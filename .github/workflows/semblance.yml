@@ -61,21 +61,15 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install AWS SAM CLI
-        # Pinning `pip install aws-sam-cli` didn't fix it either (still hung
-        # on this exact line on the very next run after pinning) — so the
-        # earlier "slow pip resolver" theory was wrong, and this is instead
-        # network/registry flakiness reaching PyPI from these runners, 5
-        # runs in a row. Installing the official standalone binary from a
-        # GitHub release asset sidesteps PyPI entirely — same
-        # GitHub-to-GitHub-runner path every other step here already uses
-        # successfully, and a single small download instead of a full pip
-        # dependency resolution + install.
-        run: |
-          curl -fsSL -o samcli.zip https://github.com/aws/aws-sam-cli/releases/download/v1.166.2/aws-sam-cli-linux-x86_64.zip
-          unzip -q samcli.zip -d sam-installation
-          sudo ./sam-installation/install
-          sam --version
+      - name: Verify AWS SAM CLI
+        # There was never anything to install: GitHub's ubuntu-latest runner
+        # image ships AWS SAM CLI preinstalled (confirmed by the standalone
+        # installer itself refusing to proceed — "Found preexisting AWS SAM
+        # CLI installation: /usr/local/aws-sam-cli/current"). Both
+        # `pip install aws-sam-cli` variants that hung 5 runs in a row were
+        # redundant work fighting PyPI reachability for a tool already on
+        # the runner; this just confirms it's there.
+        run: sam --version
 
       - name: sam build
         run: sam build --use-container
