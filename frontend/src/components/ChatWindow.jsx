@@ -62,7 +62,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                 )}
                 <div ref={bottomRef} />
             </div>
-            <div style={{ padding: "8px 12px 16px", width: "100%", boxSizing: "border-box" }}>
+            <div style={{ padding: "8px 8px 24px", width: "100%", boxSizing: "border-box" }}>
                 <div style={{ display: "flex", flexDirection: "column", width: "100%", boxSizing: "border-box", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "26px", padding: "10px 14px 8px" }}>
                     <input
                         value={input}
