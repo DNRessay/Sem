@@ -1,3 +1,5 @@
+import json
+
 import pytest
 import respx
 from httpx import Response
@@ -52,6 +54,51 @@ async def test_call_llm_raises_clear_error_when_groq_returns_no_choices(moto_cac
         )
         with pytest.raises(RuntimeError, match="Invalid API Key"):
             await engine.call_llm([{"role": "user", "content": "hi"}], session_id="s1")
+
+
+def _groq_sse_response(pieces: list[str]):
+    body = "".join(
+        f'data: {json.dumps({"choices": [{"delta": {"content": p}}]})}\n\n'
+        for p in pieces
+    ) + "data: [DONE]\n\n"
+    return Response(200, headers={"content-type": "text/event-stream"}, content=body)
+
+
+@pytest.mark.asyncio
+async def test_stream_llm_yields_each_piece_as_groq_sends_it(moto_cache_table):
+    engine = QueryEngine()
+    with respx.mock:
+        route = respx.post(GROQ_URL).mock(return_value=_groq_sse_response(["hel", "lo ", "there"]))
+        pieces = [p async for p in engine.stream_llm([{"role": "user", "content": "hi"}], session_id="s1")]
+
+    assert pieces == ["hel", "lo ", "there"]
+    assert route.called
+
+
+@pytest.mark.asyncio
+async def test_stream_llm_serves_second_identical_call_from_cache_in_one_piece(moto_cache_table):
+    engine = QueryEngine()
+    messages = [{"role": "user", "content": "hi"}]
+    with respx.mock:
+        route = respx.post(GROQ_URL).mock(return_value=_groq_sse_response(["first"]))
+        first = [p async for p in engine.stream_llm(messages, session_id="s1")]
+        second = [p async for p in engine.stream_llm(messages, session_id="s1")]
+
+    assert "".join(first) == "first"
+    assert second == ["first"]  # served whole from DynamoDB cache, not re-streamed
+    assert route.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_stream_llm_raises_clear_error_when_groq_returns_no_choices(moto_cache_table):
+    engine = QueryEngine()
+    with respx.mock:
+        respx.post(GROQ_URL).mock(
+            return_value=Response(401, json={"error": {"message": "Invalid API Key"}})
+        )
+        with pytest.raises(RuntimeError, match="Invalid API Key"):
+            async for _ in engine.stream_llm([{"role": "user", "content": "hi"}], session_id="s1"):
+                pass
 
 
 def test_fire_break_invalidates_known_vector_only(moto_cache_table):

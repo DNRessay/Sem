@@ -1,3 +1,5 @@
+import json
+
 import httpx
 
 from cache.cache_ctrl import CacheController
@@ -64,6 +66,66 @@ class QueryEngine:
         self.cache_ctrl.write(prefix_hash, content)
         self.conv_cache.append(session_id, {"role": "assistant", "content": content})
         return {"content": content, "done": finish == "stop", "cached": False}
+
+    async def stream_llm(
+        self,
+        messages: list,
+        model: str = settings.GROQ_MODEL,
+        session_id: str = "default",
+        max_tokens: int = 1024,
+        temperature: float = 0.5,
+    ):
+        """
+        Same request/cache/Groq target as call_llm, but actually streams
+        Groq's own token-by-token SSE output instead of waiting for the
+        full completion and returning it as one piece — call_llm's single
+        blocking request was why replies always "popped in" all at once
+        right after the thinking indicator, regardless of the transport
+        already being SSE end-to-end.
+        """
+        prefix_hash = self.cache_ctrl.compute_prefix_hash(str(messages[:2]))
+        cached = self.cache_ctrl.read(prefix_hash)
+        if cached and self.cache_ctrl.is_cache_valid(prefix_hash):
+            yield cached
+            return
+
+        headers = {
+            "Authorization": f"Bearer {settings.GROQ_API_KEY}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": True,
+        }
+        full_parts = []
+        async with httpx.AsyncClient(timeout=60) as client:
+            async with client.stream(
+                "POST", "https://api.groq.com/openai/v1/chat/completions",
+                json=payload, headers=headers,
+            ) as r:
+                if r.status_code != 200:
+                    body = await r.aread()
+                    raise RuntimeError(
+                        f"Groq API error (status {r.status_code}) for model '{model}': {body.decode(errors='replace')}"
+                    )
+                async for line in r.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data_str = line[len("data: "):]
+                    if data_str == "[DONE]":
+                        break
+                    chunk = json.loads(data_str)
+                    delta = chunk["choices"][0]["delta"].get("content")
+                    if delta:
+                        full_parts.append(delta)
+                        yield delta
+
+        content = "".join(full_parts)
+        self.cache_ctrl.write(prefix_hash, content)
+        self.conv_cache.append(session_id, {"role": "assistant", "content": content})
 
     def connector_text_buffer(self, reasoning: str, session_id: str) -> str:
         import hashlib

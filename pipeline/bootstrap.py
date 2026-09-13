@@ -42,19 +42,21 @@ class Bootstrap:
         # Step 6 - ctx pressure before we hit the LLM
         full_ctx = self.ctx_pressure.apply(f"{ctx}\n\n{memory_block}")
 
-        # Step 4 - query engine: direct Groq call, cached, cost-tracked
+        # Step 4 - query engine: direct Groq call, cached, cost-tracked,
+        # streamed token-by-token as Groq generates it
         messages = [{"role": "system", "content": full_ctx}]
         messages.extend({"role": h.get("role", "user"), "content": h.get("content", "")} for h in history)
         messages.append({"role": "user", "content": query})
 
-        result = await self.query_engine.call_llm(messages, session_id=session_id)
-        reply = result["content"]
+        reply_parts = []
+        async for piece in self.query_engine.stream_llm(messages, session_id=session_id):
+            reply_parts.append(piece)
+            yield piece
+        reply = "".join(reply_parts)
 
         db = await get_store()
         await db.save_turn(session_id, "user", query)
         await db.save_turn(session_id, "assistant", reply)
-
-        yield reply
 
     def _format_memories(self, memories: list) -> str:
         if not memories:
