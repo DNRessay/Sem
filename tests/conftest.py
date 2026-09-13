@@ -3,7 +3,7 @@ import os
 # Must be set before config.py (or anything importing it) is first imported,
 # since pydantic-settings reads the environment at instantiation time.
 os.environ.setdefault("GROQ_API_KEY", "test-groq-key")
-os.environ.setdefault("GROQ_MODEL", "qwen/qwen3-32b")
+os.environ.setdefault("GROQ_MODEL", "qwen/qwen3.8-27b")
 os.environ.setdefault("NEON_DATABASE_URL", "postgresql://test:test@localhost/test")
 os.environ.setdefault("MODAL_EMBEDDINGS_URL", "")
 os.environ.setdefault("CACHE_TABLE_NAME", "semblance-cache-test")

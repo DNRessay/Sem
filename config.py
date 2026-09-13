@@ -5,8 +5,14 @@ class Settings(BaseSettings):
     # LLM backend — Groq hosts open-weight models (Qwen, DeepSeek, Llama) for free.
     # SEMBLANCE never claims to be Claude or any other vendor's model.
     GROQ_API_KEY: str = ""
-    GROQ_MODEL: str = "qwen/qwen3-32b"                       # primary conversational model
+    GROQ_MODEL: str = "qwen/qwen3.8-27b"                     # primary conversational model
     GROQ_PLANNING_MODEL: str = "deepseek-r1-distill-llama-70b"  # ULTRAPLAN deep reasoning
+    # ^ GROQ_MODEL confirmed against this account's actual `GET /openai/v1/models`
+    # list, not just Groq's public docs — a model can be publicly documented
+    # and still 404 as "does not exist or you do not have access to it" if
+    # it's not enabled for this specific account/tier (as qwen/qwen3-32b was).
+    # GROQ_PLANNING_MODEL is NOT yet re-verified the same way — check it
+    # against that same models list before trusting ULTRAPLAN in production.
 
     # Storage — Neon serverless Postgres (+ pgvector) replaces Aiven MySQL + ChromaDB.
     # One database, two roles: raw records and vector search over the same rows.

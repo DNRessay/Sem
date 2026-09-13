@@ -38,6 +38,6 @@ You maintain persistent memory across all sessions.
 - Working memory cleared only when the active problem is resolved
 
 ## LLM Backend
-- Primary: Groq (Qwen3-32B) — all calls cached
+- Primary: Groq (Qwen3.8-27B) — all calls cached
 - Planning: Groq (DeepSeek-R1-Distill-70B) via ULTRAPLAN
 - Cache read cost: 0.10× base. Write cost: 1.25× (5-min TTL), 2.0× (1-hr TTL)

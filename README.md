@@ -209,7 +209,7 @@ Every tool defines its own input schema, permission level, and execution logic i
 ### External APIs
 | API | Role |
 |-----|------|
-| **GROQ** (Qwen3-32B) | Primary free LLM backend, open-weight. All calls intercepted by Cache Layer. |
+| **GROQ** (Qwen3.8-27B) | Primary free LLM backend, open-weight. All calls intercepted by Cache Layer. |
 | **DEEPSEEK-R1-Distill-70B** (via Groq) | Powers ULTRAPLAN. 30-minute deep reasoning sessions. Free, open-weight. |
 
 ### Storage Layer
@@ -241,7 +241,7 @@ DREAM consolidates memories on a 3-gate trigger (24hr + 5 sessions + lock), scor
 |-----------|---------|------|
 | Chat API | AWS Lambda + Function URL (FastAPI via Mangum) | Free (1M req/mo forever) |
 | Scheduled KAIROS tick | AWS Lambda + EventBridge (rate: 15 min) | Free |
-| LLM Backend | Groq (Qwen3-32B) | Free |
+| LLM Backend | Groq (Qwen3.8-27B) | Free |
 | Planning LLM | Groq (DeepSeek-R1-Distill-70B) | Free |
 | Persistent Storage + Vector Store | Neon Postgres + pgvector | Free |
 | Cache | DynamoDB (pay-per-request, TTL) | ~$0 |

@@ -10,7 +10,7 @@ Copy `.env.example` → `.env` and fill in:
 
 ```env
 GROQ_API_KEY=
-GROQ_MODEL=qwen/qwen3-32b
+GROQ_MODEL=qwen/qwen3.8-27b
 GROQ_PLANNING_MODEL=deepseek-r1-distill-llama-70b
 NEON_DATABASE_URL=postgresql://user:pass@host/semblance?sslmode=require
 MODAL_EMBEDDINGS_URL=

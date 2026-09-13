@@ -12,7 +12,7 @@ Parameters:
     NoEcho: true
   GroqModel:
     Type: String
-    Default: qwen/qwen3-32b
+    Default: qwen/qwen3.8-27b
   GroqPlanningModel:
     Type: String
     Default: deepseek-r1-distill-llama-70b
