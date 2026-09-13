@@ -1,9 +1,25 @@
 import { useState, useRef, useEffect } from "react";
+import { marked } from "marked";
+import DOMPurify from "dompurify";
 import { useStream } from "../hooks/useStream";
 import VoiceInput from "./VoiceInput";
 
 const API = import.meta.env.VITE_API_URL || "";
 const MODEL_LABEL = "Qwen";
+const THINKING_WORDS = ["Thinking", "Pondering", "Mulling it over", "Sleuthing", "Working on it", "Piecing it together"];
+
+function renderMarkdown(text) {
+    return { __html: DOMPurify.sanitize(marked.parse(text, { breaks: true })) };
+}
+
+function ThinkingIndicator() {
+    const [i, setI] = useState(0);
+    useEffect(() => {
+        const id = setInterval(() => setI(v => (v + 1) % THINKING_WORDS.length), 1100);
+        return () => clearInterval(id);
+    }, []);
+    return <span style={{ color: "var(--text-muted)", fontSize: "14px" }}>{THINKING_WORDS[i]}…</span>;
+}
 
 export default function ChatWindow({ sessionId = "default", initialHistory = [], onStreamChange, onNewChat }) {
     const [input, setInput] = useState("");
@@ -40,20 +56,25 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                             {m.content}
                         </div>
                     ) : (
-                        <div key={i} style={{ alignSelf: "flex-start", maxWidth: "88%", padding: "0 2px", fontSize: "15px", lineHeight: "1.7", whiteSpace: "pre-wrap" }}>
-                            {m.content}
-                        </div>
+                        <div
+                            key={i}
+                            className="md-content"
+                            style={{ alignSelf: "flex-start", maxWidth: "88%", padding: "0 2px", fontSize: "15px", lineHeight: "1.7" }}
+                            dangerouslySetInnerHTML={renderMarkdown(m.content)}
+                        />
                     )
                 ))}
                 {isThinking && (
                     <div style={{ alignSelf: "flex-start", padding: "6px 2px" }}>
-                        <span className="thinking-dots"><span /><span /><span /></span>
+                        <ThinkingIndicator />
                     </div>
                 )}
                 {streaming && !isThinking && (
-                    <div style={{ alignSelf: "flex-start", maxWidth: "88%", padding: "0 2px", fontSize: "15px", lineHeight: "1.7", whiteSpace: "pre-wrap" }}>
-                        {fullResponse}<span style={{ opacity: 0.4 }}>▋</span>
-                    </div>
+                    <div
+                        className="md-content"
+                        style={{ alignSelf: "flex-start", maxWidth: "88%", padding: "0 2px", fontSize: "15px", lineHeight: "1.7" }}
+                        dangerouslySetInnerHTML={renderMarkdown(fullResponse + " ▋")}
+                    />
                 )}
                 {error && (
                     <div style={{ alignSelf: "flex-start", maxWidth: "80%", background: "rgba(196,69,58,0.08)", border: "1px solid var(--danger)", padding: "10px 14px", borderRadius: "12px", fontSize: "13px", lineHeight: "1.6", color: "var(--danger)" }}>
