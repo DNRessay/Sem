@@ -62,15 +62,20 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install AWS SAM CLI
-        # Pinned rather than left to resolve "latest": aws-sam-cli has a
-        # large, fast-moving release history and a heavy transitive
-        # dependency tree (boto3, docker, cookiecutter, aws-lambda-builders,
-        # jsonschema...) — an unpinned install lets pip's resolver fall into
-        # slow backtracking across that whole history on any version
-        # conflict, which is indistinguishable from a hung runner from the
-        # outside. This step hung 4 runs in a row on exactly this line before
-        # being pinned; bump this version deliberately, not by removing it.
-        run: pip install aws-sam-cli==1.166.2
+        # Pinning `pip install aws-sam-cli` didn't fix it either (still hung
+        # on this exact line on the very next run after pinning) — so the
+        # earlier "slow pip resolver" theory was wrong, and this is instead
+        # network/registry flakiness reaching PyPI from these runners, 5
+        # runs in a row. Installing the official standalone binary from a
+        # GitHub release asset sidesteps PyPI entirely — same
+        # GitHub-to-GitHub-runner path every other step here already uses
+        # successfully, and a single small download instead of a full pip
+        # dependency resolution + install.
+        run: |
+          curl -fsSL -o samcli.zip https://github.com/aws/aws-sam-cli/releases/download/v1.166.2/aws-sam-cli-linux-x86_64.zip
+          unzip -q samcli.zip -d sam-installation
+          sudo ./sam-installation/install
+          sam --version
 
       - name: sam build
         run: sam build --use-container
