@@ -77,7 +77,7 @@ rather than letting it happen by accident.
 |---|---|
 | Neon Postgres + pgvector | Free-tier hosted, autosuspends when idle. Replaces Aiven MySQL + ChromaDB — one database instead of two services. |
 | Modal | Runs `modal_app/embeddings.py`. Scales to zero; $30/month free credit. |
-| Groq | Qwen3.8-27B (chat) + DeepSeek-R1-Distill-70B (planning). Free tier. |
+| Groq | Qwen3.8-27B (chat) + GPT-OSS-120B (planning). Free tier. |
 | OpenClaw gateway | Optional. `tools/openclaw_bridge.py` talks to it over HTTP at `OPENCLAW_URL` if you self-host it — a Heavy-tier persistent Node process, entirely separate from this stack. Disabled (fails closed) if `OPENCLAW_URL` is unset. |
 
 ---

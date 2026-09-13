@@ -42,7 +42,7 @@ semblance/
 ├── agents/
 │   ├── base_agent.py        # Abstract agent base
 │   ├── kairos.py            # Always-on daemon
-│   ├── ultraplan.py         # DeepSeek-R1 planner
+│   ├── ultraplan.py         # GPT-OSS-120B planner
 │   ├── coordinator.py       # XML parallel workers
 │   ├── dream_agent.py       # 4-phase consolidation
 │   ├── proactive.py         # KAIROS-driven outreach

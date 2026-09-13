@@ -15,7 +15,7 @@ Parameters:
     Default: qwen/qwen3.8-27b
   GroqPlanningModel:
     Type: String
-    Default: deepseek-r1-distill-llama-70b
+    Default: openai/gpt-oss-120b
   NeonDatabaseUrl:
     Type: String
     NoEcho: true

@@ -12,7 +12,7 @@ MAX_WINDOW    = 1800   # 30 minutes
 
 class UltraPlanAgent(BaseAgent):
     """
-    Remote DeepSeek-R1 planning agent via Groq.
+    Remote GPT-OSS-120B planning agent via Groq.
     Up to 30-minute planning window. Polls every 3s.
     Browser approval gate before any execution.
     """
@@ -39,7 +39,7 @@ class UltraPlanAgent(BaseAgent):
         return {"status": "approved", "plan": plan, "task_id": task_id}
 
     async def _deep_plan(self, query: str) -> str:
-        """Call DeepSeek-R1 via Groq for extended reasoning."""
+        """Call GPT-OSS-120B via Groq for extended reasoning."""
         headers = {
             "Authorization": f"Bearer {settings.GROQ_API_KEY}",
             "Content-Type": "application/json",

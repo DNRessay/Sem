@@ -23,7 +23,7 @@ EventBridge (rate: 15 min) ──────────► TickFunction (Mediu
                                         one KAIROS tick per firing
                                         (replaces the always-on daemon loop)
 
-Groq API ── Qwen3.8-27B (chat) + DeepSeek-R1-Distill-70B (ULTRAPLAN) — free tier
+Groq API ── Qwen3.8-27B (chat) + GPT-OSS-120B (ULTRAPLAN) — free tier
 ```
 
 Nothing runs continuously. There is no Heavy tier in this deployment — KAIROS's
@@ -256,7 +256,7 @@ aws cloudformation delete-stack --stack-name aws-sam-cli-managed-default --regio
 | CloudWatch Logs (14-day retention set) | 5 GB ingest + 5 GB storage free tier | $0 |
 | Neon Postgres + pgvector | Free tier (0.5 GB, autosuspend) | $0 |
 | Modal embeddings | $30/month credit; single-user usage is a rounding error against it | $0 |
-| Groq (Qwen3.8-27B, DeepSeek-R1) | Free tier | $0 |
+| Groq (Qwen3.8-27B, GPT-OSS-120B) | Free tier | $0 |
 | Frontend (Cloudflare Pages) | Free (unlimited requests, 500 builds/mo) | $0 |
 | **Total** | | **~$0.00–0.05/month** |
 

@@ -13,7 +13,7 @@ NATURE SCI: BERT + RNN + CNN + GAN emotional ensemble. Modulates all responses.
 TAU: Adaptive identity engine. PACIFIC OCEAN model (29.25%→76% personalization).
 DREAM: Memory consolidation. 3-gate (24hr + 5 sessions + lock). 4 phases. Nothing deleted.
 
-AGENTS: KAIROS (always-on daemon, 15s budget), ULTRAPLAN (DeepSeek-R1, 30min),
+AGENTS: KAIROS (always-on daemon, 15s budget), ULTRAPLAN (GPT-OSS-120B, 30min),
 COORDINATOR (XML parallel workers), DREAM, PROACTIVE, EXPLORE, PLAN, GENERAL,
 GUIDE, SWARM (async isolated), UDS INBOX, BRIDGE, BUDDY (18 species companion).
 
@@ -26,7 +26,7 @@ CACHE: SysCache (0.10× read, 1.25× write), ConvCache (rolling 20-block), Cache
 — all DynamoDB-backed with an in-memory L1 layer for warm Lambda invocations.
 
 INFRASTRUCTURE: AWS Lambda + Function URL (FastAPI via Mangum), Groq (Qwen3.8-27B +
-DeepSeek-R1 open-weight models), Neon Postgres (free tier), DynamoDB cache (pay-per-request),
+GPT-OSS-120B open-weight models), Neon Postgres (free tier), DynamoDB cache (pay-per-request),
 Modal (sentence-transformer embeddings, scales to zero) — a few rand a month for one user.
 """
 

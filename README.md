@@ -5,7 +5,7 @@
 
 SEMBLANCE is a multi-agent AI assistant framework built on top of free-tier infrastructure. It combines adaptive identity modeling, emotional intelligence, semantic memory, a 7-stage execution pipeline, and a flat tool registry into a single coherent system — designed to run in production on close to zero budget, on AWS. See **[docs/AWS_DEPLOYMENT.md](docs/AWS_DEPLOYMENT.md)** for the full deployment guide and cost breakdown.
 
-The architecture takes inspiration from patterns common to modern agentic coding tools (cache-breakpoint tracking, sub-agent delegation, gated tool execution), the Nature Scientific Reports 2026 ensemble emotional intelligence research, and Big Five personality psychology (OCEAN model). Every design decision prioritizes permanent memory, zero deletion, and a system that learns specifically who *you* are. SEMBLANCE runs entirely on open-weight models (Qwen, DeepSeek) via Groq — it never claims to be Claude, GPT, or any other vendor's model.
+The architecture takes inspiration from patterns common to modern agentic coding tools (cache-breakpoint tracking, sub-agent delegation, gated tool execution), the Nature Scientific Reports 2026 ensemble emotional intelligence research, and Big Five personality psychology (OCEAN model). Every design decision prioritizes permanent memory, zero deletion, and a system that learns specifically who *you* are. SEMBLANCE runs entirely on open-weight models (Qwen, GPT-OSS) via Groq — it never claims to be Claude, GPT, or any other vendor's model.
 
 ---
 
@@ -174,7 +174,7 @@ All agents are spawned by CABLES MAN and interact exclusively through the TOOLS 
 | Agent | Description |
 |-------|-------------|
 | **KAIROS** | Always-on daemon. Periodic tick prompts, decides independently. 15-second blocking budget per tick. 3 exclusive tools: push notifications, file delivery, PR subscriptions. Append-only audit logs. |
-| **ULTRAPLAN** | Remote DeepSeek-R1 planning agent. Up to 30-minute planning window. Polls every 3s. Browser approval gate before execution. |
+| **ULTRAPLAN** | Remote GPT-OSS-120B planning agent. Up to 30-minute planning window. Polls every 3s. Browser approval gate before execution. |
 | **COORDINATOR** | Spawns parallel workers via XML messages. Shared scratchpad. Hardcoded ban on lazy delegation. |
 | **DREAM** | Memory consolidation agent. Triggered by: 24hr timer + 5 sessions + lock (3-gate). 4 phases: Orient → Gather → Consolidate → Index. Scores every memory via SALIENCE ENGINE, writes embeddings to Neon (pgvector), updates index. Nothing pruned. Everything kept forever. |
 | **PROACTIVE** | KAIROS-driven outreach. Semblance initiates contact — alerts, suggestions, reminders without being asked. |
@@ -210,7 +210,7 @@ Every tool defines its own input schema, permission level, and execution logic i
 | API | Role |
 |-----|------|
 | **GROQ** (Qwen3.8-27B) | Primary free LLM backend, open-weight. All calls intercepted by Cache Layer. |
-| **DEEPSEEK-R1-Distill-70B** (via Groq) | Powers ULTRAPLAN. 30-minute deep reasoning sessions. Free, open-weight. |
+| **GPT-OSS-120B-Distill-70B** (via Groq) | Powers ULTRAPLAN. 30-minute deep reasoning sessions. Free, open-weight. |
 
 ### Storage Layer
 | Store | Description |
@@ -242,7 +242,7 @@ DREAM consolidates memories on a 3-gate trigger (24hr + 5 sessions + lock), scor
 | Chat API | AWS Lambda + Function URL (FastAPI via Mangum) | Free (1M req/mo forever) |
 | Scheduled KAIROS tick | AWS Lambda + EventBridge (rate: 15 min) | Free |
 | LLM Backend | Groq (Qwen3.8-27B) | Free |
-| Planning LLM | Groq (DeepSeek-R1-Distill-70B) | Free |
+| Planning LLM | Groq (GPT-OSS-120B) | Free |
 | Persistent Storage + Vector Store | Neon Postgres + pgvector | Free |
 | Cache | DynamoDB (pay-per-request, TTL) | ~$0 |
 | Embeddings | Modal (sentence-transformers) | Free ($30/mo credit) |

@@ -14,7 +14,7 @@ class Bootstrap:
     """
     Step 1 - 7-stage init. Assembles context (SEMBLANCE.md + TAU + memory),
     then hands the full conversation off to QueryEngine, which calls Groq
-    directly (Qwen/DeepSeek, whichever GROQ_MODEL is configured). No
+    directly (Qwen/GPT-OSS, whichever GROQ_MODEL is configured). No
     intermediate CLI, no third-party binary, no impersonation of any model
     the response didn't actually come from.
     """
