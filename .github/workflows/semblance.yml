@@ -94,7 +94,21 @@ jobs:
           # truly empty value ("not a valid format") — so optional params that
           # are unset get left out entirely rather than passed as empty; the
           # template's own Default: "" covers them the same way either way.
-          params=("GroqApiKey=${groq_api_key}" "NeonDatabaseUrl=${neon_database_url}" "SecretKey=${secret_key}")
+          #
+          # GroqModel/GroqPlanningModel are passed explicitly, always, even
+          # though they're not secrets — CloudFormation reuses a parameter's
+          # *previous deployed value* for any parameter omitted from
+          # --parameter-overrides on a stack update, not the template's
+          # current Default. Two model-ID fixes both silently no-op'd for
+          # exactly this reason before this was caught. Keep these two
+          # literal values in sync with the Default: in template.yaml.
+          params=(
+            "GroqApiKey=${groq_api_key}"
+            "NeonDatabaseUrl=${neon_database_url}"
+            "SecretKey=${secret_key}"
+            "GroqModel=qwen/qwen3.8-27b"
+            "GroqPlanningModel=openai/gpt-oss-120b"
+          )
           [ -n "$modal_embeddings_url" ] && params+=("ModalEmbeddingsUrl=${modal_embeddings_url}")
           [ -n "$serp_api_key" ] && params+=("SerpApiKey=${serp_api_key}")
           [ -n "$openclaw_url" ] && params+=("OpenclawUrl=${openclaw_url}")
