@@ -104,20 +104,28 @@ come from `--parameter-overrides` (CI) or your local untracked answers file.
 Take the `ChatFunctionUrl` output and set it as `VITE_API_URL` for the
 frontend build.
 
-### 4. CI/CD (GitHub Actions → AWS via OIDC, no stored AWS keys)
+### 4. CI/CD (GitHub Actions → AWS via an IAM user access key)
 
-1. Create an IAM OIDC identity provider for `token.actions.githubusercontent.com`
-   (one-time per AWS account) and a role that trusts it, scoped to this repo.
-   AWS's own guide: search "GitHub Actions OpenID Connect IAM role" in the
-   IAM console docs, or use the `aws-actions/configure-aws-credentials`
-   README, which walks through the exact trust policy.
-2. Attach a policy to that role covering: Lambda, DynamoDB (on the cache
-   table), CloudFormation (SAM deploys via a changeset), IAM (to manage the
-   two function execution roles), S3 (SAM's deployment bucket), Logs.
-   Scope resource ARNs to the `semblance-*` stack rather than `*` where the
-   console lets you.
-3. Add these **repository secrets**:
-   - `AWS_ROLE_ARN` — the role from step 1
+This repo authenticates as an existing IAM user (named e.g. `git`) using a
+static access key pair, rather than an OIDC role. Simpler to set up; the
+trade-off is that leaked key works from anywhere, not just GitHub's runners
+— rotate it periodically and scope its policy tightly. (If you'd rather not
+manage that, the OIDC role approach avoids storing any long-lived key at
+all — ask if you want to switch later, it's a small workflow change.)
+
+1. On the `git` IAM user, attach a policy covering: Lambda, DynamoDB (on the
+   cache table), CloudFormation (SAM deploys via a changeset), IAM (to
+   manage the two function execution roles), S3 (SAM's deployment bucket),
+   Logs. Scope resource ARNs to the `semblance-*` stack rather than `*`
+   where the console lets you.
+2. Generate an access key for that user (IAM console → the user → Security
+   credentials → Create access key → "Application running outside AWS" /
+   CLI). You get an **Access Key ID** and a **Secret Access Key** — the
+   secret is shown once, copy it immediately.
+3. Add these **repository secrets** (Settings → Secrets and variables →
+   Actions → New repository secret):
+   - `AWS_ACCESS_KEY_ID`
+   - `AWS_SECRET_ACCESS_KEY`
    - `AWS_REGION` — e.g. `us-east-1`
    - `GROQ_API_KEY`
    - `NEON_DATABASE_URL`
