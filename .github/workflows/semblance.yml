@@ -90,18 +90,21 @@ jobs:
           serp_api_key=$(printf '%s' "$SERP_API_KEY" | tr -d '\r\n')
           openclaw_url=$(printf '%s' "$OPENCLAW_URL" | tr -d '\r\n')
 
+          # sam deploy's --parameter-overrides shorthand rejects "Key=" with a
+          # truly empty value ("not a valid format") — so optional params that
+          # are unset get left out entirely rather than passed as empty; the
+          # template's own Default: "" covers them the same way either way.
+          params=("GroqApiKey=${groq_api_key}" "NeonDatabaseUrl=${neon_database_url}" "SecretKey=${secret_key}")
+          [ -n "$modal_embeddings_url" ] && params+=("ModalEmbeddingsUrl=${modal_embeddings_url}")
+          [ -n "$serp_api_key" ] && params+=("SerpApiKey=${serp_api_key}")
+          [ -n "$openclaw_url" ] && params+=("OpenclawUrl=${openclaw_url}")
+
           sam deploy \
             --debug \
             --region "${{ secrets.AWS_REGION || 'eu-west-1' }}" \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
-            --parameter-overrides \
-              "GroqApiKey=${groq_api_key}" \
-              "NeonDatabaseUrl=${neon_database_url}" \
-              "ModalEmbeddingsUrl=${modal_embeddings_url}" \
-              "SecretKey=${secret_key}" \
-              "SerpApiKey=${serp_api_key}" \
-              "OpenclawUrl=${openclaw_url}"
+            --parameter-overrides "${params[@]}"
 
       - name: Expire old build artifacts in the SAM deployment bucket
         # `sam deploy --resolve-s3` keeps every historical build zip forever
