@@ -72,7 +72,14 @@ jobs:
         run: sam --version
 
       - name: sam build
-        run: sam build --use-container
+        # --use-container builds inside a Docker container matching the
+        # Lambda runtime — needed when the machine building doesn't match
+        # that runtime (e.g. an arm64 dev laptop targeting x86_64 Lambda).
+        # That's not the case here: the runner is already x86_64 Linux via
+        # actions/setup-python, the same architecture template.yaml targets
+        # (Architectures: [x86_64]), so there's nothing left to cross-build
+        # for — only a Docker image pull to hang on, which it just did.
+        run: sam build
 
       - name: sam deploy
         env:
