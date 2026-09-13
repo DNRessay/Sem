@@ -19,6 +19,16 @@ html, body, #root {
     height: 100%;
 }
 
+/* 100vh on mobile Chrome/Safari measures the viewport with the address bar
+   collapsed, taller than what's actually visible when it's shown — pushing
+   the input bar half off-screen and forcing a scroll to reach it. 100dvh
+   tracks the real visible height; the plain 100vh line is a fallback for
+   browsers that don't support dvh (it's simply overridden where dvh works). */
+.app-shell {
+    height: 100vh;
+    height: 100dvh;
+}
+
 body {
     margin: 0;
     background: var(--bg);

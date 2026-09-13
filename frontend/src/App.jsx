@@ -26,7 +26,7 @@ export default function App() {
     };
 
     return (
-        <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "var(--bg)" }}>
+        <div className="app-shell" style={{ display: "flex", flexDirection: "column", background: "var(--bg)" }}>
             <StatusBar sessionId={sessionId} streaming={streaming} onMenu={() => setMenuOpen(true)} />
             <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
                 <ChatWindow
