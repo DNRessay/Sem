@@ -68,6 +68,8 @@ jobs:
       - name: sam deploy
         run: |
           sam deploy \
+            --debug \
+            --region "${{ secrets.AWS_REGION || 'eu-west-1' }}" \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
