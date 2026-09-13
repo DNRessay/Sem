@@ -14,11 +14,20 @@ function renderMarkdown(text) {
 
 function ThinkingIndicator() {
     const [i, setI] = useState(0);
+    const [elapsed, setElapsed] = useState(0);
+    const startRef = useRef(Date.now());
+
     useEffect(() => {
-        const id = setInterval(() => setI(v => (v + 1) % THINKING_WORDS.length), 1100);
-        return () => clearInterval(id);
+        const wordId = setInterval(() => setI(v => (v + 1) % THINKING_WORDS.length), 1100);
+        const tickId = setInterval(() => setElapsed(Math.round((Date.now() - startRef.current) / 1000)), 1000);
+        return () => { clearInterval(wordId); clearInterval(tickId); };
     }, []);
-    return <span style={{ color: "var(--text-muted)", fontSize: "14px" }}>{THINKING_WORDS[i]}…</span>;
+
+    return (
+        <span style={{ color: "var(--text-muted)", fontSize: "14px" }}>
+            {elapsed}s · {THINKING_WORDS[i]}…
+        </span>
+    );
 }
 
 export default function ChatWindow({ sessionId = "default", initialHistory = [], onStreamChange, onNewChat }) {
