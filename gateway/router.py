@@ -5,6 +5,7 @@ from fastapi.responses import StreamingResponse
 
 from config import settings
 from pipeline.bootstrap import Bootstrap
+from storage.neon_store import get_store
 from tau.tau_engine import TAUEngine
 
 router = APIRouter()
@@ -42,6 +43,18 @@ async def chat(request: Request, trust: str = Depends(_get_trust)):
 @router.get("/status/{session_id}")
 async def status(session_id: str):
     return {"session_id": session_id, "status": "active"}
+
+
+@router.get("/sessions")
+async def sessions():
+    db = await get_store()
+    return {"sessions": await db.list_sessions()}
+
+
+@router.get("/history/{session_id}")
+async def history(session_id: str):
+    db = await get_store()
+    return {"session_id": session_id, "turns": await db.get_conversation(session_id)}
 
 
 @router.get("/health")

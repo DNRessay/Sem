@@ -4,9 +4,9 @@ import VoiceInput from "./VoiceInput";
 
 const API = import.meta.env.VITE_API_URL || "";
 
-export default function ChatWindow({ sessionId = "default", onStreamChange }) {
+export default function ChatWindow({ sessionId = "default", initialHistory = [], onStreamChange }) {
     const [input, setInput] = useState("");
-    const [history, setHistory] = useState([]);
+    const [history, setHistory] = useState(initialHistory);
     const { chunks, streaming, error, send, abort } = useStream(API);
     const bottomRef = useRef(null);
 

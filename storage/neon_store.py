@@ -114,6 +114,29 @@ class NeonStore:
                 session_id, role, content, int(time.time()),
             )
 
+    async def list_sessions(self, limit: int = 50) -> list[dict]:
+        """Distinct session_ids that have at least one turn, newest first, with a preview."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT session_id, MAX(created_at) AS last_at,
+                          (ARRAY_AGG(content ORDER BY created_at ASC))[1] AS preview
+                   FROM conversations
+                   GROUP BY session_id
+                   ORDER BY last_at DESC
+                   LIMIT $1""",
+                limit,
+            )
+            return [dict(r) for r in rows]
+
+    async def get_conversation(self, session_id: str, limit: int = 200) -> list[dict]:
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT role, content, created_at FROM conversations
+                   WHERE session_id=$1 ORDER BY created_at ASC LIMIT $2""",
+                session_id, limit,
+            )
+            return [dict(r) for r in rows]
+
     async def get_user_model(self, session_id: str) -> dict | None:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow("SELECT data FROM user_models WHERE session_id=$1", session_id)

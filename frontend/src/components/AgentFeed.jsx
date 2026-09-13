@@ -22,8 +22,7 @@ export default function AgentFeed({ sessionId = "default" }) {
     }, [sessionId]);
 
     return (
-        <div style={{ background: "var(--bg)", borderLeft: "1px solid var(--border)", width: "220px", overflowY: "auto", padding: "12px", fontSize: "11px" }}>
-            <div style={{ color: "var(--text-muted)", letterSpacing: "1px", marginBottom: "10px", fontWeight: "600" }}>AGENT FEED</div>
+        <div style={{ fontSize: "11px" }}>
             {events.length === 0 ? (
                 <div style={{ color: "var(--border)" }}>No activity yet</div>
             ) : events.map((e, i) => (
