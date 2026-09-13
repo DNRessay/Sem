@@ -1,0 +1,126 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  SEMBLANCE — personal AI assistant. Light tier (chat, Lambda Function URL)
+  + Medium tier (scheduled KAIROS tick). No API Gateway (avoids its 12-month
+  free-tier cliff), no NAT gateway, no always-on compute — designed to cost
+  a few rand a month for a single user.
+
+Parameters:
+  GroqApiKey:
+    Type: String
+    NoEcho: true
+  GroqModel:
+    Type: String
+    Default: qwen/qwen3-32b
+  GroqPlanningModel:
+    Type: String
+    Default: deepseek-r1-distill-llama-70b
+  NeonDatabaseUrl:
+    Type: String
+    NoEcho: true
+    Description: Neon Postgres connection string, e.g. postgresql://user:pass@host/db?sslmode=require
+  ModalEmbeddingsUrl:
+    Type: String
+    Default: ""
+    Description: URL of the deployed Modal embeddings endpoint (modal_app/embeddings.py)
+  SecretKey:
+    Type: String
+    NoEcho: true
+    Description: Shared secret the frontend sends as x-api-key for BYPASS trust mode
+  SerpApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+  OpenclawUrl:
+    Type: String
+    Default: ""
+    Description: Optional self-hosted OpenClaw gateway URL (WhatsApp/Telegram bridge)
+
+Globals:
+  Function:
+    Runtime: python3.13
+    Architectures: [arm64]  # Graviton — cheaper per ms than x86_64
+    Timeout: 30
+    MemorySize: 512
+    Environment:
+      Variables:
+        GROQ_API_KEY: !Ref GroqApiKey
+        GROQ_MODEL: !Ref GroqModel
+        GROQ_PLANNING_MODEL: !Ref GroqPlanningModel
+        NEON_DATABASE_URL: !Ref NeonDatabaseUrl
+        MODAL_EMBEDDINGS_URL: !Ref ModalEmbeddingsUrl
+        CACHE_TABLE_NAME: !Ref CacheTable
+        SECRET_KEY: !Ref SecretKey
+        SERP_API_KEY: !Ref SerpApiKey
+        OPENCLAW_URL: !Ref OpenclawUrl
+
+Resources:
+  ChatFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: semblance-chat
+      CodeUri: ./
+      Handler: lambda_handler.handler
+      Description: Light tier — FastAPI app (chat, status, webhooks) via Mangum
+      FunctionUrlConfig:
+        AuthType: NONE      # app-level auth via x-api-key (see gateway/router.py)
+        InvokeMode: BUFFERED
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CacheTable
+
+  ChatFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${ChatFunction}
+      RetentionInDays: 14  # Lambda's auto-created log group defaults to "never expire" — a slow, silent cost creep otherwise
+
+  TickFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: semblance-tick
+      CodeUri: ./
+      Handler: tick_handler.handler
+      Description: Medium tier — one KAIROS tick per schedule firing, replacing the Heavy-tier daemon loop
+      Timeout: 20
+      MemorySize: 256
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CacheTable
+      Events:
+        ScheduledTick:
+          Type: Schedule
+          Properties:
+            Schedule: rate(15 minutes)
+            Enabled: true
+
+  TickFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${TickFunction}
+      RetentionInDays: 14
+
+  CacheTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: semblance-cache
+      BillingMode: PAY_PER_REQUEST  # traffic is tiny for one user; on-demand costs fractions of a cent/month
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+Outputs:
+  ChatFunctionUrl:
+    Description: Public HTTPS endpoint for the chat API — set as VITE_API_URL in the frontend
+    Value: !GetAtt ChatFunctionUrl.FunctionUrl
+  TickFunctionName:
+    Value: !Ref TickFunction
+  CacheTableName:
+    Value: !Ref CacheTable

@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SEMBLANCE — Architecture v9</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #050a0f; }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useCallback } = React;
+
+    // ─── Color palette ────────────────────────────────────────────────────────────
+    const COLOR = {
+      interface:  "#00f5ff",
+      infra:      "#a78bfa",
+      tau:        "#ff6b6b",
+      core:       "#ffd700",
+      pipeline:   "#f97316",
+      cache:      "#e879f9",
+      memory:     "#38bdf8",
+      agent:      "#06b6d4",
+      tools:      "#10b981",
+      webtools:   "#34d399",
+      misc:       "#f59e0b",
+      storage:    "#6366f1",
+      llm:        "#94a3b8",
+    };
+
+    const GROUP_LABEL = {
+      interface:  "Interface",
+      infra:      "Infrastructure",
+      tau:        "TAU Layer",
+      core:       "CABLES MAN Core",
+      pipeline:   "7-Step Pipeline",
+      cache:      "Cache Layer",
+      memory:     "Memory",
+      agent:      "Agents",
+      tools:      "TOOLS Registry",
+      webtools:   "Web Tools",
+      misc:       "Misc Tools",
+      storage:    "Storage Layer",
+      llm:        "External APIs",
+    };
+
+    // ─── Node definitions ─────────────────────────────────────────────────────────
+    const NODES = {
+      ui:         { label:"SEMBLANCE UI",    sublabel:"React Frontend",               group:"interface",  col:5,  row:0, desc:"Chat, voice, status, real-time agent activity feed. The face of Semblance." },
+      voice:      { label:"VOICE INPUT",     sublabel:"Sensory Layer",                group:"interface",  col:7,  row:0, desc:"Microphone + screen awareness. Bridges physical world into Semblance." },
+      gateway:    { label:"FastAPI GATEWAY", sublabel:"AWS Lambda + Function URL",    group:"infra",      col:6,  row:1, desc:"Single HTTP entry. Auth, task queuing, response streaming to UI." },
+      tau:        { label:"TAU",             sublabel:"Adaptive Identity Engine",     group:"tau",        col:1,  row:2, desc:"Separate autonomous layer. Observes, learns, builds a model of YOU specifically. Feeds context into CABLES MAN." },
+      semret:     { label:"SEM RETRIEVAL",   sublabel:"Step 3b — Cosine · Top-K",    group:"memory",     col:3,  row:2, desc:"Semantic Memory Retrieval. Replaces topic-pointer lookup. Queries pgvector by cosine similarity — surfaces memories by meaning, not filename. Returns top-K relevant memories ranked by semantic closeness. Nothing is discarded." },
+      bootstrap:  { label:"BOOTSTRAP",       sublabel:"Step 1 — 7-Stage Init",       group:"pipeline",   col:5,  row:2, desc:"Prefetch → safety → CLI parse/trust gate → tool loading → deferred init → mode routing → query engine handoff." },
+      ctxassem:   { label:"CTX ASSEMBLY",    sublabel:"Step 2 — SEMBLANCE.md",       group:"pipeline",   col:6,  row:2, desc:"Loads SEMBLANCE.md hierarchy (global → user → project → local) every turn. 40k char limit." },
+      memload:    { label:"MEMORY LOAD",     sublabel:"Step 3 — Delegates to SEM",   group:"pipeline",   col:7,  row:2, desc:"Memory retrieval coordinator. Delegates semantic lookup to SEM RETRIEVAL (pgvector cosine) and raw records to Neon Postgres. Topic index fallback. Transcripts grepped, never fully loaded. Infinite retention." },
+      queryeng:   { label:"QUERY ENGINE",    sublabel:"Step 4 — 14 Cache Vectors",   group:"pipeline",   col:8,  row:2, desc:"All LLM calls, streaming, caching. Tracks 14 cache-break vectors. CONNECTOR_TEXT buffers reasoning between tool calls with cryptographically signed summaries. Feeds Cache Layer before every API call." },
+      toolexec:   { label:"TOOL EXECUTION",  sublabel:"Step 5 — 3 Modes",            group:"pipeline",   col:9,  row:2, desc:"3 permission modes: Bypass (trusted env, no confirmation), Allow Edits (confirm writes), Auto (LLM classifier gates every call)." },
+      ctxpress:   { label:"CTX PRESSURE",    sublabel:"Step 6 — 5 Strategies",       group:"pipeline",   col:10, row:2, desc:"5 compaction strategies: budgeting → microcompact → collapse → autocompact → prune+index. 13k buffer, 20k summary target, 3-failure circuit breaker." },
+      subdeleg:   { label:"SUB-AGENT DELEG", sublabel:"Step 7 — Fork/Teammate/Worktree", group:"pipeline", col:11, row:2, desc:"3 execution models: Fork (cache-optimized parallel), Teammate (file mailbox coordination), Worktree (isolated git branch)." },
+      taucache:   { label:"TAU CACHE",       sublabel:"Identity · Profile · EMUs",   group:"cache",      col:1,  row:3, desc:"Dedicated cache for TAU. Stores: PACIFIC OCEAN traits, Emotion Memory Units (EMUs), personality snapshots, DREAM consolidation results. TTL: 1hr for profile, rolling for EMUs. Prevents re-inference every turn." },
+      salience:   { label:"SALIENCE ENGINE", sublabel:"EMU Weight · Encode Priority", group:"memory",    col:3,  row:3, desc:"Scores every memory candidate before persistence. Combines NATURE SCI EMU weights + surprise delta from QUERY ENGINE. High salience = encoded to Neon (row + embedding) first. Nothing deleted — salience controls priority and retrieval ranking only." },
+      cachesys:   { label:"SYS CACHE",       sublabel:"Tools · System · 5min/1hr",   group:"cache",      col:5,  row:3, desc:"Caches SEMBLANCE.md system prompt + TOOLS registry. Write = 1.25× base cost (5-min TTL) or 2× (1-hr TTL). Read = 0.10× base cost. KV in-memory only. Breakpoint placed on last static block." },
+      cacheconv:  { label:"CONV CACHE",      sublabel:"Auto-managed · Rolling",       group:"cache",      col:7,  row:3, desc:"Rolling conversation cache. Auto-advances breakpoint as conversation grows (up to 20-block lookback). Each turn appends without invalidating the prior cached prefix. Up to 4 breakpoints per request." },
+      cachektrl:  { label:"CACHE CTRL",      sublabel:"Hash Tracker · TTL Manager",  group:"cache",      col:9,  row:3, desc:"Cryptographic prefix hash as cache key. Tracks all 14 break vectors: tool changes, model switches, image additions, system prompt edits. Manages TTL refresh. Cache miss triggers fresh write at 1.25× cost." },
+      workingmem: { label:"WORKING MEM",     sublabel:"Cross-turn Scratchpad",        group:"memory",     col:11, row:3, desc:"Active reasoning buffer persisting across multiple turns on the same problem. Fed by QUERY ENGINE, read by CABLES MAN. Cleared only when the problem is resolved — not per-turn." },
+      usermodel:  { label:"USER MODEL",      sublabel:"Model of You",                 group:"tau",        col:0,  row:4, desc:"Structured profile — habits, preferences, schedule, goals. The TAU differentiator. Refined continuously by DREAM." },
+      memory:     { label:"MEMORY",          sublabel:"Persistent Store",             group:"tau",        col:1,  row:4, desc:"Long-term memory across all sessions. Past conversations, learned facts, decisions. Stored in Neon Postgres." },
+      identity:   { label:"IDENTITY",        sublabel:"Personality & Self-Model",     group:"tau",        col:2,  row:4, desc:"Consistent character. Knows what it is and what it can do. Stable across sessions." },
+      pacific:    { label:"PACIFIC",         sublabel:"OCEAN Identity Engine",        group:"tau",        col:3,  row:4, desc:"Preference Alignment Choices Inference for Five-factor Identity Characterization. Big Five (OCEAN) model. Improves personalization 29.25% → 76% from implicit conversation signals. Fed by TAU memory and DREAM." },
+      cableman:   { label:"CABLES MAN",      sublabel:"Multi-Agent Orchestrator",     group:"core",       col:6,  row:4, desc:"Coordinated Autonomous Background Learning Execution System — Multi Agent Network. Pure orchestration. Zero direct API calls — all external access through TOOLS." },
+      naturesci:  { label:"NATURE SCI",      sublabel:"Emotional Processor",          group:"core",       col:7,  row:4, desc:"Multimodal Emotional Intelligence. Ensemble: BERT (92% text sentiment) + RNN (89% sequential tracking) + CNN (80% facial) + GAN (90% emotional content generation). Nature Scientific Reports 2026. Modulates all agent responses." },
+      kairos:     { label:"KAIROS",          sublabel:"15s Budget · 3 Excl. Tools",  group:"agent",      col:0,  row:5, desc:"Always-on daemon. Periodic tick prompts, decides independently. 15-second blocking budget per tick. 3 EXCLUSIVE tools: push notifications, file delivery, PR subscriptions. Append-only audit logs." },
+      ultraplan:  { label:"ULTRAPLAN",       sublabel:"30min · Browser Approval",    group:"agent",      col:1,  row:5, desc:"Remote DeepSeek-R1. Up to 30-minute planning window. Polls every 3s. Browser approval gate before execution." },
+      coord:      { label:"COORDINATOR",     sublabel:"XML · Shared Scratchpad",     group:"agent",      col:2,  row:5, desc:"Spawns parallel workers via XML messages. Shared scratchpad. Hardcoded ban on lazy delegation." },
+      dream:      { label:"DREAM",           sublabel:"3-Gate · 4-Phase · No Prune", group:"agent",      col:3,  row:5, desc:"3-gate trigger: 24hr + 5 sessions + lock. 4 phases: Orient → Gather → Consolidate → Index. Scores memories via SALIENCE ENGINE, writes embeddings to pgvector, updates MEMORY.md index. Nothing pruned — ever." },
+      proactive:  { label:"PROACTIVE",       sublabel:"KAIROS-driven Outreach",      group:"agent",      col:4,  row:5, desc:"Semblance initiates contact — alerts, suggestions, reminders without being asked. Driven by KAIROS tick." },
+      explore:    { label:"EXPLORE",         sublabel:"Fast Search Subagent",        group:"agent",      col:5,  row:5, desc:"Fast knowledge/codebase search. Spawned via AgentTool — first-class registry citizen." },
+      plan:       { label:"PLAN AGENT",      sublabel:"Pre-execution Strategy",      group:"agent",      col:6,  row:5, desc:"Designs strategy before any action. Prevents sloppy execution. Spawned via AgentTool." },
+      general:    { label:"GENERAL AGENT",   sublabel:"Complex Multi-step",          group:"agent",      col:7,  row:5, desc:"Handles complex multi-step tasks end-to-end. The workhorse of CABLES MAN." },
+      guide:      { label:"GUIDE AGENT",     sublabel:"Self-knowledge",              group:"agent",      col:8,  row:5, desc:"Answers questions about Semblance itself — capabilities, current state." },
+      swarm:      { label:"SWARM",           sublabel:"AsyncLocalStorage Isolation", group:"agent",      col:9,  row:5, desc:"Tengu Amber Flint. Parallel agent teammates. AsyncLocalStorage context isolation — no bleed between agents." },
+      udsinbox:   { label:"UDS INBOX",       sublabel:"Agent-to-Agent Comms",        group:"agent",      col:10, row:5, desc:"Agent-to-agent messaging over Unix sockets. Direct agent communication channel." },
+      bridge:     { label:"BRIDGE",          sublabel:"Remote CLI Control",          group:"agent",      col:11, row:5, desc:"Remote CLI control from phone or external browser." },
+      buddy:      { label:"BUDDY",           sublabel:"Companion Agent",             group:"agent",      col:12, row:5, desc:"Tamagotchi-style companion. 18 species, rarity tiers, stats. Personality layer." },
+      mcptool:    { label:"MCP TOOL",        sublabel:"Model Context Protocol",      group:"tools",      col:2,  row:6, desc:"MCP bridge. Connects Semblance to any MCP-compatible server — Gmail, Google Calendar, Slack, Asana, custom tools. Tool definitions loaded dynamically at runtime." },
+      tools:      { label:"TOOLS",           sublabel:"Flat Registry · API Gateway", group:"tools",      col:4,  row:6, desc:"The flat registry. Every tool (AgentTool, BashTool, MCP, ArtifactTool) defines its own input schema, permission level, and execution logic independently. Zero shared mutable state between tools." },
+      agenttool:  { label:"AGENT TOOL",      sublabel:"Sub-agents as Tool Calls",    group:"tools",      col:6,  row:6, desc:"Spawns sub-agents as standard tool calls. Flat, predictable. Sub-agents enter the same registry." },
+      bashtool:   { label:"BASH TOOL",       sublabel:"23 Security Checks",          group:"tools",      col:8,  row:6, desc:"Every shell command gated through 23 numbered security checks in bashSecurity before execution." },
+      artifact:   { label:"ARTIFACT TOOL",   sublabel:"JSX · HTML · SVG · MD",       group:"tools",      col:10, row:6, desc:"Structured output renderer. Tags responses with artifact type jsx|html|mermaid|svg|md. JSX via @babel/standalone. HTML in sandboxed iframe." },
+      serpapi:    { label:"SERP API",        sublabel:"Web Search",                  group:"webtools",   col:2,  row:7, desc:"Google search results and news via SerpAPI. Accessed through the flat TOOLS registry." },
+      webfetch:   { label:"WEB FETCH",       sublabel:"URL Retrieval",               group:"webtools",   col:4,  row:7, desc:"Fetches full page content from URLs. Part of the Web Tools subsection within TOOLS registry." },
+      newstool:   { label:"NEWS TOOL",       sublabel:"Real-time News",              group:"webtools",   col:6,  row:7, desc:"Real-time news retrieval. Used by KAIROS for monitoring and proactive alerts." },
+      calendar:   { label:"CALENDAR",        sublabel:"Google Calendar API",         group:"misc",       col:9,  row:7, desc:"Google Calendar read/write. Schedule awareness for PROACTIVE and KAIROS — time-aware outreach and reminders." },
+      whatsapp:   { label:"WHATSAPP",        sublabel:"WhatsApp Business API",       group:"misc",       col:11, row:7, desc:"WhatsApp Business API. PROACTIVE outbound channel for alerts, reminders, and lead capture." },
+      groq:       { label:"GROQ",            sublabel:"Qwen3-32B — Free",             group:"llm",        col:8,  row:8, desc:"Free open-weight LLM backend. Powers most agents via TOOLS. All calls intercepted by Cache Layer — cache hit returns at 0.10× base cost." },
+      deepseek:   { label:"DEEPSEEK-R1",     sublabel:"via Groq — Free",             group:"llm",        col:10, row:8, desc:"Powers ULTRAPLAN. Deep reasoning sessions up to 30 minutes. Free via Groq." },
+      mysql:      { label:"NEON POSTGRES",   sublabel:"Persistent Storage",          group:"storage",    col:5,  row:9, desc:"Long-term persistent storage. TAU memory, conversation history, user model data. Neon serverless Postgres — free tier, autosuspends when idle. Raw text and structured records. Nothing ever deleted." },
+      vecstore:   { label:"PGVECTOR",        sublabel:"Vector Embedding Store",      group:"storage",    col:7,  row:9, desc:"Semantic vector search in the same Neon database — no separate service. DREAM writes embeddings at consolidation time. SEM RETRIEVAL queries by cosine similarity every turn." },
+    };
+
+    // ─── Edge definitions ─────────────────────────────────────────────────────────
+    const EDGES = [
+      ["ui","gateway"], ["voice","gateway"], ["artifact","ui"],
+      ["gateway","tau"], ["gateway","bootstrap"],
+      ["bootstrap","ctxassem"], ["ctxassem","memload"], ["memload","queryeng"],
+      ["queryeng","toolexec"], ["toolexec","ctxpress"], ["ctxpress","subdeleg"],
+      ["subdeleg","cableman"],
+      ["memload","semret"], ["semret","queryeng"], ["vecstore","semret"], ["mysql","semret"],
+      ["tau","semret"],
+      ["queryeng","cachesys"], ["queryeng","cacheconv"], ["queryeng","cachektrl"],
+      ["queryeng","workingmem"], ["workingmem","cableman"],
+      ["naturesci","salience"], ["taucache","salience"], ["queryeng","salience"],
+      ["dream","salience"], ["salience","mysql"], ["salience","vecstore"],
+      ["cachesys","groq"], ["cacheconv","groq"], ["cachektrl","groq"], ["cachesys","deepseek"],
+      ["tau","usermodel"], ["tau","memory"], ["tau","identity"], ["tau","pacific"],
+      ["tau","taucache"], ["taucache","pacific"], ["taucache","cableman"],
+      ["tau","cableman"], ["dream","tau"], ["tau","tools"],
+      ["cableman","naturesci"], ["naturesci","cableman"],
+      ["cableman","kairos"], ["cableman","ultraplan"], ["cableman","coord"],
+      ["cableman","dream"], ["cableman","proactive"], ["cableman","explore"],
+      ["cableman","plan"], ["cableman","general"], ["cableman","guide"],
+      ["cableman","swarm"], ["cableman","udsinbox"], ["cableman","bridge"], ["cableman","buddy"],
+      ["kairos","tools"], ["ultraplan","tools"], ["coord","tools"], ["dream","tools"],
+      ["proactive","tools"], ["explore","tools"], ["plan","tools"], ["general","tools"],
+      ["guide","tools"], ["swarm","tools"], ["udsinbox","tools"], ["bridge","tools"], ["buddy","tools"],
+      ["tools","agenttool"], ["tools","bashtool"], ["tools","mcptool"], ["tools","artifact"],
+      ["tools","serpapi"], ["tools","webfetch"], ["tools","newstool"],
+      ["tools","calendar"], ["tools","whatsapp"],
+      ["tools","groq"], ["tools","deepseek"],
+      ["tools","mysql"], ["tools","vecstore"],
+      ["mysql","vecstore"],
+    ];
+
+    // ─── Layout constants ─────────────────────────────────────────────────────────
+    const COLS  = 13;
+    const ROWS  = 10;
+    const SVG_W = 1500;
+    const SVG_H = 1280;
+    const PAD_X = 58;
+    const PAD_Y = 52;
+
+    function getPos(col, row) {
+      return {
+        x: PAD_X + (col / (COLS - 1)) * (SVG_W - PAD_X * 2),
+        y: PAD_Y + (row / (ROWS - 1)) * (SVG_H - PAD_Y * 2),
+      };
+    }
+
+    const ROW_BANDS = [
+      { row:2, color:"#f97316" },
+      { row:4, color:"#ffd700" },
+      { row:5, color:"#06b6d4" },
+      { row:6, color:"#10b981" },
+      { row:7, color:"#475569" },
+      { row:8, color:"#94a3b8" },
+    ];
+
+    const ROW_LABELS = [
+      { row:0, label:"INTERFACE",   color:"#00f5ff" },
+      { row:1, label:"GATEWAY",     color:"#a78bfa" },
+      { row:2, label:"PIPELINE",    color:"#f97316" },
+      { row:3, label:"CACHE",       color:"#e879f9" },
+      { row:4, label:"CORE",        color:"#ffd700" },
+      { row:5, label:"AGENTS",      color:"#06b6d4" },
+      { row:6, label:"TOOLS",       color:"#10b981" },
+      { row:7, label:"SUBSECTIONS", color:"#94a3b8" },
+      { row:8, label:"EXT. APIS",   color:"#94a3b8" },
+      { row:9, label:"STORAGE",     color:"#6366f1" },
+    ];
+
+    const BRACKETS = [
+      { colL:4, colR:10, row:3, color:"#e879f9", label:"CACHE LAYER" },
+      { colL:1, colR:7,  row:7, color:"#34d399", label:"WEB TOOLS"   },
+      { colL:8, colR:12, row:7, color:"#f59e0b", label:"MISC TOOLS"  },
+      { colL:2, colR:8,  row:9, color:"#6366f1", label:"STORAGE LAYER" },
+    ];
+
+    const CACHE_NODES = new Set(["cachesys","cacheconv","cachektrl"]);
+    const WEB_NODES   = new Set(["serpapi","webfetch","newstool"]);
+    const MISC_NODES  = new Set(["calendar","whatsapp"]);
+
+    function edgeBaseColor(a, b) {
+      if (CACHE_NODES.has(a) || CACHE_NODES.has(b)) return "#3a1a3a";
+      if (WEB_NODES.has(a)   || WEB_NODES.has(b))   return "#1a3a2a";
+      if (MISC_NODES.has(a)  || MISC_NODES.has(b))  return "#3a2a08";
+      if (a === "mysql" || b === "mysql")            return "#1e1e3f";
+      return "#1e293b";
+    }
+
+    function nodeRadius(group) {
+      if (group === "core")  return 27;
+      if (group === "tools") return 25;
+      return 18;
+    }
+
+    function SemblanceArchV9() {
+      const [selected, setSelected] = useState(null);
+
+      const connectedTo = useCallback((id) => {
+        if (!selected) return false;
+        return EDGES.some(([a,b]) => (a===selected || b===selected) && (a===id || b===id));
+      }, [selected]);
+
+      const handleNode = (id) => setSelected(prev => prev === id ? null : id);
+
+      return (
+        <div style={{
+          background:"#050a0f",
+          minHeight:"100vh",
+          fontFamily:"'Courier New', monospace",
+          color:"#e2e8f0",
+          padding:"14px",
+        }}>
+          {/* Header */}
+          <div style={{ textAlign:"center", marginBottom:"10px" }}>
+            <div style={{
+              fontSize:"22px", fontWeight:"900", letterSpacing:"8px",
+              background:"linear-gradient(90deg,#00f5ff,#ffd700,#ff6b6b,#e879f9,#10b981,#f59e0b,#6366f1)",
+              WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent",
+            }}>
+              SEMBLANCE
+            </div>
+            <div style={{ fontSize:"9px", letterSpacing:"3px", color:"#334155", marginTop:"3px" }}>
+              CABLES MAN v9 · TAU CACHE · NATURE SCI EMOTION · PACIFIC IDENTITY · SALIENCE ENGINE · WORKING MEM · SEM RETRIEVAL · PGVECTOR · CACHE LAYER · REGISTRY: MCP + AGENT + BASH + ARTIFACT · WEB + MISC · STORAGE
+            </div>
+          </div>
+
+          {/* Legend */}
+          <div style={{ display:"flex", gap:"8px", justifyContent:"center", flexWrap:"wrap", marginBottom:"10px" }}>
+            {Object.entries(GROUP_LABEL).map(([g, label]) => (
+              <div key={g} style={{ display:"flex", alignItems:"center", gap:"4px", fontSize:"8px", color:"#64748b" }}>
+                <div style={{ width:"7px", height:"7px", borderRadius:"2px", background:COLOR[g] }} />
+                {label}
+              </div>
+            ))}
+          </div>
+
+          {/* SVG canvas */}
+          <div style={{ position:"relative", maxWidth:"1500px", margin:"0 auto" }}>
+            <svg viewBox={`0 0 ${SVG_W} ${SVG_H}`} style={{ width:"100%", height:"auto", display:"block" }}>
+              <defs>
+                <filter id="glow">
+                  <feGaussianBlur stdDeviation="4" result="b"/>
+                  <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+                </filter>
+                <filter id="sglow">
+                  <feGaussianBlur stdDeviation="2" result="b"/>
+                  <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+                </filter>
+                <filter id="cacheglow">
+                  <feGaussianBlur stdDeviation="5" result="b"/>
+                  <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+                </filter>
+                <filter id="storageglow">
+                  <feGaussianBlur stdDeviation="6" result="b"/>
+                  <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+                </filter>
+                <marker id="arDim" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto">
+                  <path d="M0,0 L0,5 L5,2.5 z" fill="#1e293b"/>
+                </marker>
+                <marker id="arActive" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto">
+                  <path d="M0,0 L0,5 L5,2.5 z" fill="#ffd700"/>
+                </marker>
+              </defs>
+
+              {/* Row bands */}
+              {ROW_BANDS.map(({ row, color }) => {
+                const { y } = getPos(0, row);
+                const h = (SVG_H - PAD_Y * 2) / (ROWS - 1);
+                return (
+                  <rect key={row} x={0} y={y - h*0.55} width={SVG_W*0.88} height={h*1.1}
+                    fill={color} opacity={0.025} rx={3}/>
+                );
+              })}
+
+              {/* Cache band row 3 */}
+              {(() => {
+                const { y } = getPos(0, 3);
+                const h = (SVG_H - PAD_Y * 2) / (ROWS - 1);
+                return <rect x={0} y={y - h*0.55} width={SVG_W*0.88} height={h*1.1}
+                  fill="#e879f9" opacity={0.04} rx={3}/>;
+              })()}
+
+              {/* Storage band row 9 */}
+              {(() => {
+                const { y } = getPos(0, 9);
+                const h = (SVG_H - PAD_Y * 2) / (ROWS - 1);
+                return <rect x={0} y={y - h*0.6} width={SVG_W*0.88} height={h*1.2}
+                  fill="#6366f1" opacity={0.04} rx={3}/>;
+              })()}
+
+              {/* Bracket overlays */}
+              {BRACKETS.map(({ colL, colR, row, color, label }) => {
+                const left  = getPos(colL, row);
+                const right = getPos(colR, row);
+                const mid   = getPos((colL + colR) / 2, row);
+                const h = (SVG_H - PAD_Y * 2) / (ROWS - 1);
+                return (
+                  <g key={label}>
+                    <rect x={left.x-30} y={left.y - h*0.5} width={right.x - left.x + 60} height={h}
+                      fill={color} opacity={0.06} rx={4}
+                      stroke={color} strokeWidth="0.7" strokeDasharray="3,4"/>
+                    <text x={mid.x} y={mid.y + h*0.42} textAnchor="middle"
+                      fontSize="7" fill={color} opacity="0.5" letterSpacing="2" fontWeight="700">
+                      {label}
+                    </text>
+                  </g>
+                );
+              })}
+
+              {/* Edges */}
+              {EDGES.map(([a, b], i) => {
+                const na = NODES[a], nb = NODES[b];
+                if (!na || !nb) return null;
+                const pa = getPos(na.col, na.row);
+                const pb = getPos(nb.col, nb.row);
+                const dx = pb.x - pa.x, dy = pb.y - pa.y;
+                const len = Math.sqrt(dx*dx + dy*dy);
+                if (len < 1) return null;
+                const r = 17;
+                const ex = pa.x + (dx / len) * (len - r);
+                const ey = pa.y + (dy / len) * (len - r);
+                const active = selected && (a === selected || b === selected);
+                const dim    = selected && !active;
+                const isCache = CACHE_NODES.has(a) || CACHE_NODES.has(b);
+                return (
+                  <line key={i}
+                    x1={pa.x} y1={pa.y} x2={ex} y2={ey}
+                    stroke={active ? COLOR[na.group] : edgeBaseColor(a, b)}
+                    strokeWidth={active ? 2 : isCache ? 1.0 : 0.8}
+                    strokeDasharray={isCache && !active ? "2,3" : active ? "none" : "4,4"}
+                    opacity={dim ? 0.04 : active ? 1 : isCache ? 0.65 : 0.55}
+                    filter={active ? "url(#sglow)" : "none"}
+                    markerEnd={active ? "url(#arActive)" : "url(#arDim)"}
+                    style={{ transition:"all 0.2s" }}
+                  />
+                );
+              })}
+
+              {/* Nodes */}
+              {Object.entries(NODES).map(([id, node]) => {
+                const { x, y } = getPos(node.col, node.row);
+                const color  = COLOR[node.group];
+                const isSel  = selected === id;
+                const isConn = connectedTo(id);
+                const dim    = selected && !isSel && !isConn;
+                const r      = nodeRadius(node.group);
+                const isCache   = node.group === "cache";
+                const isStorage = node.group === "storage";
+                return (
+                  <g key={id} transform={`translate(${x},${y})`}
+                    style={{ cursor:"pointer" }}
+                    onClick={() => handleNode(id)}>
+                    {isSel && (
+                      <circle r={r+8} fill="none"
+                        stroke={color} strokeWidth="1" opacity="0.35" strokeDasharray="3,3"/>
+                    )}
+                    {isCache && !dim && (
+                      <circle r={r+10} fill={color} opacity="0.05" filter="url(#cacheglow)"/>
+                    )}
+                    {isStorage && !dim && (
+                      <circle r={r+10} fill={color} opacity="0.04" filter="url(#storageglow)"/>
+                    )}
+                    <circle r={r} fill="#080f1a" stroke={color}
+                      strokeWidth={isSel ? 2.5 : isCache ? 1.5 : 1.2}
+                      opacity={dim ? 0.12 : 1}
+                      filter={isSel ? "url(#glow)" : "none"}
+                      style={{ transition:"all 0.2s" }}/>
+                    <circle r={r-4} fill={color} opacity={dim ? 0.02 : 0.07}/>
+                    <circle r={2.5} fill={color} opacity={dim ? 0.12 : 0.9}/>
+                    <text textAnchor="middle" dy={-(r+9)}
+                      fontSize={node.group === "core" ? 8.5 : 7.5}
+                      fontWeight="700" letterSpacing="0.8"
+                      fill={color} opacity={dim ? 0.12 : 1}
+                      style={{ transition:"all 0.2s" }}>
+                      {node.label}
+                    </text>
+                    <text textAnchor="middle" dy={-(r+2)}
+                      fontSize="6.5" fill="#475569" opacity={dim ? 0.08 : 0.75}>
+                      {node.sublabel}
+                    </text>
+                  </g>
+                );
+              })}
+
+              {/* Row labels */}
+              {ROW_LABELS.map(({ row, label, color }) => {
+                const { y } = getPos(0, row);
+                return (
+                  <text key={label} x="6" y={y}
+                    fontSize="7" fill={color}
+                    opacity={label === "CACHE" || label === "STORAGE" ? 0.55 : 0.3}
+                    fontWeight="700" letterSpacing="1.5"
+                    dominantBaseline="middle">
+                    {label}
+                  </text>
+                );
+              })}
+            </svg>
+
+            {/* Detail panel */}
+            {selected && NODES[selected] && (() => {
+              const node  = NODES[selected];
+              const color = COLOR[node.group];
+              const connections = EDGES
+                .filter(([a,b]) => a===selected || b===selected)
+                .map(([a,b]) => a===selected ? NODES[b]?.label : NODES[a]?.label)
+                .filter(Boolean);
+              return (
+                <div style={{
+                  position:"absolute", bottom:"10px", left:"50%", transform:"translateX(-50%)",
+                  background:"#0a1628", border:`1px solid ${color}`,
+                  borderRadius:"8px", padding:"12px 18px",
+                  maxWidth:"460px", width:"90%",
+                  boxShadow:`0 0 28px ${color}18`,
+                }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:"8px", marginBottom:"6px" }}>
+                    <span style={{ fontSize:"11px", fontWeight:"700", letterSpacing:"2px", color }}>
+                      {node.label}
+                    </span>
+                    <span style={{
+                      fontSize:"8px",
+                      background:`${color}18`, color,
+                      padding:"2px 7px", borderRadius:"3px",
+                    }}>
+                      {GROUP_LABEL[node.group]}
+                    </span>
+                  </div>
+                  <div style={{ fontSize:"11px", color:"#94a3b8", lineHeight:"1.65" }}>
+                    {node.desc}
+                  </div>
+                  {connections.length > 0 && (
+                    <div style={{ marginTop:"8px", fontSize:"9px", color:"#334155" }}>
+                      ↔ {connections.join("  ·  ")}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* Footer */}
+          <div style={{ textAlign:"center", marginTop:"10px", fontSize:"8px", color:"#1e293b", letterSpacing:"2px" }}>
+            TAP ANY NODE · PIPELINE → CACHE → LLM · REGISTRY: MCP + AGENT + BASH + ARTIFACT · STORAGE
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<SemblanceArchV9 />);
+  </script>
+</body>
+</html>

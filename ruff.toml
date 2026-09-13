@@ -1,0 +1,9 @@
+line-length = 120
+
+[lint]
+# Pyflakes + pycodestyle + import sorting only. This codebase leans heavily on
+# `except Exception` as an intentional fail-soft pattern (cache misses, optional
+# integrations degrading gracefully) — flake8-bugbear/ruff-specific opinionated
+# rules would flag most of that by design, not by accident.
+select = ["E4", "E7", "E9", "F", "I"]
+ignore = ["E501"]
