@@ -5,11 +5,11 @@ use_container = true
 
 [default.deploy.parameters]
 stack_name = "semblance"
-region = "us-east-1"
+region = "eu-west-1"  # Ireland
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = false
 resolve_s3 = true
 disable_rollback = false
 # Secrets are never committed here — passed via --parameter-overrides from
-# GitHub Actions secrets (see .github/workflows/deploy-aws.yml) or typed in
+# GitHub Actions secrets (see .github/workflows/semblance.yml) or typed in
 # by hand on `sam deploy --guided` for a first local deploy.

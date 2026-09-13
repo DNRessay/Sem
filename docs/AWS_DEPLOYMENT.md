@@ -154,7 +154,9 @@ all — ask if you want to switch later, it's a small workflow change.)
    Actions → New repository secret):
    - `AWS_ACCESS_KEY_ID`
    - `AWS_SECRET_ACCESS_KEY`
-   - `AWS_REGION` — e.g. `us-east-1`
+   - `AWS_REGION` — `eu-west-1` (Ireland — must match `samconfig.toml`'s
+     `region`, which SAM reads before this secret; changing one without
+     the other silently deploys to the wrong region)
    - `GROQ_API_KEY`
    - `NEON_DATABASE_URL`
    - `MODAL_EMBEDDINGS_URL`
@@ -230,6 +232,18 @@ plenty for one user's traffic):
   tier ceiling (permanent memory means this grows, if slowly, forever by
   design — that's the point of the memory philosophy, but it's worth an
   occasional glance).
+
+**If you change region** (this project moved from `us-east-1` to
+`eu-west-1` after a mismatch between `samconfig.toml` and the `AWS_REGION`
+secret meant the first deploy landed in the wrong one): CloudFormation
+stacks are region-locked, there's no "move" — the old region's stack keeps
+existing, and its resources, until you delete it. After confirming the new
+region's stack is up and working, clean up the old one:
+```bash
+aws cloudformation delete-stack --stack-name semblance --region us-east-1
+# once that's gone, if nothing else uses the SAM bootstrap bucket there:
+aws cloudformation delete-stack --stack-name aws-sam-cli-managed-default --region us-east-1
+```
 
 ## Cost breakdown (single user, realistic traffic)
 
