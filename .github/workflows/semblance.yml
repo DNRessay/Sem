@@ -35,7 +35,7 @@ jobs:
         run: ruff check .
 
       - name: Test
-        run: pytest tests/ -v --tb=short
+        run: python -m pytest tests/ -v --tb=short
 
   deploy:
     name: Deploy to AWS (SAM)
