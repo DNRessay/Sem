@@ -134,7 +134,8 @@ all — ask if you want to switch later, it's a small workflow change.)
    - `SERP_API_KEY`, `OPENCLAW_URL` (optional — leave the secret unset and
      the workflow passes an empty string, which disables those features
      cleanly)
-4. Push to `main`. `.github/workflows/semblance.yml` lints, tests, then
+4. Push to `claude/bold-hawking-8o28g3` (this repo's trunk branch —
+   there's no separate `main`). `.github/workflows/semblance.yml` lints, tests, then
    deploys — in that order, so a broken build never reaches AWS.
 
 ### 5. Frontend (Cloudflare Pages)
@@ -161,7 +162,7 @@ npm run dev
    `SEMBLANCE_API_URL` (your `ChatFunctionUrl` — baked into the static
    build at build time, since Vite env vars aren't runtime-configurable
    after the fact).
-4. Push to `main` (touching anything under `frontend/`) and
+4. Push to `claude/bold-hawking-8o28g3` (touching anything under `frontend/`) and
    `.github/workflows/cloudflare-pages.yml` builds and deploys it.
 
 Cloudflare Pages free tier: unlimited requests/bandwidth, 500 builds/month.

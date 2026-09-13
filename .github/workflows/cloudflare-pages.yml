@@ -2,8 +2,8 @@ name: Deploy frontend to Cloudflare Pages
 
 on:
   push:
-    branches: ["main"]
-    paths: ["frontend/**", ".github/workflows/static.yml"]
+    branches: ["claude/bold-hawking-8o28g3"]
+    paths: ["frontend/**", ".github/workflows/cloudflare-pages.yml"]
   workflow_dispatch:
 
 permissions:

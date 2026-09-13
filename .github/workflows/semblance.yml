@@ -2,9 +2,9 @@ name: SEMBLANCE CI/CD
 
 on:
   push:
-    branches: ["main"]
+    branches: ["claude/bold-hawking-8o28g3"]
   pull_request:
-    branches: ["main"]
+    branches: ["claude/bold-hawking-8o28g3"]
   workflow_dispatch:
 
 env:
@@ -41,7 +41,7 @@ jobs:
     name: Deploy to AWS (SAM)
     runs-on: ubuntu-latest
     needs: [lint-and-test]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/claude/bold-hawking-8o28g3' && github.event_name == 'push'
     permissions:
       contents: read
     steps:
