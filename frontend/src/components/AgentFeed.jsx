@@ -3,8 +3,8 @@ import { useState, useEffect } from "react";
 const API = import.meta.env.VITE_API_URL || "";
 
 const COLORS = {
-    kairos: "#da7756", general: "#9b9b98", plan: "#e0b84a",
-    explore: "#5fb37a", dream: "#c98fd6", swarm: "#8f8fd6",
+    kairos: "#181818", general: "#8e8e8c", plan: "#b8860b",
+    explore: "#3a9b5c", dream: "#a855c9", swarm: "#5b5bc9",
 };
 
 export default function AgentFeed({ sessionId = "default" }) {

@@ -1,12 +1,13 @@
 :root {
-    --bg: #0d0d0d;
-    --surface: #1a1a1a;
-    --surface-2: #212121;
-    --border: #2e2e2c;
-    --text: #ececec;
+    --bg: #ffffff;
+    --surface: #f0efec;
+    --surface-2: #e9e8e4;
+    --border: #e5e4e1;
+    --text: #1f1f1e;
     --text-muted: #8e8e8c;
-    --accent: #da7756;
-    --accent-dim: #a35a41;
+    --accent: #181818;
+    --accent-contrast: #ffffff;
+    --ready: #3a9b5c;
     --danger: #c4453a;
 }
 
@@ -35,7 +36,7 @@ body {
 }
 
 @keyframes thinking-bounce {
-    0%, 80%, 100% { transform: translateY(0); opacity: 0.35; }
+    0%, 80%, 100% { transform: translateY(0); opacity: 0.3; }
     40% { transform: translateY(-4px); opacity: 1; }
 }
 

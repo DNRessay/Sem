@@ -35,11 +35,11 @@ export default function ChatWindow({ sessionId = "default", onStreamChange }) {
             <div style={{ flex: 1, overflowY: "auto", padding: "20px 16px", display: "flex", flexDirection: "column", gap: "18px" }}>
                 {history.map((m, i) => (
                     m.role === "user" ? (
-                        <div key={i} style={{ alignSelf: "flex-end", maxWidth: "80%", background: "var(--surface-2)", padding: "10px 14px", borderRadius: "16px", fontSize: "14px", lineHeight: "1.6" }}>
+                        <div key={i} style={{ alignSelf: "flex-end", maxWidth: "80%", background: "var(--surface)", padding: "10px 14px", borderRadius: "18px", fontSize: "15px", lineHeight: "1.6" }}>
                             {m.content}
                         </div>
                     ) : (
-                        <div key={i} style={{ alignSelf: "flex-start", maxWidth: "85%", padding: "0 2px", fontSize: "14px", lineHeight: "1.7", whiteSpace: "pre-wrap" }}>
+                        <div key={i} style={{ alignSelf: "flex-start", maxWidth: "88%", padding: "0 2px", fontSize: "15px", lineHeight: "1.7", whiteSpace: "pre-wrap" }}>
                             {m.content}
                         </div>
                     )
@@ -50,29 +50,39 @@ export default function ChatWindow({ sessionId = "default", onStreamChange }) {
                     </div>
                 )}
                 {streaming && !isThinking && (
-                    <div style={{ alignSelf: "flex-start", maxWidth: "85%", padding: "0 2px", fontSize: "14px", lineHeight: "1.7", whiteSpace: "pre-wrap" }}>
-                        {fullResponse}<span style={{ opacity: 0.5, color: "var(--accent)" }}>▋</span>
+                    <div style={{ alignSelf: "flex-start", maxWidth: "88%", padding: "0 2px", fontSize: "15px", lineHeight: "1.7", whiteSpace: "pre-wrap" }}>
+                        {fullResponse}<span style={{ opacity: 0.4 }}>▋</span>
                     </div>
                 )}
                 {error && (
-                    <div style={{ alignSelf: "flex-start", maxWidth: "80%", background: "rgba(196,69,58,0.12)", border: "1px solid var(--danger)", padding: "10px 14px", borderRadius: "10px", fontSize: "13px", lineHeight: "1.6", color: "#e5897f" }}>
+                    <div style={{ alignSelf: "flex-start", maxWidth: "80%", background: "rgba(196,69,58,0.08)", border: "1px solid var(--danger)", padding: "10px 14px", borderRadius: "12px", fontSize: "13px", lineHeight: "1.6", color: "var(--danger)" }}>
                         {error}
                     </div>
                 )}
                 <div ref={bottomRef} />
             </div>
-            <div style={{ display: "flex", gap: "8px", padding: "12px 16px", borderTop: "1px solid var(--border)" }}>
-                <VoiceInput onTranscript={text => setInput(prev => (prev ? `${prev} ${text}` : text))} />
-                <input
-                    value={input}
-                    onChange={e => setInput(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && !e.shiftKey && submit()}
-                    placeholder="Message SEMBLANCE..."
-                    style={{ flex: 1, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "10px", padding: "10px 14px", color: "var(--text)", fontSize: "14px", outline: "none" }}
-                />
-                <button onClick={streaming ? abort : submit} style={{ padding: "10px 18px", background: streaming ? "var(--danger)" : "var(--accent)", border: "none", borderRadius: "10px", color: "#fff", cursor: "pointer", fontSize: "13px", fontWeight: "600" }}>
-                    {streaming ? "Stop" : "Send"}
-                </button>
+            <div style={{ padding: "10px 12px 16px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "26px", padding: "6px 6px 6px 16px" }}>
+                    <input
+                        value={input}
+                        onChange={e => setInput(e.target.value)}
+                        onKeyDown={e => e.key === "Enter" && !e.shiftKey && submit()}
+                        placeholder="Message SEMBLANCE..."
+                        style={{ flex: 1, background: "transparent", border: "none", padding: "8px 0", color: "var(--text)", fontSize: "15px", outline: "none" }}
+                    />
+                    <VoiceInput onTranscript={text => setInput(prev => (prev ? `${prev} ${text}` : text))} />
+                    <button
+                        onClick={streaming ? abort : submit}
+                        aria-label={streaming ? "Stop" : "Send"}
+                        style={{
+                            width: "36px", height: "36px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                            background: streaming ? "var(--danger)" : "var(--accent)", border: "none", borderRadius: "50%",
+                            color: "var(--accent-contrast)", cursor: "pointer", fontSize: "16px",
+                        }}
+                    >
+                        {streaming ? "■" : "↑"}
+                    </button>
+                </div>
             </div>
         </div>
     );
