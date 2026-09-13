@@ -32,7 +32,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
     };
 
     return (
-        <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--bg)", color: "var(--text)" }}>
+        <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, height: "100%", background: "var(--bg)", color: "var(--text)" }}>
             <div style={{ flex: 1, overflowY: "auto", padding: "20px 16px", display: "flex", flexDirection: "column", gap: "18px" }}>
                 {history.map((m, i) => (
                     m.role === "user" ? (
@@ -62,14 +62,14 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                 )}
                 <div ref={bottomRef} />
             </div>
-            <div style={{ padding: "8px 12px 16px" }}>
-                <div style={{ display: "flex", flexDirection: "column", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "26px", padding: "10px 14px 8px" }}>
+            <div style={{ padding: "8px 12px 16px", width: "100%", boxSizing: "border-box" }}>
+                <div style={{ display: "flex", flexDirection: "column", width: "100%", boxSizing: "border-box", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "26px", padding: "10px 14px 8px" }}>
                     <input
                         value={input}
                         onChange={e => setInput(e.target.value)}
                         onKeyDown={e => e.key === "Enter" && !e.shiftKey && submit()}
                         placeholder="Message SEMBLANCE..."
-                        style={{ background: "transparent", border: "none", padding: "2px 2px 8px", color: "var(--text)", fontSize: "15px", outline: "none" }}
+                        style={{ width: "100%", boxSizing: "border-box", background: "transparent", border: "none", padding: "2px 2px 8px", color: "var(--text)", fontSize: "15px", outline: "none" }}
                     />
                     <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                         <button
