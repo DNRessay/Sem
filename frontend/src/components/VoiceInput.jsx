@@ -36,9 +36,9 @@ export default function VoiceInput({ onTranscript }) {
             title="Voice input"
             aria-label="Voice input"
             style={{
-                width: "36px", height: "36px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                width: "32px", height: "32px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
                 background: "none", border: "none", borderRadius: "50%",
-                color: listening ? "var(--danger)" : "var(--text-muted)", cursor: "pointer", fontSize: "16px",
+                color: listening ? "var(--danger)" : "var(--text-muted)", cursor: "pointer", fontSize: "15px",
             }}
         >
             {listening ? "●" : "🎙"}

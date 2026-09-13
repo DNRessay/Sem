@@ -3,8 +3,9 @@ import { useStream } from "../hooks/useStream";
 import VoiceInput from "./VoiceInput";
 
 const API = import.meta.env.VITE_API_URL || "";
+const MODEL_LABEL = "Qwen";
 
-export default function ChatWindow({ sessionId = "default", initialHistory = [], onStreamChange }) {
+export default function ChatWindow({ sessionId = "default", initialHistory = [], onStreamChange, onNewChat }) {
     const [input, setInput] = useState("");
     const [history, setHistory] = useState(initialHistory);
     const { chunks, streaming, error, send, abort } = useStream(API);
@@ -61,27 +62,44 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                 )}
                 <div ref={bottomRef} />
             </div>
-            <div style={{ padding: "10px 12px 16px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "6px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "26px", padding: "6px 6px 6px 16px" }}>
+            <div style={{ padding: "8px 12px 16px" }}>
+                <div style={{ display: "flex", flexDirection: "column", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "26px", padding: "10px 14px 8px" }}>
                     <input
                         value={input}
                         onChange={e => setInput(e.target.value)}
                         onKeyDown={e => e.key === "Enter" && !e.shiftKey && submit()}
                         placeholder="Message SEMBLANCE..."
-                        style={{ flex: 1, background: "transparent", border: "none", padding: "8px 0", color: "var(--text)", fontSize: "15px", outline: "none" }}
+                        style={{ background: "transparent", border: "none", padding: "2px 2px 8px", color: "var(--text)", fontSize: "15px", outline: "none" }}
                     />
-                    <VoiceInput onTranscript={text => setInput(prev => (prev ? `${prev} ${text}` : text))} />
-                    <button
-                        onClick={streaming ? abort : submit}
-                        aria-label={streaming ? "Stop" : "Send"}
-                        style={{
-                            width: "36px", height: "36px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
-                            background: streaming ? "var(--danger)" : "var(--accent)", border: "none", borderRadius: "50%",
-                            color: "var(--accent-contrast)", cursor: "pointer", fontSize: "16px",
-                        }}
-                    >
-                        {streaming ? "■" : "↑"}
-                    </button>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <button
+                            onClick={onNewChat}
+                            aria-label="New chat"
+                            style={{
+                                width: "32px", height: "32px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                                background: "none", border: "1px solid var(--border)", borderRadius: "50%",
+                                color: "var(--text-muted)", cursor: "pointer", fontSize: "17px", lineHeight: 1,
+                            }}
+                        >
+                            +
+                        </button>
+                        <span style={{ display: "flex", alignItems: "center", gap: "3px", border: "1px solid var(--border)", borderRadius: "999px", padding: "5px 10px", fontSize: "12px", color: "var(--text-muted)" }}>
+                            {MODEL_LABEL} <span style={{ fontSize: "9px" }}>▾</span>
+                        </span>
+                        <span style={{ flex: 1 }} />
+                        <VoiceInput onTranscript={text => setInput(prev => (prev ? `${prev} ${text}` : text))} />
+                        <button
+                            onClick={streaming ? abort : submit}
+                            aria-label={streaming ? "Stop" : "Send"}
+                            style={{
+                                width: "32px", height: "32px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                                background: streaming ? "var(--danger)" : "var(--accent)", border: "none", borderRadius: "50%",
+                                color: "var(--accent-contrast)", cursor: "pointer", fontSize: "15px",
+                            }}
+                        >
+                            {streaming ? "■" : "↑"}
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>

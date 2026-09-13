@@ -34,6 +34,7 @@ export default function App() {
                     sessionId={sessionId}
                     initialHistory={initialHistory}
                     onStreamChange={setStreaming}
+                    onNewChat={startNewChat}
                 />
             </div>
             <Drawer
