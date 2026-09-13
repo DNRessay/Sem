@@ -62,7 +62,15 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install AWS SAM CLI
-        run: pip install aws-sam-cli
+        # Pinned rather than left to resolve "latest": aws-sam-cli has a
+        # large, fast-moving release history and a heavy transitive
+        # dependency tree (boto3, docker, cookiecutter, aws-lambda-builders,
+        # jsonschema...) — an unpinned install lets pip's resolver fall into
+        # slow backtracking across that whole history on any version
+        # conflict, which is indistinguishable from a hung runner from the
+        # outside. This step hung 4 runs in a row on exactly this line before
+        # being pinned; bump this version deliberately, not by removing it.
+        run: pip install aws-sam-cli==1.166.2
 
       - name: sam build
         run: sam build --use-container
