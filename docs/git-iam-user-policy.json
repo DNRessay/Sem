@@ -2,140 +2,51 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "CloudFormationDeploy",
+      "Sid": "CFN",
       "Effect": "Allow",
-      "Action": [
-        "cloudformation:CreateStack",
-        "cloudformation:UpdateStack",
-        "cloudformation:DeleteStack",
-        "cloudformation:DescribeStacks",
-        "cloudformation:DescribeStackEvents",
-        "cloudformation:DescribeStackResource",
-        "cloudformation:DescribeStackResources",
-        "cloudformation:GetTemplate",
-        "cloudformation:GetTemplateSummary",
-        "cloudformation:ValidateTemplate",
-        "cloudformation:CreateChangeSet",
-        "cloudformation:DescribeChangeSet",
-        "cloudformation:ExecuteChangeSet",
-        "cloudformation:DeleteChangeSet",
-        "cloudformation:ListStackResources",
-        "cloudformation:TagResource"
-      ],
+      "Action": "cloudformation:*",
       "Resource": [
         "arn:aws:cloudformation:*:053097418755:stack/aws-sam-cli-managed-default/*",
         "arn:aws:cloudformation:*:053097418755:stack/semblance/*"
       ]
     },
     {
-      "Sid": "S3DeploymentBucket",
+      "Sid": "S3",
       "Effect": "Allow",
-      "Action": [
-        "s3:CreateBucket",
-        "s3:PutBucketPolicy",
-        "s3:GetBucketPolicy",
-        "s3:PutEncryptionConfiguration",
-        "s3:GetEncryptionConfiguration",
-        "s3:PutBucketPublicAccessBlock",
-        "s3:GetBucketPublicAccessBlock",
-        "s3:PutBucketVersioning",
-        "s3:GetBucketVersioning",
-        "s3:PutLifecycleConfiguration",
-        "s3:GetLifecycleConfiguration",
-        "s3:GetBucketLocation",
-        "s3:ListBucket",
-        "s3:PutObject",
-        "s3:GetObject",
-        "s3:DeleteObject"
-      ],
+      "Action": "s3:*",
       "Resource": [
         "arn:aws:s3:::aws-sam-cli-managed-default*",
         "arn:aws:s3:::aws-sam-cli-managed-default*/*"
       ]
     },
     {
-      "Sid": "LambdaFunctions",
+      "Sid": "Lambda",
       "Effect": "Allow",
-      "Action": [
-        "lambda:CreateFunction",
-        "lambda:UpdateFunctionCode",
-        "lambda:UpdateFunctionConfiguration",
-        "lambda:GetFunction",
-        "lambda:GetFunctionConfiguration",
-        "lambda:DeleteFunction",
-        "lambda:AddPermission",
-        "lambda:RemovePermission",
-        "lambda:GetPolicy",
-        "lambda:ListVersionsByFunction",
-        "lambda:PublishVersion",
-        "lambda:CreateAlias",
-        "lambda:UpdateAlias",
-        "lambda:GetAlias",
-        "lambda:DeleteAlias",
-        "lambda:TagResource",
-        "lambda:ListTags",
-        "lambda:CreateFunctionUrlConfig",
-        "lambda:UpdateFunctionUrlConfig",
-        "lambda:DeleteFunctionUrlConfig",
-        "lambda:GetFunctionUrlConfig"
-      ],
+      "Action": "lambda:*",
       "Resource": "arn:aws:lambda:*:053097418755:function:semblance-*"
     },
     {
-      "Sid": "IAMExecutionRoles",
+      "Sid": "IAMRoles",
       "Effect": "Allow",
-      "Action": [
-        "iam:CreateRole",
-        "iam:DeleteRole",
-        "iam:GetRole",
-        "iam:AttachRolePolicy",
-        "iam:DetachRolePolicy",
-        "iam:PutRolePolicy",
-        "iam:DeleteRolePolicy",
-        "iam:GetRolePolicy",
-        "iam:TagRole",
-        "iam:PassRole"
-      ],
+      "Action": "iam:*",
       "Resource": "arn:aws:iam::053097418755:role/semblance-*"
     },
     {
-      "Sid": "DynamoDBCacheTable",
+      "Sid": "DynamoDB",
       "Effect": "Allow",
-      "Action": [
-        "dynamodb:CreateTable",
-        "dynamodb:DeleteTable",
-        "dynamodb:DescribeTable",
-        "dynamodb:UpdateTable",
-        "dynamodb:UpdateTimeToLive",
-        "dynamodb:DescribeTimeToLive",
-        "dynamodb:TagResource"
-      ],
+      "Action": "dynamodb:*",
       "Resource": "arn:aws:dynamodb:*:053097418755:table/semblance-*"
     },
     {
-      "Sid": "CloudWatchLogGroups",
+      "Sid": "Logs",
       "Effect": "Allow",
-      "Action": [
-        "logs:CreateLogGroup",
-        "logs:DeleteLogGroup",
-        "logs:PutRetentionPolicy",
-        "logs:DescribeLogGroups",
-        "logs:TagResource",
-        "logs:TagLogGroup"
-      ],
+      "Action": "logs:*",
       "Resource": "arn:aws:logs:*:053097418755:log-group:/aws/lambda/semblance-*"
     },
     {
-      "Sid": "EventBridgeSchedule",
+      "Sid": "Events",
       "Effect": "Allow",
-      "Action": [
-        "events:PutRule",
-        "events:DeleteRule",
-        "events:PutTargets",
-        "events:RemoveTargets",
-        "events:DescribeRule",
-        "events:ListTargetsByRule"
-      ],
+      "Action": "events:*",
       "Resource": "arn:aws:events:*:053097418755:rule/semblance-*"
     }
   ]

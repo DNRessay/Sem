@@ -113,30 +113,31 @@ trade-off is that leaked key works from anywhere, not just GitHub's runners
 manage that, the OIDC role approach avoids storing any long-lived key at
 all — ask if you want to switch later, it's a small workflow change.)
 
-1. Create the policy in
-   [`docs/git-iam-user-policy.json`](./git-iam-user-policy.json) as a
-   **standalone managed policy** — IAM console → Policies → Create policy
-   → JSON tab → paste it in → name it e.g. `SemblanceDeployPolicy` → Create.
-   (Not an inline policy on the user: at ~3,090 non-whitespace characters
-   it's over the 2,048-character limit IAM puts on a user's inline
-   policies. Managed policies allow up to 6,144.) Then attach that policy
-   to the `git` user — Users → `git` → Add permissions → Attach existing
-   policies directly → select `SemblanceDeployPolicy`.
+1. On the `git` IAM user, attach the policy in
+   [`docs/git-iam-user-policy.json`](./git-iam-user-policy.json) as an
+   inline policy (IAM console → Users → `git` → Add permissions → Create
+   inline policy → JSON tab → paste it in → name it and save). It's ~980
+   non-whitespace characters, comfortably under the 2,048-character limit
+   IAM puts on a user's inline policies.
 
-   It's scoped to resources named `semblance-*` (or the
-   `aws-sam-cli-managed-default` bootstrap stack SAM
-   creates for its deployment bucket) rather than `*`, covering exactly
-   what this template needs: CloudFormation changesets on both stacks,
-   the deployment S3 bucket (including `PutLifecycleConfiguration` so old
-   build artifacts actually expire — see "Cost hygiene" below), the two
-   Lambda functions, their two execution roles, the DynamoDB cache table,
-   their log groups, and the EventBridge schedule rule. It has the account
-   ID from this repo's own first deploy attempt baked into the resource
-   ARNs — swap it if you're deploying to a different AWS account.
+   It uses a per-service wildcard action (`cloudformation:*`, `s3:*`,
+   `lambda:*`, etc.) rather than enumerating individual actions, to stay
+   well under that size limit — the resource ARNs are still scoped to
+   `semblance-*` (or the `aws-sam-cli-managed-default` bootstrap stack SAM
+   creates for its deployment bucket) rather than `*`, so it can't touch
+   anything outside those specific stacks/functions/tables/roles even
+   though the action side is broad. Reasonable for a personal, single-user
+   AWS account; tighten the actions further if this account ever has more
+   than one person with access to it. It has the account ID from this
+   repo's own first deploy attempt baked into the resource ARNs — swap it
+   if you're deploying to a different AWS account.
+
    First-ever deploy bootstraps more than a routine one (creating the SAM
    managed bucket from scratch), so it's the run most likely to still hit
    a missing permission — if it does, the AccessDenied error names the
-   exact action, add that one line and retry.
+   exact service, and it's already covered by that service's wildcard
+   here, so a genuinely new denial at this point would mean a service
+   this policy doesn't list at all (unlikely, but tell me and I'll add it).
 2. Generate an access key for that user (IAM console → the user → Security
    credentials → Create access key → "Application running outside AWS" /
    CLI). You get an **Access Key ID** and a **Secret Access Key** — the
