@@ -9,7 +9,7 @@ export default function App() {
     const [streaming, setStreaming] = useState(false);
 
     return (
-        <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "#050a0f" }}>
+        <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "var(--bg)" }}>
             <StatusBar sessionId={SESSION} streaming={streaming} />
             <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
                 <ChatWindow sessionId={SESSION} onStreamChange={setStreaming} />

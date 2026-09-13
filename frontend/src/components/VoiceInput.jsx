@@ -31,8 +31,8 @@ export default function VoiceInput({ onTranscript }) {
     };
 
     return (
-        <button onClick={toggle} title="Voice input" style={{ background: "none", border: `1px solid ${listening ? "#f97316" : "#1e293b"}`, borderRadius: "6px", padding: "8px 12px", color: listening ? "#f97316" : "#475569", cursor: "pointer", fontSize: "14px" }}>
-            {listening ? "🔴" : "🎙️"}
+        <button onClick={toggle} title="Voice input" style={{ background: "none", border: `1px solid ${listening ? "var(--accent)" : "var(--border)"}`, borderRadius: "8px", padding: "8px 12px", color: listening ? "var(--accent)" : "var(--text-muted)", cursor: "pointer", fontSize: "14px" }}>
+            {listening ? "●" : "🎙"}
         </button>
     );
 }

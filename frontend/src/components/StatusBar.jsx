@@ -1,13 +1,13 @@
 export default function StatusBar({ sessionId, streaming }) {
     return (
-        <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "6px 16px", background: "#080f1a", borderBottom: "1px solid #1e293b", fontFamily: "monospace", fontSize: "10px", color: "#334155" }}>
-            <span style={{ color: "#00f5ff", fontWeight: "700", letterSpacing: "3px" }}>SEMBLANCE</span>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 16px", background: "var(--bg)", borderBottom: "1px solid var(--border)", fontSize: "12px", color: "var(--text-muted)" }}>
+            <span style={{ color: "var(--accent)", fontWeight: "600" }}>SEMBLANCE</span>
             <span>v9</span>
             <span>·</span>
             <span>session: {sessionId}</span>
             <span>·</span>
-            <span style={{ color: streaming ? "#f97316" : "#10b981" }}>
-                {streaming ? "● streaming" : "● ready"}
+            <span style={{ color: streaming ? "var(--accent)" : "#5fb37a" }}>
+                {streaming ? "● thinking" : "● ready"}
             </span>
         </div>
     );

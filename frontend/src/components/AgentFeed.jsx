@@ -3,8 +3,8 @@ import { useState, useEffect } from "react";
 const API = import.meta.env.VITE_API_URL || "";
 
 const COLORS = {
-    kairos: "#f97316", general: "#06b6d4", plan: "#ffd700",
-    explore: "#10b981", dream: "#e879f9", swarm: "#a78bfa",
+    kairos: "#da7756", general: "#9b9b98", plan: "#e0b84a",
+    explore: "#5fb37a", dream: "#c98fd6", swarm: "#8f8fd6",
 };
 
 export default function AgentFeed({ sessionId = "default" }) {
@@ -22,12 +22,12 @@ export default function AgentFeed({ sessionId = "default" }) {
     }, [sessionId]);
 
     return (
-        <div style={{ background: "#050a0f", borderLeft: "1px solid #1e293b", width: "220px", overflowY: "auto", padding: "12px", fontFamily: "monospace", fontSize: "11px" }}>
-            <div style={{ color: "#334155", letterSpacing: "2px", marginBottom: "10px" }}>AGENT FEED</div>
+        <div style={{ background: "var(--bg)", borderLeft: "1px solid var(--border)", width: "220px", overflowY: "auto", padding: "12px", fontSize: "11px" }}>
+            <div style={{ color: "var(--text-muted)", letterSpacing: "1px", marginBottom: "10px", fontWeight: "600" }}>AGENT FEED</div>
             {events.length === 0 ? (
-                <div style={{ color: "#1e293b" }}>No activity yet</div>
+                <div style={{ color: "var(--border)" }}>No activity yet</div>
             ) : events.map((e, i) => (
-                <div key={i} style={{ color: COLORS[e.agent] || "#475569", marginBottom: "6px", lineHeight: "1.4" }}>
+                <div key={i} style={{ color: COLORS[e.agent] || "var(--text-muted)", marginBottom: "6px", lineHeight: "1.4" }}>
                     <span style={{ opacity: 0.5 }}>{new Date(e.ts * 1000).toLocaleTimeString()} </span>
                     <span style={{ fontWeight: "700" }}>{e.agent}</span>
                     <div style={{ opacity: 0.7, paddingLeft: "8px" }}>{e.action}</div>
