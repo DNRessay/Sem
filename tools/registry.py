@@ -143,11 +143,10 @@ def get_registry() -> ToolsRegistry:
 
 def _bootstrap_registry(reg: ToolsRegistry):
     """Register all built-in tools at startup."""
-    from tools.misc.calendar_tool import CalendarTool
-
     from tools.artifact_tool import ArtifactTool
     from tools.bash_tool import BashTool
     from tools.mcp_tool import MCPTool
+    from tools.misc.calendar_tool import CalendarTool
     from tools.misc.whatsapp_tool import WhatsAppTool
     from tools.web.fetch_tool import FetchTool
     from tools.web.news_tool import NewsTool
