@@ -66,19 +66,42 @@ jobs:
         run: sam build --use-container
 
       - name: sam deploy
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          MODAL_EMBEDDINGS_URL: ${{ secrets.MODAL_EMBEDDINGS_URL }}
+          SEMBLANCE_SECRET_KEY: ${{ secrets.SEMBLANCE_SECRET_KEY }}
+          SERP_API_KEY: ${{ secrets.SERP_API_KEY }}
+          OPENCLAW_URL: ${{ secrets.OPENCLAW_URL }}
         run: |
+          # Secrets go through env vars (not string-interpolated straight into
+          # the script) and get trimmed + individually quoted below. Directly
+          # interpolating ${{ secrets.X }} unquoted into a multi-line shell
+          # command — the previous version of this step — meant a secret with
+          # so much as a trailing newline (a common copy-paste artifact, e.g.
+          # from a database dashboard's "connection string" field) silently
+          # truncated the whole command: everything after the newline became
+          # a separate, harmless no-op shell statement instead of erroring,
+          # so sam deploy "succeeded" while quietly deploying nothing.
+          groq_api_key=$(printf '%s' "$GROQ_API_KEY" | tr -d '\r\n')
+          neon_database_url=$(printf '%s' "$NEON_DATABASE_URL" | tr -d '\r\n')
+          modal_embeddings_url=$(printf '%s' "$MODAL_EMBEDDINGS_URL" | tr -d '\r\n')
+          secret_key=$(printf '%s' "$SEMBLANCE_SECRET_KEY" | tr -d '\r\n')
+          serp_api_key=$(printf '%s' "$SERP_API_KEY" | tr -d '\r\n')
+          openclaw_url=$(printf '%s' "$OPENCLAW_URL" | tr -d '\r\n')
+
           sam deploy \
             --debug \
             --region "${{ secrets.AWS_REGION || 'eu-west-1' }}" \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
-              GroqApiKey=${{ secrets.GROQ_API_KEY }} \
-              NeonDatabaseUrl=${{ secrets.NEON_DATABASE_URL }} \
-              ModalEmbeddingsUrl=${{ secrets.MODAL_EMBEDDINGS_URL }} \
-              SecretKey=${{ secrets.SEMBLANCE_SECRET_KEY }} \
-              SerpApiKey=${{ secrets.SERP_API_KEY }} \
-              OpenclawUrl=${{ secrets.OPENCLAW_URL }}
+              "GroqApiKey=${groq_api_key}" \
+              "NeonDatabaseUrl=${neon_database_url}" \
+              "ModalEmbeddingsUrl=${modal_embeddings_url}" \
+              "SecretKey=${secret_key}" \
+              "SerpApiKey=${serp_api_key}" \
+              "OpenclawUrl=${openclaw_url}"
 
       - name: Expire old build artifacts in the SAM deployment bucket
         # `sam deploy --resolve-s3` keeps every historical build zip forever
