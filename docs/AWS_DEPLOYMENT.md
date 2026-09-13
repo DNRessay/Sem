@@ -37,7 +37,7 @@ codebase as documented, deliberate future work — see the table at the bottom.
 | Decision | Why |
 |---|---|
 | Lambda **Function URL**, not API Gateway | API Gateway HTTP APIs are free for the first 12 months, then ~$1/million requests. Function URLs have no request charge, ever, and no cliff to fall off. |
-| **arm64** (Graviton) Lambda | ~20% cheaper per ms than x86_64 for the same work — free either way at this volume, but no reason not to. |
+| **x86_64** Lambda, not arm64/Graviton | Graviton is ~20% cheaper per ms, but building it needs cross-architecture container emulation (QEMU) — GitHub-hosted CI runners don't reliably have that set up, and the first real deploy hit exactly this as a build failure risk. x86_64 matches the CI runner natively. At ~$0/month usage either way, reliability wins. |
 | **Neon** instead of Aiven MySQL | Same "always free" positioning, but adds pgvector — one database instead of two services. |
 | **pgvector** instead of ChromaDB | ChromaDB's `PersistentClient` writes to local disk, which doesn't exist reliably in Lambda (`/tmp` is wiped on cold start, not shared across concurrent invocations). pgvector rides on the database you already have. |
 | **DynamoDB** for cache, not in-memory only | An in-memory dict resets every cold start. DynamoDB's native per-item TTL means expiring cache entries need no cron job. An in-memory L1 sits in front of it so warm invocations never leave the process. |
@@ -91,7 +91,7 @@ Copy the printed URL into `MODAL_EMBEDDINGS_URL`.
 
 ```bash
 pip install aws-sam-cli
-sam build --use-container     # container build = correct arm64/py3.13 wheels for asyncpg etc.
+sam build --use-container     # container build = correct x86_64/py3.13 wheels for asyncpg etc.
 sam deploy --guided
 ```
 

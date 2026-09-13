@@ -40,7 +40,10 @@ Parameters:
 Globals:
   Function:
     Runtime: python3.13
-    Architectures: [arm64]  # Graviton — cheaper per ms than x86_64
+    Architectures: [x86_64]  # matches GitHub Actions runners natively — arm64/Graviton
+                              # needs cross-arch container emulation (QEMU) in CI, which
+                              # GitHub-hosted runners don't reliably have; not worth the
+                              # ~20% compute saving when usage is already ~$0/month
     Timeout: 30
     MemorySize: 512
     Environment:
