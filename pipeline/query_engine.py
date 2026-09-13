@@ -32,7 +32,12 @@ class QueryEngine:
         max_tokens: int = 1024,
         temperature: float = 0.5,
     ) -> dict:
-        prefix_hash = self.cache_ctrl.compute_prefix_hash(str(messages[:2]))
+        # Hash the whole conversation, not just the first two messages —
+        # messages[:2] is system + the *first* history entry, which never
+        # changes for the rest of a session once there's any history, so
+        # every later turn was hitting the very first turn's cached reply
+        # regardless of the actual new query.
+        prefix_hash = self.cache_ctrl.compute_prefix_hash(str(messages))
         cached = self.cache_ctrl.read(prefix_hash)
         if cached and self.cache_ctrl.is_cache_valid(prefix_hash):
             return {"content": cached, "cached": True}
@@ -83,7 +88,8 @@ class QueryEngine:
         right after the thinking indicator, regardless of the transport
         already being SSE end-to-end.
         """
-        prefix_hash = self.cache_ctrl.compute_prefix_hash(str(messages[:2]))
+        # See call_llm — hash the whole conversation, not just messages[:2].
+        prefix_hash = self.cache_ctrl.compute_prefix_hash(str(messages))
         cached = self.cache_ctrl.read(prefix_hash)
         if cached and self.cache_ctrl.is_cache_valid(prefix_hash):
             yield cached

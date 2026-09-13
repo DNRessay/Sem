@@ -43,6 +43,36 @@ async def test_call_llm_serves_second_identical_call_from_cache(moto_cache_table
 
 
 @pytest.mark.asyncio
+async def test_call_llm_does_not_reuse_cache_for_a_different_followup_query(moto_cache_table):
+    # Regression test: the cache key used to be hashed from messages[:2]
+    # (system + the *first* history entry), which is identical for every
+    # turn after the first one in a session — so a second, unrelated
+    # question was silently served the first turn's cached reply instead
+    # of ever reaching Groq. Same system prompt and same first history
+    # entry here, but a genuinely different final user query, must produce
+    # two different Groq calls and two different answers.
+    engine = QueryEngine()
+    system = {"role": "system", "content": "ctx"}
+    first_turn_user = {"role": "user", "content": "hello world"}
+    first_turn_assistant = {"role": "assistant", "content": "hi there"}
+    with respx.mock:
+        route = respx.post(GROQ_URL).mock(side_effect=[
+            _groq_response("hi there"),
+            _groq_response("the sky is blue because of Rayleigh scattering"),
+        ])
+        first = await engine.call_llm([system, first_turn_user], session_id="s1")
+        second = await engine.call_llm(
+            [system, first_turn_user, first_turn_assistant, {"role": "user", "content": "why is the sky blue"}],
+            session_id="s1",
+        )
+
+    assert first["content"] == "hi there"
+    assert second["content"] == "the sky is blue because of Rayleigh scattering"
+    assert second["cached"] is False
+    assert route.call_count == 2
+
+
+@pytest.mark.asyncio
 async def test_call_llm_raises_clear_error_when_groq_returns_no_choices(moto_cache_table):
     # e.g. an auth failure, unknown model, or rate limit — Groq's error shape
     # has no "choices" key, and the failure reason must survive into the
@@ -87,6 +117,28 @@ async def test_stream_llm_serves_second_identical_call_from_cache_in_one_piece(m
     assert "".join(first) == "first"
     assert second == ["first"]  # served whole from DynamoDB cache, not re-streamed
     assert route.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_stream_llm_does_not_reuse_cache_for_a_different_followup_query(moto_cache_table):
+    engine = QueryEngine()
+    system = {"role": "system", "content": "ctx"}
+    first_turn_user = {"role": "user", "content": "hello world"}
+    first_turn_assistant = {"role": "assistant", "content": "hi there"}
+    with respx.mock:
+        route = respx.post(GROQ_URL).mock(side_effect=[
+            _groq_sse_response(["hi there"]),
+            _groq_sse_response(["the sky is blue"]),
+        ])
+        first = [p async for p in engine.stream_llm([system, first_turn_user], session_id="s1")]
+        second = [p async for p in engine.stream_llm(
+            [system, first_turn_user, first_turn_assistant, {"role": "user", "content": "why is the sky blue"}],
+            session_id="s1",
+        )]
+
+    assert "".join(first) == "hi there"
+    assert "".join(second) == "the sky is blue"
+    assert route.call_count == 2
 
 
 @pytest.mark.asyncio
