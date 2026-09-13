@@ -1,12 +1,13 @@
 import { useState, useRef, useEffect } from "react";
 import { useStream } from "../hooks/useStream";
+import VoiceInput from "./VoiceInput";
 
 const API = import.meta.env.VITE_API_URL || "";
 
 export default function ChatWindow({ sessionId = "default" }) {
     const [input, setInput] = useState("");
     const [history, setHistory] = useState([]);
-    const { chunks, streaming, send, abort } = useStream(API);
+    const { chunks, streaming, error, send, abort } = useStream(API);
     const bottomRef = useRef(null);
 
     const fullResponse = chunks.join("");
@@ -20,8 +21,8 @@ export default function ChatWindow({ sessionId = "default" }) {
         const msg = input.trim();
         setInput("");
         setHistory(h => [...h, { role: "user", content: msg }]);
-        await send(msg, sessionId, history);
-        setHistory(h => [...h, { role: "assistant", content: fullResponse }]);
+        const reply = await send(msg, sessionId, history);
+        if (reply) setHistory(h => [...h, { role: "assistant", content: reply }]);
     };
 
     return (
@@ -37,9 +38,15 @@ export default function ChatWindow({ sessionId = "default" }) {
                         {fullResponse}<span style={{ opacity: 0.5 }}>▋</span>
                     </div>
                 )}
+                {error && (
+                    <div style={{ alignSelf: "flex-start", maxWidth: "80%", background: "#3f0f0f", padding: "10px 14px", borderRadius: "8px", fontSize: "13px", lineHeight: "1.6", color: "#f87171" }}>
+                        {error}
+                    </div>
+                )}
                 <div ref={bottomRef} />
             </div>
             <div style={{ display: "flex", gap: "8px", padding: "12px", borderTop: "1px solid #1e293b" }}>
+                <VoiceInput onTranscript={text => setInput(prev => (prev ? `${prev} ${text}` : text))} />
                 <input
                     value={input}
                     onChange={e => setInput(e.target.value)}

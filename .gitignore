@@ -128,3 +128,8 @@ dmypy.json
 # Pyre type checker
 .pyre/
 .aws-sam/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+.wrangler/

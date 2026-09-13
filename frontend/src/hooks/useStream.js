@@ -12,6 +12,12 @@ export function useStream(baseUrl = "") {
         setStreaming(true);
         abortRef.current = new AbortController();
 
+        // Built locally rather than read back from state: state updates are
+        // async, so a caller awaiting send() and then reading `chunks` would
+        // see a stale (often empty) value. Returning the accumulated string
+        // directly is the only way to get the *final* response reliably.
+        let full = "";
+
         try {
             const res = await fetch(`${baseUrl}/chat`, {
                 method: "POST",
@@ -19,6 +25,10 @@ export function useStream(baseUrl = "") {
                 body: JSON.stringify({ message, session_id: sessionId, history }),
                 signal: abortRef.current.signal,
             });
+
+            if (!res.ok || !res.body) {
+                throw new Error(`Request failed: ${res.status}`);
+            }
 
             const reader = res.body.getReader();
             const decoder = new TextDecoder();
@@ -33,7 +43,10 @@ export function useStream(baseUrl = "") {
                         if (data === "[DONE]") break;
                         try {
                             const parsed = JSON.parse(data);
-                            if (parsed.chunk) setChunks(c => [...c, parsed.chunk]);
+                            if (parsed.chunk) {
+                                full += parsed.chunk;
+                                setChunks(c => [...c, parsed.chunk]);
+                            }
                         } catch {}
                     }
                 }
@@ -43,6 +56,8 @@ export function useStream(baseUrl = "") {
         } finally {
             setStreaming(false);
         }
+
+        return full;
     }, [baseUrl]);
 
     const abort = useCallback(() => abortRef.current?.abort(), []);

@@ -246,7 +246,7 @@ DREAM consolidates memories on a 3-gate trigger (24hr + 5 sessions + lock), scor
 | Persistent Storage + Vector Store | Neon Postgres + pgvector | Free |
 | Cache | DynamoDB (pay-per-request, TTL) | ~$0 |
 | Embeddings | Modal (sentence-transformers) | Free ($30/mo credit) |
-| Frontend | React (GitHub Pages) | Free |
+| Frontend | React + Vite (Cloudflare Pages) | Free |
 
 The entire system is designed to run in production for a few cents a month —
 see **[docs/AWS_DEPLOYMENT.md](docs/AWS_DEPLOYMENT.md)** for the full cost
@@ -364,7 +364,7 @@ semblance/
 │   ├── salience_engine.py
 │   └── working_mem.py
 ├── tests/                   ← pytest + moto (DynamoDB) + respx (Groq)
-├── frontend/                 ← React UI (source only — no build tooling yet)
+├── frontend/                 ← React + Vite UI, deploys to Cloudflare Pages
 ├── SEMBLANCE.md              ← Global config
 ├── docs/AWS_DEPLOYMENT.md    ← deployment guide + cost breakdown
 └── README.md

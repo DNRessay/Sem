@@ -6,7 +6,7 @@ about R59 even under generous assumptions. No Render, no Aiven, no ChromaDB.
 ## Architecture
 
 ```
-React frontend (GitHub Pages, free)
+React frontend (Cloudflare Pages, free)
         │  VITE_API_URL
         ▼
 Lambda Function URL  ──────────────►  ChatFunction (Light tier)
@@ -137,14 +137,41 @@ all — ask if you want to switch later, it's a small workflow change.)
 4. Push to `main`. `.github/workflows/semblance.yml` lints, tests, then
    deploys — in that order, so a broken build never reaches AWS.
 
-### 5. Frontend
+### 5. Frontend (Cloudflare Pages)
 
-The frontend (`frontend/src`) has no build tooling committed yet (no
-`package.json`) — it's source files only. Scaffolding a Vite build and
-wiring `.github/workflows/static.yml` to actually build it (rather than
-uploading raw source) is the one piece of this migration still open; until
-then, run it locally with your own Vite/CRA setup pointed at
-`VITE_API_URL=<ChatFunctionUrl>`.
+`frontend/` is a Vite + React app. Local dev:
+
+```bash
+cd frontend
+npm install
+cp .env.example .env   # set VITE_API_URL to your ChatFunctionUrl (or localhost:8000)
+npm run dev
+```
+
+**One-time Cloudflare setup:**
+1. Cloudflare dashboard → Workers & Pages → create a Pages project named
+   `semblance` (matches `projectName` in
+   `.github/workflows/cloudflare-pages.yml`) — connecting it to a "Direct
+   Upload" project is enough since GitHub Actions does the building and
+   pushing, not Cloudflare's own Git integration.
+2. Create an API token (My Profile → API Tokens → "Edit Cloudflare
+   Workers" template covers Pages) and note your Account ID (right sidebar
+   of any dashboard page).
+3. Add repository secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`,
+   `SEMBLANCE_API_URL` (your `ChatFunctionUrl` — baked into the static
+   build at build time, since Vite env vars aren't runtime-configurable
+   after the fact).
+4. Push to `main` (touching anything under `frontend/`) and
+   `.github/workflows/cloudflare-pages.yml` builds and deploys it.
+
+Cloudflare Pages free tier: unlimited requests/bandwidth, 500 builds/month.
+For one user, $0.
+
+**Known gap:** `AgentFeed.jsx` polls `/status/{session_id}` expecting
+`{event: {...}}` objects, but `gateway/router.py`'s `/status` endpoint
+currently just returns `{"status": "active"}` — the panel renders fine, it
+just always says "No activity yet". Wiring real agent-activity events
+through there is follow-up work, not a broken build.
 
 ## Cost breakdown (single user, realistic traffic)
 
@@ -158,7 +185,7 @@ then, run it locally with your own Vite/CRA setup pointed at
 | Neon Postgres + pgvector | Free tier (0.5 GB, autosuspend) | $0 |
 | Modal embeddings | $30/month credit; single-user usage is a rounding error against it | $0 |
 | Groq (Qwen3-32B, DeepSeek-R1) | Free tier | $0 |
-| Frontend (GitHub Pages) | Free | $0 |
+| Frontend (Cloudflare Pages) | Free (unlimited requests, 500 builds/mo) | $0 |
 | **Total** | | **~$0.00–0.05/month** |
 
 At any realistic ZAR/USD rate that's a few cents to a few rand — well under

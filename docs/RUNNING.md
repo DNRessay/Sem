@@ -36,10 +36,14 @@ uvicorn main:app --reload --port 8000
 
 Frontend:
 ```bash
-cd frontend && npm install && npm run dev   # no package.json committed yet — bring your own Vite/CRA config
+cd frontend
+npm install
+cp .env.example .env   # VITE_API_URL=http://localhost:8000 by default
+npm run dev
 ```
 
-Point the frontend at your local API: `VITE_API_URL=http://localhost:8000`.
+Deploys to Cloudflare Pages via `.github/workflows/cloudflare-pages.yml` on
+push — see `docs/AWS_DEPLOYMENT.md` for the one-time Cloudflare setup.
 
 ## Tests
 

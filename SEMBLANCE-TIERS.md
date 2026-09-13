@@ -49,7 +49,7 @@ Gateway — see `docs/AWS_DEPLOYMENT.md` for why). `main.py`'s lifespan detects
 |---|---|---|
 | KAIROS tick | `tick_handler.py` calling `KairosDaemon.run_once()` | Same decision logic as the daemon, fired every 15 minutes by EventBridge instead of looping with `asyncio.sleep(60)`. Gets you "checks in periodically" without an always-on process. |
 | CI/CD (`.github/workflows/semblance.yml`) | Runs on push, lints, tests, deploys, stops. |
-| Static docs/frontend (`.github/workflows/static.yml`) | Builds and publishes on push. |
+| Frontend (`.github/workflows/cloudflare-pages.yml`) | Builds the Vite app and deploys to Cloudflare Pages on push. |
 
 ---
 
