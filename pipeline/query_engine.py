@@ -51,6 +51,13 @@ class QueryEngine:
                 json=payload, headers=headers,
             )
             data = r.json()
+            if "choices" not in data:
+                # Surface whatever Groq actually said (bad API key, unknown
+                # model, rate limit, etc.) instead of a bare KeyError that
+                # hides the real reason in the traceback.
+                raise RuntimeError(
+                    f"Groq API error (status {r.status_code}) for model '{model}': {data}"
+                )
             content = data["choices"][0]["message"]["content"]
             finish = data["choices"][0].get("finish_reason", "stop")
 

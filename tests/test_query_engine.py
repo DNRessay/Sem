@@ -40,6 +40,20 @@ async def test_call_llm_serves_second_identical_call_from_cache(moto_cache_table
     assert route.call_count == 1  # second call served from DynamoDB cache, not Groq
 
 
+@pytest.mark.asyncio
+async def test_call_llm_raises_clear_error_when_groq_returns_no_choices(moto_cache_table):
+    # e.g. an auth failure, unknown model, or rate limit — Groq's error shape
+    # has no "choices" key, and the failure reason must survive into the
+    # exception message rather than surfacing as a bare KeyError.
+    engine = QueryEngine()
+    with respx.mock:
+        respx.post(GROQ_URL).mock(
+            return_value=Response(401, json={"error": {"message": "Invalid API Key"}})
+        )
+        with pytest.raises(RuntimeError, match="Invalid API Key"):
+            await engine.call_llm([{"role": "user", "content": "hi"}], session_id="s1")
+
+
 def test_fire_break_invalidates_known_vector_only(moto_cache_table):
     engine = QueryEngine()
     engine.cache_ctrl.write("k", "v")
