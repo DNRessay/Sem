@@ -114,10 +114,13 @@ manage that, the OIDC role approach avoids storing any long-lived key at
 all — ask if you want to switch later, it's a small workflow change.)
 
 1. On the `git` IAM user, attach a policy covering: Lambda, DynamoDB (on the
-   cache table), CloudFormation (SAM deploys via a changeset), IAM (to
-   manage the two function execution roles), S3 (SAM's deployment bucket),
-   Logs. Scope resource ARNs to the `semblance-*` stack rather than `*`
-   where the console lets you.
+   cache table), CloudFormation (SAM deploys via a changeset, plus
+   `DescribeStacks` on `aws-sam-cli-managed-default` — the bootstrap stack
+   SAM creates for its deployment bucket), IAM (to manage the two function
+   execution roles), S3 (`PutObject`/`GetObject` on the deployment bucket,
+   plus `PutLifecycleConfiguration` so old build artifacts actually expire —
+   see the "Cost hygiene" note below), Logs. Scope resource ARNs to the
+   `semblance-*` stack rather than `*` where the console lets you.
 2. Generate an access key for that user (IAM console → the user → Security
    credentials → Create access key → "Application running outside AWS" /
    CLI). You get an **Access Key ID** and a **Secret Access Key** — the
@@ -173,6 +176,35 @@ For one user, $0.
 currently just returns `{"status": "active"}` — the panel renders fine, it
 just always says "No activity yet". Wiring real agent-activity events
 through there is follow-up work, not a broken build.
+
+## Cost hygiene — don't let unused stuff quietly accumulate
+
+A near-zero deploy stays near-zero only if old data doesn't pile up
+somewhere nobody's looking. What's already handled automatically:
+
+- **CloudWatch Logs**: `template.yaml` sets `RetentionInDays: 14` on both
+  functions' log groups explicitly — Lambda's default (no retention set)
+  is "never expire," which is the classic slow leak.
+- **SAM's deployment bucket**: `sam deploy --resolve-s3` keeps every
+  historical build zip forever by default. The deploy workflow now applies
+  a 14-day expiration lifecycle rule to that bucket on every deploy (see
+  `.github/workflows/semblance.yml`) — old artifacts age out on their own.
+- **DynamoDB cache**: every item already carries a short TTL (minutes to an
+  hour, per cache type) — nothing accumulates there by design.
+
+What to check by hand occasionally (a few minutes, every month or so is
+plenty for one user's traffic):
+- **CloudFormation console** → any stack besides `semblance` and
+  `aws-sam-cli-managed-default` (the SAM bootstrap stack) that you don't
+  recognize — a half-finished deploy from a build that failed partway
+  through can leave a stack sitting in `ROLLBACK_COMPLETE`, which itself
+  doesn't cost anything, but its resources are also just dead weight.
+  Delete it from the console (or `aws cloudformation delete-stack`) if you
+  find one — the next `sam deploy` recreates `semblance` clean either way.
+- **Neon dashboard** → storage usage, if you're ever near the 0.5 GB free
+  tier ceiling (permanent memory means this grows, if slowly, forever by
+  design — that's the point of the memory philosophy, but it's worth an
+  occasional glance).
 
 ## Cost breakdown (single user, realistic traffic)
 

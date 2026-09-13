@@ -77,3 +77,25 @@ jobs:
               SecretKey=${{ secrets.SEMBLANCE_SECRET_KEY }} \
               SerpApiKey=${{ secrets.SERP_API_KEY }} \
               OpenclawUrl=${{ secrets.OPENCLAW_URL }}
+
+      - name: Expire old build artifacts in the SAM deployment bucket
+        # `sam deploy --resolve-s3` keeps every historical build zip forever
+        # by default. Idempotent — re-applies the same 14-day expiry rule on
+        # every deploy, matching the CloudWatch log retention in template.yaml,
+        # so this bucket never becomes a slow, silent storage cost.
+        run: |
+          BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name aws-sam-cli-managed-default \
+            --query "Stacks[0].Outputs[?OutputKey=='SourceBucket'].OutputValue" \
+            --output text)
+          aws s3api put-bucket-lifecycle-configuration \
+            --bucket "$BUCKET" \
+            --lifecycle-configuration '{
+              "Rules": [{
+                "ID": "expire-old-build-artifacts",
+                "Status": "Enabled",
+                "Filter": {},
+                "Expiration": {"Days": 14},
+                "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 1}
+              }]
+            }'
