@@ -113,11 +113,18 @@ trade-off is that leaked key works from anywhere, not just GitHub's runners
 manage that, the OIDC role approach avoids storing any long-lived key at
 all — ask if you want to switch later, it's a small workflow change.)
 
-1. On the `git` IAM user, attach the policy in
-   [`docs/git-iam-user-policy.json`](./git-iam-user-policy.json) as an
-   inline policy (IAM console → Users → `git` → Add permissions → Create
-   inline policy → JSON tab → paste it in). It's scoped to resources named
-   `semblance-*` (or the `aws-sam-cli-managed-default` bootstrap stack SAM
+1. Create the policy in
+   [`docs/git-iam-user-policy.json`](./git-iam-user-policy.json) as a
+   **standalone managed policy** — IAM console → Policies → Create policy
+   → JSON tab → paste it in → name it e.g. `SemblanceDeployPolicy` → Create.
+   (Not an inline policy on the user: at ~3,090 non-whitespace characters
+   it's over the 2,048-character limit IAM puts on a user's inline
+   policies. Managed policies allow up to 6,144.) Then attach that policy
+   to the `git` user — Users → `git` → Add permissions → Attach existing
+   policies directly → select `SemblanceDeployPolicy`.
+
+   It's scoped to resources named `semblance-*` (or the
+   `aws-sam-cli-managed-default` bootstrap stack SAM
    creates for its deployment bucket) rather than `*`, covering exactly
    what this template needs: CloudFormation changesets on both stacks,
    the deployment S3 bucket (including `PutLifecycleConfiguration` so old
