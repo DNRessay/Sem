@@ -120,7 +120,13 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
     augmented = _fold_attachments(raw_msg, text_attachments)
     tau_ctx = await _tau.observe_and_inject(session_id, augmented, history)
     bootstrap = Bootstrap(trust_mode=trust, tau_context=tau_ctx)
-    web_intent = detect_web_intent(augmented)
+    # Deliberately raw_msg, not augmented: web-intent detection must only look
+    # at what the user actually typed. Scanning attachment content too means
+    # any URL-shaped text sitting in an attached file — a regex literal in a
+    # workflow script, an example in a README, anything — gets treated as
+    # "fetch this," hijacking the user's real question and hanging on a
+    # garbage host until the fetch tool's own timeout.
+    web_intent = detect_web_intent(raw_msg)
 
     async def stream_gen():
         msg = augmented
