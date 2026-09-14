@@ -118,20 +118,26 @@ class Bootstrap:
         await db.save_turn(session_id, "assistant", f"{assistant_prefix}{reply}")
 
         # Long-term memory: the system prompt has always claimed persistent
-        # memory that "updates from every conversation" — but until now only
-        # the user's own message ever got embedded here, never the
-        # assistant's reply. That's backwards for a case like a detailed
-        # repo-structure answer: the reply IS the valuable content, and once
-        # its turn ages out of the live conversation window (_trim_history
-        # above — a hard limit on what fits in one Groq request, not a
-        # deletion; the full turn stays in `conversations` forever either
-        # way), nothing could find that content again unless it was also
-        # independently embedded and searchable. Both sides of the exchange
-        # are embedded now, so a later relevant question can still surface
-        # it via SEMRetrieval even after it's no longer in the live window.
+        # memory that "updates from every conversation" — but until recently
+        # only the user's own message ever got embedded here, never the
+        # assistant's reply, which for a genuine conversational answer (an
+        # opinion, a decision, a fact about the user) is often the actually
+        # valuable content to be able to find again later.
+        #
+        # A tool-driven reply (assistant_prefix non-empty — web search, news,
+        # fetch, or a repo read/grep) is different: its content already has
+        # an authoritative source of truth outside this app (the live web
+        # page, the persistently cloned repo on Modal) that can be re-fetched
+        # fresh on demand. Embedding a snapshot of it here would duplicate
+        # that source, go stale the moment the source changes, and — for
+        # something like "what's in this repo," asked again next month or
+        # next year — pile up near-duplicate memory rows describing the same
+        # repo at different points in time instead of just re-reading it.
+        # So only genuine conversational replies get embedded, not tool
+        # output; the user's own query is still always embedded either way.
         query_embedding = await embed_text(save_query)
         await db.save_memory(session_id, save_query, embedding=query_embedding)
-        if reply:
+        if reply and not assistant_prefix:
             reply_embedding = await embed_text(reply)
             await db.save_memory(session_id, reply, embedding=reply_embedding)
 

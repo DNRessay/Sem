@@ -173,6 +173,47 @@ async def test_run_embeds_the_reply_too_not_just_the_query(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_does_not_embed_tool_driven_replies(monkeypatch):
+    """A reply built from a web search, news, fetch, or repo read/grep
+    (assistant_prefix non-empty — see gateway/router.py) already has an
+    authoritative source outside this app that can be re-fetched fresh on
+    demand. Embedding a snapshot of it would duplicate that source, go
+    stale the moment it changes, and pile up near-duplicate memory rows
+    every time the same repo/page gets asked about again later. Only the
+    user's own query should still be embedded in that case."""
+    saved_contents = []
+
+    class RecordingStore(FakeStore):
+        async def save_memory(self, session_id, content, salience=0.5, embedding=None):
+            saved_contents.append(content)
+
+    async def fake_get_store():
+        return RecordingStore()
+
+    monkeypatch.setattr("pipeline.bootstrap.get_store", fake_get_store)
+    bootstrap = Bootstrap()
+
+    async def fake_retrieve(query, top_k=5):
+        return []
+
+    bootstrap.sem_retrieval.retrieve = fake_retrieve
+
+    async def fake_stream_llm(messages, model=None, session_id="default", **kwargs):
+        yield "index.html has a hero section, a stats bar, and a contact form"
+
+    bootstrap.query_engine.stream_llm = fake_stream_llm
+
+    [
+        piece async for piece in bootstrap.run(
+            "what's in index.html", "sess1", [],
+            assistant_prefix="[[SEMBLANCE_TOOL:{\"kind\":\"read\"}]]\n",
+        )
+    ]
+
+    assert saved_contents == ["what's in index.html"]  # the reply itself never got embedded
+
+
+@pytest.mark.asyncio
 async def test_run_persists_display_query_not_the_augmented_one(monkeypatch):
     """A caller that folds attachments/search results into `query` for the
     model must be able to keep the *clean* original text as what gets

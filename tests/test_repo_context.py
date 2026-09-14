@@ -15,6 +15,20 @@ def test_detect_repo_intent_finds_explicit_file_read():
     assert detect_repo_intent("read the file config.py") == ("read", "config.py")
 
 
+def test_detect_repo_intent_finds_natural_read_phrasings():
+    """These natural phrasings used to fall through to no repo intent at
+    all — only the exact "read file: X" shape matched, so the model just
+    answered from whatever happened to still be in short-term conversation
+    context instead of actually reading the live cloned repo."""
+    assert detect_repo_intent("what does index look like") == ("read", "index")
+    assert detect_repo_intent("Can u tell me what the main looks like") == ("read", "main")
+    assert detect_repo_intent("what's in index") == ("read", "index")
+    assert detect_repo_intent("show me main.py") == ("read", "main.py")
+    assert detect_repo_intent("give me a copy of the content of index") == ("read", "index")
+    assert detect_repo_intent("give me a copy of config.py") == ("read", "config.py")
+    assert detect_repo_intent("contents of index.html") == ("read", "index.html")
+
+
 def test_detect_repo_intent_finds_grep_phrasing():
     assert detect_repo_intent("search the repo for TODO") == ("grep", "TODO")
     assert detect_repo_intent("grep the codebase for save_turn") == ("grep", "save_turn")
@@ -23,6 +37,17 @@ def test_detect_repo_intent_finds_grep_phrasing():
 def test_detect_repo_intent_returns_none_for_ordinary_chat():
     assert detect_repo_intent("hey, how's it going?") is None
     assert detect_repo_intent("what's the weather like") is None
+
+
+def test_detect_repo_intent_rejects_generic_pronoun_targets():
+    """The broadened read-file patterns capture whatever word follows their
+    trigger phrase — for a generic "what's in here" (used right after
+    attaching a repo, common phrasing) that word is a pronoun, not a real
+    filename, and firing a bogus repo_read with target="here" against a
+    real DB/Modal call is exactly the false-positive this guards against."""
+    assert detect_repo_intent("what's in here") is None
+    assert detect_repo_intent("what's in this") is None
+    assert detect_repo_intent("show me everything") is None
 
 
 def test_status_label_differs_by_kind():

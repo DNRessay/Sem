@@ -114,10 +114,32 @@ class RepoTool:
         if not file_path.startswith(os.path.realpath(repo_path) + os.sep):
             return {"ok": False, "error": "invalid path"}
         if not os.path.isfile(file_path):
-            return {"ok": False, "error": "file not found"}
+            resolved = self._resolve_bare_filename(repo_path, rel_path)
+            if resolved is None:
+                return {"ok": False, "error": "file not found"}
+            file_path, rel_path = resolved, os.path.relpath(resolved, repo_path)
         with open(file_path, errors="replace") as f:
             content = f.read(_MAX_READ_CHARS)
         return {"ok": True, "content": content, "path": rel_path}
+
+    def _resolve_bare_filename(self, repo_path: str, name: str) -> str | None:
+        """A user asking "what's in index" doesn't know or care that the
+        real file is index.html — if the exact path isn't found and the
+        given name has no directory component, look for exactly one file
+        anywhere in the repo whose name matches with or without extension
+        (case-insensitively, so "readme" finds README.md). Ambiguous (more
+        than one match) or no match returns None rather than guessing."""
+        if "/" in name:
+            return None
+        name_lower = name.lower()
+        candidates = []
+        for root, dirs, files in os.walk(repo_path):
+            dirs[:] = [d for d in dirs if d != ".git"]
+            for f in files:
+                stem = f.rsplit(".", 1)[0]
+                if f.lower() == name_lower or stem.lower() == name_lower:
+                    candidates.append(os.path.join(root, f))
+        return candidates[0] if len(candidates) == 1 else None
 
     def _grep(self, repo_path: str, term: str) -> dict:
         if not term:
