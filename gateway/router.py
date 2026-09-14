@@ -17,6 +17,12 @@ from pipeline.agent_intent import (
     run_explore_intent,
     run_plan_intent,
 )
+from pipeline.bash_intent import (
+    bash_status_label,
+    detect_bash_intent,
+    format_bash_result,
+    run_bash_intent,
+)
 from pipeline.bootstrap import Bootstrap
 from pipeline.repo_context import (
     detect_repo_intent,
@@ -160,6 +166,11 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
     # detection is — see the comment above web_intent.
     plan_intent = detect_plan_intent(raw_msg)
     explore_intent = detect_explore_intent(raw_msg)
+    # "run bash: X" — Step 5's permission-gated tool execution reachable
+    # directly from chat, not just from a sub-agent. Runs inside this
+    # Lambda's own /tmp sandbox only — see pipeline/bash_intent.py's
+    # docstring for exactly what that does and doesn't reach.
+    bash_intent = detect_bash_intent(raw_msg)
 
     async def _bypass_with_reply(kind: str, label: str, detail: str, reply: str):
         """Shared tail for an intent that answers the message completely on
@@ -235,6 +246,16 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
                         yield f"data: {json.dumps({'title': title})}\n\n"
 
                 yield "data: [DONE]\n\n"
+                return
+
+        if bash_intent:
+            yield f"data: {json.dumps({'status': bash_status_label()})}\n\n"
+            result = await run_bash_intent(bash_intent, session_id)
+            reply = format_bash_result(result)
+            if reply:
+                label = f"$ {bash_intent}"
+                async for line in _bypass_with_reply("bash", label, json.dumps(result), reply):
+                    yield line
                 return
 
         if repo_intent and repo_intent[0] == "grep":

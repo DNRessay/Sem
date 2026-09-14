@@ -63,7 +63,12 @@ class BashTool:
     Every command passes through 23 security checks before execution.
     """
 
-    async def execute(self, command: str, trust_mode: str = "AUTO", timeout: int = 30) -> dict:
+    async def execute(self, command: str, trust_mode: str = "AUTO", timeout: int = 30, cwd: str | None = "/tmp") -> dict:
+        """cwd defaults to /tmp, not the process's own cwd — in the deployed
+        Lambda, that's /var/task (the read-only deployment package itself);
+        any command that writes a file would fail with "Read-only file
+        system" there. /tmp is the one writable directory every standard
+        Lambda runtime provides."""
         failures = self._run_security_checks(command)
         if failures:
             return {
@@ -78,6 +83,7 @@ class BashTool:
                 command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                cwd=cwd,
             )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             return {
@@ -87,6 +93,16 @@ class BashTool:
                 "exit_code": proc.returncode,
             }
         except asyncio.TimeoutError:
+            # wait_for cancels its own await, not the subprocess itself —
+            # left alone, a command that hangs past `timeout` keeps running
+            # in the background and its process object leaks until garbage
+            # collection, silently, in a Lambda container that may well be
+            # reused for the next invocation.
+            try:
+                proc.kill()
+                await proc.wait()
+            except (ProcessLookupError, UnboundLocalError):
+                pass
             return {"blocked": False, "error": f"Command timed out after {timeout}s", "exit_code": -1}
         except Exception as e:
             return {"blocked": False, "error": str(e), "exit_code": -1}

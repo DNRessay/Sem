@@ -357,6 +357,58 @@ def test_explore_code_intent_does_not_fire_on_repo_grep_phrasing(client, monkeyp
     assert repo_calls == ["TODO"]
 
 
+def test_bash_intent_bypasses_the_llm_and_streams_the_command_output(client, monkeypatch):
+    """Step 5 (tool execution) reachable directly from chat, not just from
+    a sub-agent: "run bash: X" routes through run_bash_intent instead of
+    Bootstrap/the main LLM call, same bypass shape as the repo "read" and
+    plan/explore intents."""
+    calls = []
+
+    async def fake_run_bash_intent(command, session_id):
+        calls.append((command, session_id))
+        return {"blocked": False, "stdout": "hello\n", "stderr": "", "exit_code": 0}
+
+    class RecordingStore:
+        def __init__(self):
+            self.turns = []
+
+        async def save_turn(self, session_id, role, content):
+            self.turns.append((session_id, role, content))
+
+        async def save_memory(self, session_id, content, salience=0.5, embedding=None):
+            pass
+
+    store = RecordingStore()
+
+    async def fake_get_store():
+        return store
+
+    monkeypatch.setattr("gateway.router.run_bash_intent", fake_run_bash_intent)
+    monkeypatch.setattr("gateway.router.get_store", fake_get_store)
+
+    resp = client.post("/chat", json={"message": "run bash: echo hello", "session_id": "sess1"})
+    assert resp.status_code == 200
+    assert calls == [("echo hello", "sess1")]
+    assert "hello" in resp.text
+    assert "Exit code: 0" in resp.text
+    assert ("sess1", "user", "run bash: echo hello") in store.turns
+
+
+def test_bash_intent_falls_back_to_normal_flow_when_formatting_yields_nothing(client, monkeypatch):
+    """format_bash_result only ever returns "" for a non-dict result — in
+    practice run_bash_intent always returns a dict (even a blocked/errored
+    command formats to a real message), so this exercises the defensive
+    fallback path rather than a scenario that happens in normal use."""
+    async def fake_run_bash_intent(command, session_id):
+        return None
+
+    monkeypatch.setattr("gateway.router.run_bash_intent", fake_run_bash_intent)
+
+    resp = client.post("/chat", json={"message": "run bash: echo hello", "session_id": "sess1"})
+    assert resp.status_code == 200
+    assert "ok" in resp.text  # FakeBootstrap's fixed reply — the normal flow ran
+
+
 def test_status_endpoint_returns_the_latest_agent_event(client, monkeypatch):
     class RecordingStore:
         async def get_latest_agent_event(self, session_id):
