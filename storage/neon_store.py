@@ -80,6 +80,14 @@ class NeonStore:
                     updated_at BIGINT NOT NULL
                 )
             """)
+            # refresh_token/expires_at: added for OAuth-issued tokens (GitLab's
+            # OAuth access tokens expire in ~2h and need silent refresh; a
+            # manually pasted PAT leaves these NULL and never expires here).
+            # ALTER ... ADD COLUMN IF NOT EXISTS rather than folding into the
+            # CREATE TABLE above, since that table already exists in any
+            # environment that deployed before this column was added.
+            await conn.execute("ALTER TABLE connectors ADD COLUMN IF NOT EXISTS refresh_token TEXT")
+            await conn.execute("ALTER TABLE connectors ADD COLUMN IF NOT EXISTS expires_at BIGINT")
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS skills (
                     id TEXT PRIMARY KEY,
@@ -91,6 +99,13 @@ class NeonStore:
                     updated_at BIGINT NOT NULL
                 )
             """)
+            # description: a short "when to use this" summary, always shown to
+            # the model alongside every other enabled skill's name+description
+            # on every turn (see Bootstrap._skills_context) — same two-tier
+            # shape as a Claude Skill's frontmatter name+description versus
+            # its full body, so the model can consider a skill exists even
+            # when the deterministic trigger keywords below don't fire.
+            await conn.execute("ALTER TABLE skills ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT ''")
 
     async def save_memory(self, session_id: str, content: str, salience: float = 0.5,
                            embedding: list[float] | None = None) -> int:
@@ -181,7 +196,9 @@ class NeonStore:
 
     async def get_connector(self, provider: str) -> dict | None:
         async with self._pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT provider, token FROM connectors WHERE provider=$1", provider)
+            row = await conn.fetchrow(
+                "SELECT provider, token, refresh_token, expires_at FROM connectors WHERE provider=$1", provider,
+            )
             return dict(row) if row else None
 
     async def list_connectors(self) -> list[str]:
@@ -190,12 +207,14 @@ class NeonStore:
             rows = await conn.fetch("SELECT provider FROM connectors ORDER BY provider")
             return [r["provider"] for r in rows]
 
-    async def upsert_connector(self, provider: str, token: str):
+    async def upsert_connector(self, provider: str, token: str,
+                                refresh_token: str | None = None, expires_at: int | None = None):
         async with self._pool.acquire() as conn:
             await conn.execute(
-                """INSERT INTO connectors (provider, token, updated_at) VALUES ($1, $2, $3)
-                   ON CONFLICT (provider) DO UPDATE SET token=$2, updated_at=$3""",
-                provider, token, int(time.time()),
+                """INSERT INTO connectors (provider, token, refresh_token, expires_at, updated_at)
+                   VALUES ($1, $2, $3, $4, $5)
+                   ON CONFLICT (provider) DO UPDATE SET token=$2, refresh_token=$3, expires_at=$4, updated_at=$5""",
+                provider, token, refresh_token, expires_at, int(time.time()),
             )
 
     async def delete_connector(self, provider: str):
@@ -204,21 +223,22 @@ class NeonStore:
 
     async def list_skills(self, enabled_only: bool = False) -> list[dict]:
         async with self._pool.acquire() as conn:
-            query = "SELECT id, name, triggers, content, enabled, created_at FROM skills"
+            query = "SELECT id, name, description, triggers, content, enabled, created_at FROM skills"
             if enabled_only:
                 query += " WHERE enabled = true"
             query += " ORDER BY created_at ASC"
             rows = await conn.fetch(query)
             return [dict(r) for r in rows]
 
-    async def upsert_skill(self, skill_id: str, name: str, triggers: list[str], content: str, enabled: bool = True):
+    async def upsert_skill(self, skill_id: str, name: str, triggers: list[str], content: str,
+                            description: str = "", enabled: bool = True):
         async with self._pool.acquire() as conn:
             now = int(time.time())
             await conn.execute(
-                """INSERT INTO skills (id, name, triggers, content, enabled, created_at, updated_at)
-                   VALUES ($1, $2, $3, $4, $5, $6, $6)
-                   ON CONFLICT (id) DO UPDATE SET name=$2, triggers=$3, content=$4, enabled=$5, updated_at=$6""",
-                skill_id, name, triggers, content, enabled, now,
+                """INSERT INTO skills (id, name, description, triggers, content, enabled, created_at, updated_at)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+                   ON CONFLICT (id) DO UPDATE SET name=$2, description=$3, triggers=$4, content=$5, enabled=$6, updated_at=$7""",
+                skill_id, name, description, triggers, content, enabled, now,
             )
 
     async def delete_skill(self, skill_id: str):

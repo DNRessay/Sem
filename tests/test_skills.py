@@ -15,9 +15,9 @@ class FakeStore:
             rows = [s for s in rows if s["enabled"]]
         return rows
 
-    async def upsert_skill(self, skill_id, name, triggers, content, enabled=True):
+    async def upsert_skill(self, skill_id, name, triggers, content, description="", enabled=True):
         self.skills[skill_id] = {
-            "id": skill_id, "name": name, "triggers": triggers,
+            "id": skill_id, "name": name, "description": description, "triggers": triggers,
             "content": content, "enabled": enabled,
         }
 
@@ -50,6 +50,19 @@ def test_create_skill_lowercases_triggers_and_generates_id(client):
     assert body["name"] == "Deploy checklist"
     assert body["triggers"] == ["deploy", "release", "ship it"]
     assert body["id"] in store.skills
+
+
+def test_create_skill_stores_description(client):
+    c, store = client
+    resp = c.post("/skills", json={
+        "name": "Deploy checklist",
+        "description": "Use when deploying to production",
+        "content": "Run tests first.",
+    })
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["description"] == "Use when deploying to production"
+    assert store.skills[body["id"]]["description"] == "Use when deploying to production"
 
 
 def test_create_skill_requires_name_and_content(client):

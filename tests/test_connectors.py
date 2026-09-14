@@ -1,7 +1,11 @@
 import pytest
+import respx
 from fastapi.testclient import TestClient
+from httpx import Response
 
+from config import settings
 from gateway.auth import require_account
+from gateway.connectors import _make_state, _verify_state
 from main import app
 
 
@@ -12,15 +16,15 @@ class FakeStore:
     async def list_connectors(self):
         return sorted(self.connectors.keys())
 
-    async def upsert_connector(self, provider, token):
-        self.connectors[provider] = token
+    async def upsert_connector(self, provider, token, refresh_token=None, expires_at=None):
+        self.connectors[provider] = {"token": token, "refresh_token": refresh_token, "expires_at": expires_at}
 
     async def delete_connector(self, provider):
         self.connectors.pop(provider, None)
 
     async def get_connector(self, provider):
-        token = self.connectors.get(provider)
-        return {"provider": provider, "token": token} if token else None
+        c = self.connectors.get(provider)
+        return {"provider": provider, **c} if c else None
 
 
 @pytest.fixture
@@ -44,7 +48,7 @@ def test_save_and_list_connector(client):
 
     resp = c.get("/connectors")
     assert resp.json() == {"connectors": ["github"]}
-    assert store.connectors["github"] == "ghp_test123"
+    assert store.connectors["github"]["token"] == "ghp_test123"
 
 
 def test_save_connector_rejects_unknown_provider(client):
@@ -76,6 +80,59 @@ def test_fetch_without_configured_connector_errors(client):
 
 def test_fetch_requires_repo_and_path(client):
     c, store = client
-    store.connectors["github"] = "ghp_test"
+    store.connectors["github"] = {"token": "ghp_test", "refresh_token": None, "expires_at": None}
     resp = c.post("/connectors/github/fetch", json={"repo": "", "path": ""})
     assert resp.status_code == 400
+
+
+def test_authorize_errors_when_oauth_not_configured(client, monkeypatch):
+    monkeypatch.setattr(settings, "GITHUB_CLIENT_ID", "")
+    c, _ = client
+    resp = c.get("/connectors/github/authorize")
+    assert resp.status_code == 400
+    assert "isn't configured" in resp.json()["detail"].lower()
+
+
+def test_authorize_returns_provider_consent_url(client, monkeypatch):
+    monkeypatch.setattr(settings, "GITHUB_CLIENT_ID", "abc123")
+    monkeypatch.setattr(settings, "PUBLIC_API_URL", "https://api.example.com")
+    c, _ = client
+    resp = c.get("/connectors/github/authorize")
+    assert resp.status_code == 200
+    url = resp.json()["url"]
+    assert url.startswith("https://github.com/login/oauth/authorize?")
+    assert "client_id=abc123" in url
+    assert "redirect_uri=" in url
+    assert "state=" in url
+
+
+def test_state_round_trips_and_rejects_tampering():
+    state = _make_state("github")
+    assert _verify_state(state, "github") is True
+    assert _verify_state(state, "gitlab") is False  # wrong provider
+    assert _verify_state(state + "x", "github") is False  # tampered
+
+
+def test_callback_rejects_missing_or_invalid_state(client):
+    c, _ = client
+    resp = c.get("/connectors/github/callback", params={"code": "somecode", "state": "bogus"})
+    assert resp.status_code == 200  # renders an HTML error page, not a raw error
+    assert "failed" in resp.text.lower()
+
+
+def test_callback_exchanges_code_and_stores_token(client, monkeypatch):
+    monkeypatch.setattr(settings, "GITHUB_CLIENT_ID", "abc123")
+    monkeypatch.setattr(settings, "GITHUB_CLIENT_SECRET", "shh")
+    monkeypatch.setattr(settings, "PUBLIC_API_URL", "https://api.example.com")
+    c, store = client
+
+    state = _make_state("github")
+    with respx.mock:
+        respx.post("https://github.com/login/oauth/access_token").mock(
+            return_value=Response(200, json={"access_token": "gho_realtoken", "token_type": "bearer"})
+        )
+        resp = c.get("/connectors/github/callback", params={"code": "realcode", "state": state})
+
+    assert resp.status_code == 200
+    assert "connected" in resp.text.lower()
+    assert store.connectors["github"]["token"] == "gho_realtoken"

@@ -36,6 +36,30 @@ Parameters:
     Type: String
     Default: ""
     Description: Optional self-hosted OpenClaw gateway URL (WhatsApp/Telegram bridge)
+  GithubClientId:
+    Type: String
+    Default: ""
+    Description: GitHub OAuth App client ID (github.com/settings/developers) — blank disables GitHub OAuth, manual PAT paste still works
+  GithubClientSecret:
+    Type: String
+    NoEcho: true
+    Default: ""
+  GitlabClientId:
+    Type: String
+    Default: ""
+    Description: GitLab OAuth App client ID (gitlab.com/-/user_settings/applications) — blank disables GitLab OAuth, manual PAT paste still works
+  GitlabClientSecret:
+    Type: String
+    NoEcho: true
+    Default: ""
+  PublicApiUrl:
+    Type: String
+    Default: ""
+    Description: >
+      This stack's own ChatFunctionUrl value (same as the frontend's VITE_API_URL) — needed to build
+      the exact OAuth redirect_uri. Can't be !GetAtt'd here: that would be a circular reference on the
+      same resource whose Environment this sets, so it's a plain parameter carrying the already-known
+      Function URL instead.
 
 Globals:
   Function:
@@ -57,6 +81,11 @@ Globals:
         SECRET_KEY: !Ref SecretKey
         SERP_API_KEY: !Ref SerpApiKey
         OPENCLAW_URL: !Ref OpenclawUrl
+        GITHUB_CLIENT_ID: !Ref GithubClientId
+        GITHUB_CLIENT_SECRET: !Ref GithubClientSecret
+        GITLAB_CLIENT_ID: !Ref GitlabClientId
+        GITLAB_CLIENT_SECRET: !Ref GitlabClientSecret
+        PUBLIC_API_URL: !Ref PublicApiUrl
 
 Resources:
   ChatFunction:

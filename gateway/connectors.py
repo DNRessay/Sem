@@ -1,8 +1,14 @@
 import base64
+import hashlib
+import hmac
+import json
+import time
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse
 
+from config import settings
 from gateway.auth import require_account
 from storage.neon_store import get_store
 
@@ -10,6 +16,23 @@ router = APIRouter()
 
 _PROVIDERS = {"github", "gitlab"}
 _MAX_FETCH_CHARS = 60_000  # keeps one repo file from blowing the model's context on its own
+
+_OAUTH = {
+    "github": {
+        "authorize_url": "https://github.com/login/oauth/authorize",
+        "token_url": "https://github.com/login/oauth/access_token",
+        "scope": "repo",
+        "client_id": lambda: settings.GITHUB_CLIENT_ID,
+        "client_secret": lambda: settings.GITHUB_CLIENT_SECRET,
+    },
+    "gitlab": {
+        "authorize_url": "https://gitlab.com/oauth/authorize",
+        "token_url": "https://gitlab.com/oauth/token",
+        "scope": "api",
+        "client_id": lambda: settings.GITLAB_CLIENT_ID,
+        "client_secret": lambda: settings.GITLAB_CLIENT_SECRET,
+    },
+}
 
 
 @router.get("/connectors")
@@ -39,6 +62,126 @@ async def remove_connector(provider: str, _account: dict = Depends(require_accou
     return {"provider": provider, "connected": False}
 
 
+@router.get("/connectors/{provider}/authorize")
+async def authorize(provider: str, _account: dict = Depends(require_account)):
+    """Returns the URL to send the browser to for the provider's OAuth
+    consent screen. Requires a real Bearer token to call (this is a normal
+    authenticated fetch from the app, not the browser redirect itself), so
+    the state it mints is only ever issued to an already-logged-in owner."""
+    if provider not in _PROVIDERS:
+        raise HTTPException(400, f"Unknown provider '{provider}' — must be one of {sorted(_PROVIDERS)}")
+    cfg = _OAUTH[provider]
+    client_id = cfg["client_id"]()
+    if not client_id:
+        raise HTTPException(
+            400,
+            f"{provider} OAuth isn't configured on this deployment yet "
+            f"({provider.upper()}_CLIENT_ID is unset) — paste a personal access token instead for now.",
+        )
+    if not settings.PUBLIC_API_URL:
+        raise HTTPException(400, "PUBLIC_API_URL isn't configured on this deployment yet")
+
+    redirect_uri = f"{settings.PUBLIC_API_URL}/connectors/{provider}/callback"
+    state = _make_state(provider)
+    params = {
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "scope": cfg["scope"],
+        "state": state,
+    }
+    if provider == "gitlab":
+        params["response_type"] = "code"
+    url = f"{cfg['authorize_url']}?{httpx.QueryParams(params)}"
+    return {"url": url}
+
+
+@router.get("/connectors/{provider}/callback")
+async def oauth_callback(provider: str, request: Request):
+    """Hit by the browser as a plain redirect from GitHub/GitLab after the
+    user approves — there's no Authorization header on a browser navigation,
+    so this endpoint is deliberately NOT behind require_account. Its own
+    security is the signed `state` param: it only accepts a code paired with
+    a state this same app minted (via /authorize, which IS authenticated)
+    less than 10 minutes ago for this exact provider."""
+    if provider not in _PROVIDERS:
+        raise HTTPException(400, f"Unknown provider '{provider}'")
+
+    code = request.query_params.get("code")
+    state = request.query_params.get("state", "")
+    error = request.query_params.get("error")
+    if error:
+        return _callback_page(provider, ok=False, message=request.query_params.get("error_description", error))
+    if not code or not _verify_state(state, provider):
+        return _callback_page(provider, ok=False, message="Invalid or expired authorization request — try connecting again.")
+
+    cfg = _OAUTH[provider]
+    redirect_uri = f"{settings.PUBLIC_API_URL}/connectors/{provider}/callback"
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(
+                cfg["token_url"],
+                data={
+                    "client_id": cfg["client_id"](),
+                    "client_secret": cfg["client_secret"](),
+                    "code": code,
+                    "redirect_uri": redirect_uri,
+                    "grant_type": "authorization_code",
+                },
+                headers={"Accept": "application/json"},
+            )
+            r.raise_for_status()
+            data = r.json()
+    except httpx.HTTPError as e:
+        return _callback_page(provider, ok=False, message=f"Token exchange failed: {e}")
+
+    access_token = data.get("access_token")
+    if not access_token:
+        return _callback_page(provider, ok=False, message=f"No access_token in response: {data}")
+
+    refresh_token = data.get("refresh_token")
+    expires_in = data.get("expires_in")
+    expires_at = int(time.time()) + int(expires_in) if expires_in else None
+
+    db = await get_store()
+    await db.upsert_connector(provider, access_token, refresh_token, expires_at)
+    return _callback_page(provider, ok=True)
+
+
+def _callback_page(provider: str, ok: bool, message: str = "") -> HTMLResponse:
+    title = f"{provider.capitalize()} connected" if ok else f"{provider.capitalize()} connection failed"
+    body = "You can close this tab and go back to SEMBLANCE." if ok else message
+    return HTMLResponse(f"<title>{title}</title><body style='font-family:sans-serif;padding:40px;text-align:center'>"
+                         f"<h2>{title}</h2><p>{body}</p></body>")
+
+
+def _make_state(provider: str) -> str:
+    payload = json.dumps({"provider": provider, "exp": int(time.time()) + 600}).encode()
+    sig = hmac.new(settings.SECRET_KEY.encode(), payload, hashlib.sha256).digest()
+    return _b64url(payload) + "." + _b64url(sig)
+
+
+def _verify_state(state: str, provider: str) -> bool:
+    try:
+        payload_b64, sig_b64 = state.split(".")
+        payload = _b64url_decode(payload_b64)
+        sig = _b64url_decode(sig_b64)
+        expected_sig = hmac.new(settings.SECRET_KEY.encode(), payload, hashlib.sha256).digest()
+        if not hmac.compare_digest(sig, expected_sig):
+            return False
+        data = json.loads(payload)
+        return data.get("provider") == provider and data.get("exp", 0) > time.time()
+    except Exception:
+        return False
+
+
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def _b64url_decode(data: str) -> bytes:
+    return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+
+
 @router.post("/connectors/{provider}/fetch")
 async def fetch_file(provider: str, request: Request, _account: dict = Depends(require_account)):
     """Fetch one file's raw content from a GitHub or GitLab repo, for attaching to a chat message."""
@@ -56,12 +199,12 @@ async def fetch_file(provider: str, request: Request, _account: dict = Depends(r
     connector = await db.get_connector(provider)
     if not connector:
         raise HTTPException(400, f"No {provider} connector configured — add a token first")
-    token = connector["token"]
 
     try:
         if provider == "github":
-            content = await _fetch_github(repo, path, ref, token)
+            content = await _fetch_github(repo, path, ref, connector["token"])
         else:
+            token = await _ensure_fresh_gitlab_token(connector, db)
             content = await _fetch_gitlab(repo, path, ref, token)
     except httpx.HTTPStatusError as e:
         raise HTTPException(e.response.status_code, f"{provider} error: {e.response.text[:300]}")
@@ -91,8 +234,38 @@ async def _fetch_gitlab(repo: str, path: str, ref: str, token: str) -> str:
     path_enc = path.replace("/", "%2F")
     url = f"https://gitlab.com/api/v4/projects/{project_enc}/repository/files/{path_enc}/raw"
     params = {"ref": ref or "HEAD"}
-    headers = {"PRIVATE-TOKEN": token}
+    # Bearer works for both a manually pasted PAT and an OAuth-issued token —
+    # GitLab's PRIVATE-TOKEN header only accepts PATs, not OAuth tokens.
+    headers = {"Authorization": f"Bearer {token}"}
     async with httpx.AsyncClient(timeout=20) as client:
         r = await client.get(url, params=params, headers=headers)
         r.raise_for_status()
         return r.text
+
+
+async def _ensure_fresh_gitlab_token(connector: dict, db) -> str:
+    """OAuth-issued GitLab access tokens expire in ~2h; a manually pasted PAT
+    has no expires_at/refresh_token and is returned as-is. Refreshes and
+    persists the new token/expiry when it's within 60s of expiring, so a
+    long chat session doesn't start failing fetches mid-way through."""
+    expires_at = connector.get("expires_at")
+    refresh_token = connector.get("refresh_token")
+    if not expires_at or not refresh_token or expires_at > time.time() + 60:
+        return connector["token"]
+
+    cfg = _OAUTH["gitlab"]
+    async with httpx.AsyncClient(timeout=20) as client:
+        r = await client.post(cfg["token_url"], data={
+            "client_id": cfg["client_id"](),
+            "client_secret": cfg["client_secret"](),
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token",
+        })
+        r.raise_for_status()
+        data = r.json()
+
+    new_token = data["access_token"]
+    new_refresh = data.get("refresh_token", refresh_token)
+    new_expires_at = int(time.time()) + int(data["expires_in"]) if data.get("expires_in") else None
+    await db.upsert_connector("gitlab", new_token, new_refresh, new_expires_at)
+    return new_token

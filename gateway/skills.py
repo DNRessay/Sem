@@ -20,6 +20,7 @@ async def save_skill(request: Request, _account: dict = Depends(require_account)
     body = await request.json()
     name = (body.get("name") or "").strip()
     content = (body.get("content") or "").strip()
+    description = (body.get("description") or "").strip()
     if not name or not content:
         raise HTTPException(400, "name and content required")
 
@@ -32,8 +33,8 @@ async def save_skill(request: Request, _account: dict = Depends(require_account)
     enabled = body.get("enabled", True)
 
     db = await get_store()
-    await db.upsert_skill(skill_id, name, triggers, content, enabled)
-    return {"id": skill_id, "name": name, "triggers": triggers, "enabled": enabled}
+    await db.upsert_skill(skill_id, name, triggers, content, description, enabled)
+    return {"id": skill_id, "name": name, "description": description, "triggers": triggers, "enabled": enabled}
 
 
 @router.delete("/skills/{skill_id}")

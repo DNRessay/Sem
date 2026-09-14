@@ -40,6 +40,23 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "change-me"
     TRUST_MODE: str = "AUTO"  # BYPASS | ALLOW_EDITS | AUTO
 
+    # OAuth for the GitHub/GitLab connectors — lets "Connect GitHub" redirect
+    # to GitHub's own consent screen instead of asking for a pasted PAT.
+    # Each requires a one-time OAuth App registered by the account owner
+    # (github.com/settings/developers, gitlab.com/-/user_settings/applications)
+    # with its callback URL set to {PUBLIC_API_URL}/connectors/<provider>/callback.
+    # Left blank, /connectors/{provider}/authorize returns a clear error and
+    # the manual-token flow still works as a fallback.
+    GITHUB_CLIENT_ID: str = ""
+    GITHUB_CLIENT_SECRET: str = ""
+    GITLAB_CLIENT_ID: str = ""
+    GITLAB_CLIENT_SECRET: str = ""
+    # The Lambda Function URL itself — used to build the exact OAuth redirect_uri,
+    # which must match what's registered in the OAuth App byte-for-byte. Not
+    # inferred from the incoming request's Host header, to avoid depending on
+    # proxy headers surviving the Lambda Web Adapter hop uncorrupted.
+    PUBLIC_API_URL: str = ""
+
     model_config = SettingsConfigDict(env_file=".env")
 
 

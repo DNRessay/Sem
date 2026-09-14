@@ -5,6 +5,7 @@ const API = import.meta.env.VITE_API_URL || "";
 export default function SkillsPanel({ token }) {
     const [skills, setSkills] = useState([]);
     const [name, setName] = useState("");
+    const [description, setDescription] = useState("");
     const [triggers, setTriggers] = useState("");
     const [content, setContent] = useState("");
     const [busy, setBusy] = useState(false);
@@ -27,9 +28,9 @@ export default function SkillsPanel({ token }) {
             await fetch(`${API}/skills`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json", ...authHeaders },
-                body: JSON.stringify({ name: name.trim(), triggers, content: content.trim() }),
+                body: JSON.stringify({ name: name.trim(), description: description.trim(), triggers, content: content.trim() }),
             });
-            setName(""); setTriggers(""); setContent("");
+            setName(""); setDescription(""); setTriggers(""); setContent("");
             load();
         } finally {
             setBusy(false);
@@ -50,8 +51,13 @@ export default function SkillsPanel({ token }) {
                 <div key={s.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px", border: "1px solid var(--border)", borderRadius: "8px", padding: "6px 8px" }}>
                     <div style={{ minWidth: 0 }}>
                         <div style={{ fontSize: "12px", color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</div>
+                        {s.description && (
+                            <div style={{ fontSize: "10px", color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {s.description}
+                            </div>
+                        )}
                         <div style={{ fontSize: "10px", color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {(s.triggers || []).join(", ")}
+                            triggers: {(s.triggers || []).join(", ") || "(none)"}
                         </div>
                     </div>
                     <button onClick={() => removeSkill(s.id)} aria-label={`Delete ${s.name}`} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: "13px", flexShrink: 0 }}>✕</button>
@@ -60,9 +66,12 @@ export default function SkillsPanel({ token }) {
 
             <input value={name} onChange={e => setName(e.target.value)} placeholder="Skill name"
                 style={fieldStyle} />
+            <input value={description} onChange={e => setDescription(e.target.value)}
+                placeholder="Description — shown to SEMBLANCE every turn so it knows this skill exists"
+                style={fieldStyle} />
             <input value={triggers} onChange={e => setTriggers(e.target.value)} placeholder="trigger words, comma separated"
                 style={fieldStyle} />
-            <textarea value={content} onChange={e => setContent(e.target.value)} placeholder="Instructions to inject when triggered"
+            <textarea value={content} onChange={e => setContent(e.target.value)} placeholder="Full instructions, loaded when a trigger word matches"
                 rows={3} style={{ ...fieldStyle, resize: "vertical", fontFamily: "inherit" }} />
             <button onClick={addSkill} disabled={busy} style={{ padding: "8px", borderRadius: "8px", border: "none", background: "var(--accent)", color: "var(--accent-contrast)", fontSize: "13px", fontWeight: "600", cursor: "pointer" }}>
                 {busy ? "Saving…" : "Add skill"}

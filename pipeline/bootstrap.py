@@ -39,7 +39,7 @@ class Bootstrap:
         memories = await self.sem_retrieval.retrieve(query)
         memory_block = self._format_memories(memories)
 
-        skills_block = await self._match_skills(query)
+        skills_block = await self._skills_context(query)
 
         # Step 6 - ctx pressure before we hit the LLM
         full_ctx = self.ctx_pressure.apply(f"{ctx}\n\n{memory_block}\n\n{skills_block}")
@@ -60,24 +60,45 @@ class Bootstrap:
         await db.save_turn(session_id, "user", query)
         await db.save_turn(session_id, "assistant", reply)
 
-    async def _match_skills(self, query: str) -> str:
-        """Keyword-triggered skill injection — a skill's content is pulled
-        into context only when one of its trigger words appears in the
-        query, not on every turn. Simple substring matching rather than an
-        agentic tool-search: Groq's function-calling reliability on the
-        current models (Qwen3.8-27B, GPT-OSS-120B) isn't something to bet
-        every message on."""
+    async def _skills_context(self, query: str) -> str:
+        """Two-tier skill disclosure, mirroring how Claude sees Skills: a
+        lightweight catalog (name + description) for every enabled skill is
+        shown on *every* turn so the model always knows what's available and
+        is told to check it before responding — not just the ones a keyword
+        happens to hit. Full skill content is then loaded only for skills
+        whose trigger keywords actually match this query, the same
+        two-stage shape as a skill's frontmatter description being always
+        visible versus its full body being loaded on demand — done here via
+        deterministic substring matching rather than a tool call, since
+        Groq's function-calling reliability on the current models
+        (Qwen3.8-27B, GPT-OSS-120B) isn't something to bet every message on."""
         db = await get_store()
         skills = await db.list_skills(enabled_only=True)
+        if not skills:
+            return ""
+
+        catalog_lines = [
+            "<available_skills>",
+            "Before responding, check whether any of these skills apply to the "
+            "current request. If one does, follow its full instructions (shown "
+            "below under active_skills if already loaded, otherwise use your "
+            "judgement from the description) as authoritative for how to proceed.",
+        ]
+        for s in skills:
+            desc = s.get("description") or "(no description)"
+            catalog_lines.append(f"- {s['name']}: {desc}")
+        catalog_lines.append("</available_skills>")
+
         query_lower = query.lower()
         matched = [s for s in skills if any(t in query_lower for t in s["triggers"])]
-        if not matched:
-            return ""
-        lines = ["<semblance_skills>"]
-        for s in matched:
-            lines.append(f"  <skill name=\"{s['name']}\">\n{s['content']}\n  </skill>")
-        lines.append("</semblance_skills>")
-        return "\n".join(lines)
+        active_lines = []
+        if matched:
+            active_lines.append("<active_skills>")
+            for s in matched:
+                active_lines.append(f"  <skill name=\"{s['name']}\">\n{s['content']}\n  </skill>")
+            active_lines.append("</active_skills>")
+
+        return "\n".join(catalog_lines + active_lines)
 
     def _format_memories(self, memories: list) -> str:
         if not memories:

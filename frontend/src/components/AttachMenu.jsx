@@ -65,6 +65,26 @@ function ConnectorTokenForm({ provider, token, onSaved }) {
     const [value, setValue] = useState("");
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
+    const [manual, setManual] = useState(false);
+
+    const connectViaOAuth = async () => {
+        setBusy(true);
+        setError(null);
+        try {
+            const res = await fetch(`${API}/connectors/${provider}/authorize`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                setError(data.detail || "OAuth isn't set up for this provider yet");
+                setManual(true);
+                return;
+            }
+            window.open(data.url, "_blank", "noopener");
+        } finally {
+            setBusy(false);
+        }
+    };
 
     const save = async () => {
         if (!value.trim() || busy) return;
@@ -88,14 +108,29 @@ function ConnectorTokenForm({ provider, token, onSaved }) {
     return (
         <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" }}>
             <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>
-                No {provider} token saved yet — paste a personal access token to connect.
+                No {provider} connector yet.
             </div>
-            <input value={value} onChange={e => setValue(e.target.value)} type="password"
-                placeholder={provider === "github" ? "ghp_..." : "glpat-..."} style={inputStyle} />
-            {error && <div style={{ color: "var(--danger)", fontSize: "12px" }}>{error}</div>}
-            <button onClick={save} disabled={busy} style={smallButtonStyle}>
-                {busy ? "Saving…" : "Save token"}
-            </button>
+            {!manual ? (
+                <>
+                    <button onClick={connectViaOAuth} disabled={busy} style={smallButtonStyle}>
+                        {busy ? "Opening…" : `Connect ${provider}`}
+                    </button>
+                    {error && <div style={{ color: "var(--text-muted)", fontSize: "12px" }}>{error}</div>}
+                    <button onClick={() => setManual(true)}
+                        style={{ background: "none", border: "none", color: "var(--text-muted)", fontSize: "11px", cursor: "pointer", padding: 0, textDecoration: "underline" }}>
+                        or paste a token instead
+                    </button>
+                </>
+            ) : (
+                <>
+                    <input value={value} onChange={e => setValue(e.target.value)} type="password"
+                        placeholder={provider === "github" ? "ghp_..." : "glpat-..."} style={inputStyle} />
+                    {error && <div style={{ color: "var(--danger)", fontSize: "12px" }}>{error}</div>}
+                    <button onClick={save} disabled={busy} style={smallButtonStyle}>
+                        {busy ? "Saving…" : "Save token"}
+                    </button>
+                </>
+            )}
         </div>
     );
 }

@@ -89,6 +89,10 @@ jobs:
           SEMBLANCE_SECRET_KEY: ${{ secrets.SEMBLANCE_SECRET_KEY }}
           SERP_API_KEY: ${{ secrets.SERP_API_KEY }}
           OPENCLAW_URL: ${{ secrets.OPENCLAW_URL }}
+          GITHUB_OAUTH_CLIENT_ID: ${{ secrets.GITHUB_OAUTH_CLIENT_ID }}
+          GITHUB_OAUTH_CLIENT_SECRET: ${{ secrets.GITHUB_OAUTH_CLIENT_SECRET }}
+          GITLAB_OAUTH_CLIENT_ID: ${{ secrets.GITLAB_OAUTH_CLIENT_ID }}
+          GITLAB_OAUTH_CLIENT_SECRET: ${{ secrets.GITLAB_OAUTH_CLIENT_SECRET }}
         run: |
           # Secrets go through env vars (not string-interpolated straight into
           # the script) and get trimmed + individually quoted below. Directly
@@ -105,6 +109,10 @@ jobs:
           secret_key=$(printf '%s' "$SEMBLANCE_SECRET_KEY" | tr -d '\r\n')
           serp_api_key=$(printf '%s' "$SERP_API_KEY" | tr -d '\r\n')
           openclaw_url=$(printf '%s' "$OPENCLAW_URL" | tr -d '\r\n')
+          github_oauth_client_id=$(printf '%s' "$GITHUB_OAUTH_CLIENT_ID" | tr -d '\r\n')
+          github_oauth_client_secret=$(printf '%s' "$GITHUB_OAUTH_CLIENT_SECRET" | tr -d '\r\n')
+          gitlab_oauth_client_id=$(printf '%s' "$GITLAB_OAUTH_CLIENT_ID" | tr -d '\r\n')
+          gitlab_oauth_client_secret=$(printf '%s' "$GITLAB_OAUTH_CLIENT_SECRET" | tr -d '\r\n')
 
           # sam deploy's --parameter-overrides shorthand rejects "Key=" with a
           # truly empty value ("not a valid format") — so optional params that
@@ -118,16 +126,25 @@ jobs:
           # current Default. Two model-ID fixes both silently no-op'd for
           # exactly this reason before this was caught. Keep these two
           # literal values in sync with the Default: in template.yaml.
+          # PublicApiUrl is this stack's own ChatFunctionUrl — stable once
+          # created (Function URLs don't change across in-place updates,
+          # confirmed repeatedly this session), so it's safe to hardcode
+          # rather than needing a secret for it.
           params=(
             "GroqApiKey=${groq_api_key}"
             "NeonDatabaseUrl=${neon_database_url}"
             "SecretKey=${secret_key}"
             "GroqModel=qwen/qwen3.8-27b"
             "GroqPlanningModel=openai/gpt-oss-120b"
+            "PublicApiUrl=https://sv2uw47le4udr57ojay37ey3ry0nssoa.lambda-url.eu-west-1.on.aws"
           )
           [ -n "$modal_embeddings_url" ] && params+=("ModalEmbeddingsUrl=${modal_embeddings_url}")
           [ -n "$serp_api_key" ] && params+=("SerpApiKey=${serp_api_key}")
           [ -n "$openclaw_url" ] && params+=("OpenclawUrl=${openclaw_url}")
+          [ -n "$github_oauth_client_id" ] && params+=("GithubClientId=${github_oauth_client_id}")
+          [ -n "$github_oauth_client_secret" ] && params+=("GithubClientSecret=${github_oauth_client_secret}")
+          [ -n "$gitlab_oauth_client_id" ] && params+=("GitlabClientId=${gitlab_oauth_client_id}")
+          [ -n "$gitlab_oauth_client_secret" ] && params+=("GitlabClientSecret=${gitlab_oauth_client_secret}")
 
           sam deploy \
             --debug \
