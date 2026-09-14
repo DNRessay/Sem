@@ -8,7 +8,7 @@ import asyncpg
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gateway.auth import hash_passphrase  # noqa: E402
+from gateway.passphrase import hash_passphrase  # noqa: E402
 
 
 async def main():

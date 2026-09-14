@@ -2,38 +2,18 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 import time
 
 from fastapi import HTTPException, Request
 
 from config import settings
+from gateway.passphrase import hash_passphrase, verify_passphrase  # noqa: F401 (re-exported)
 
 TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 days
-_SCRYPT_N, _SCRYPT_R, _SCRYPT_P, _SCRYPT_DKLEN = 16384, 8, 1, 64
 
 
 class InvalidTokenError(Exception):
     pass
-
-
-def hash_passphrase(passphrase: str, salt: bytes | None = None) -> str:
-    """Returns 'salt_hex:hash_hex'. Verify with verify_passphrase, never compare directly."""
-    salt = salt or os.urandom(16)
-    digest = hashlib.scrypt(
-        passphrase.encode(), salt=salt,
-        n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P, dklen=_SCRYPT_DKLEN,
-    )
-    return f"{salt.hex()}:{digest.hex()}"
-
-
-def verify_passphrase(passphrase: str, stored_hash: str) -> bool:
-    try:
-        salt_hex, digest_hex = stored_hash.split(":")
-    except ValueError:
-        return False
-    candidate = hash_passphrase(passphrase, salt=bytes.fromhex(salt_hex))
-    return hmac.compare_digest(candidate, stored_hash)
 
 
 def _b64url_encode(data: bytes) -> str:
