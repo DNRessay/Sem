@@ -25,6 +25,22 @@ def test_detect_bash_intent_returns_none_for_ordinary_run_execute_phrasing():
     assert detect_bash_intent("hey, how's it going?") is None
 
 
+def test_detect_bash_intent_does_not_fire_on_ordinary_questions_about_bash():
+    """Regression: a bare "bash[:\\s]+(.+)" trigger used to match this —
+    "bash" followed by a space and the rest of the sentence — captured
+    "tools" as a literal command and ran /bin/sh -c tools, which of course
+    doesn't exist. Asking about bash is not asking to run something."""
+    assert detect_bash_intent("Do you have bash tools") is None
+    assert detect_bash_intent("does semblance have bash access") is None
+    assert detect_bash_intent("what can you do with bash") is None
+
+
+def test_detect_bash_intent_shorthand_requires_a_colon_at_the_start():
+    assert detect_bash_intent("bash: echo hi") == "echo hi"
+    assert detect_bash_intent("I love bash scripting") is None
+    assert detect_bash_intent("here's some bash: echo hi") is None
+
+
 def test_bash_status_label():
     assert bash_status_label() == "Running…"
 

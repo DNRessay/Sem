@@ -6,16 +6,28 @@ import re
 # loose keyword match. Requires an explicit trigger phrase, not just "run"
 # or "execute" alone (which show up constantly in ordinary conversation —
 # "run the numbers", "execute the plan").
+#
+# A bare "bash[:\s]+(.+)" alternative used to be in this same pattern —
+# "Do you have bash tools" matched it (captured "tools" as the literal
+# command to run: "bash" + a space + everything after) since ordinary
+# conversation says the word "bash" far more often than it means "run this
+# as a command." The colon-shorthand below is scoped much tighter: anchored
+# to the start of the message and requiring an actual colon, not just
+# whitespace, which "asking about bash" essentially never looks like.
 _BASH_RE = re.compile(
     r"\b(?:run\s+bash|run\s+shell|run\s+command|run\s+this\s+command|"
-    r"execute\s+command|execute\s+this\s+command|bash)[:\s]+(.+)$",
+    r"execute\s+command|execute\s+this\s+command)[:\s]+(.+)$",
     re.I,
 )
+_BASH_SHORTHAND_RE = re.compile(r"^\s*bash:\s*(.+)$", re.I)
 
 
 def detect_bash_intent(query: str) -> str | None:
     """Returns the command to run, or None."""
     m = _BASH_RE.search(query)
+    if m:
+        return m.group(1).strip()
+    m = _BASH_SHORTHAND_RE.match(query)
     if m:
         return m.group(1).strip()
     return None
