@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 
 const API = import.meta.env.VITE_API_URL || "";
 const TEXT_EXT = /\.(txt|md|mdx|py|js|jsx|ts|tsx|mjs|cjs|json|jsonc|csv|tsv|log|ya?ml|html?|css|scss|sass|less|sql|sh|bash|zsh|env|toml|ini|cfg|conf|xml|svg|graphql|gql|proto|rs|go|java|kt|kts|c|h|cpp|cc|hpp|cs|rb|php|swift|dart|lua|r|jl|vue|svelte|diff|patch|lock|gitignore|editorconfig)$/i;
@@ -73,21 +73,49 @@ export function AttachFileIcon() {
 }
 
 function RepoForm({ provider, token, onAttach, onNeedConnector, onClose }) {
+    const [repos, setRepos] = useState(null); // null = still loading
+    const [loadError, setLoadError] = useState(null);
     const [repo, setRepo] = useState("");
     const [path, setPath] = useState("");
     const [ref, setRef] = useState("");
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
 
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await fetch(`${API}/connectors/${provider}/repos`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    if (res.status === 400 && (data.detail || "").toLowerCase().includes("no ")) {
+                        onNeedConnector();
+                        return;
+                    }
+                    throw new Error(data.detail || `Couldn't load repos (${res.status})`);
+                }
+                if (cancelled) return;
+                const list = data.repos || [];
+                setRepos(list);
+                if (list.length > 0) setRepo(list[0].full_name);
+            } catch (e) {
+                if (!cancelled) setLoadError(e.message);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [provider, token]);
+
     const submit = async () => {
-        if (!repo.trim() || !path.trim() || busy) return;
+        if (!repo || !path.trim() || busy) return;
         setBusy(true);
         setError(null);
         try {
             const res = await fetch(`${API}/connectors/${provider}/fetch`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ repo: repo.trim(), path: path.trim(), ref: ref.trim() }),
+                body: JSON.stringify({ repo, path: path.trim(), ref: ref.trim() }),
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) {
@@ -108,14 +136,26 @@ function RepoForm({ provider, token, onAttach, onNeedConnector, onClose }) {
 
     return (
         <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" }}>
-            <input value={repo} onChange={e => setRepo(e.target.value)} placeholder="owner/repo"
-                style={inputStyle} />
+            {repos === null && !loadError && (
+                <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>Loading repos…</div>
+            )}
+            {loadError && <div style={{ color: "var(--danger)", fontSize: "12px" }}>{loadError}</div>}
+            {repos?.length === 0 && (
+                <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>No repos found on this account.</div>
+            )}
+            {repos?.length > 0 && (
+                <select value={repo} onChange={e => setRepo(e.target.value)} style={inputStyle}>
+                    {repos.map(r => (
+                        <option key={r.full_name} value={r.full_name}>{r.full_name}{r.private ? " (private)" : ""}</option>
+                    ))}
+                </select>
+            )}
             <input value={path} onChange={e => setPath(e.target.value)} placeholder="path/to/file.py"
                 style={inputStyle} />
             <input value={ref} onChange={e => setRef(e.target.value)} placeholder="branch (optional)"
                 style={inputStyle} />
             {error && <div style={{ color: "var(--danger)", fontSize: "12px" }}>{error}</div>}
-            <button onClick={submit} disabled={busy} style={smallButtonStyle}>
+            <button onClick={submit} disabled={busy || !repo} style={smallButtonStyle}>
                 {busy ? "Fetching…" : "Fetch file"}
             </button>
         </div>

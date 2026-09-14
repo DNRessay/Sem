@@ -190,6 +190,56 @@ def _b64url_decode(data: str) -> bytes:
     return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
 
 
+@router.get("/connectors/{provider}/repos")
+async def list_repos(provider: str, account: dict = Depends(require_account)):
+    """Lists the connected account's own repos, so the frontend can offer a
+    dropdown instead of asking the user to type "owner/repo" from memory."""
+    if provider not in _PROVIDERS:
+        raise HTTPException(400, f"Unknown provider '{provider}' — must be one of {sorted(_PROVIDERS)}")
+
+    db = await get_store()
+    connector = await db.get_connector(account["account_id"], provider)
+    if not connector:
+        raise HTTPException(400, f"No {provider} connector configured — add a token first")
+
+    try:
+        if provider == "github":
+            repos = await _list_github_repos(connector["token"])
+        else:
+            token = await _ensure_fresh_gitlab_token(account["account_id"], connector, db)
+            repos = await _list_gitlab_repos(token)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(e.response.status_code, f"{provider} error: {e.response.text[:300]}")
+
+    return {"provider": provider, "repos": repos}
+
+
+async def _list_github_repos(token: str) -> list[dict]:
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
+    async with httpx.AsyncClient(timeout=20) as client:
+        r = await client.get(
+            "https://api.github.com/user/repos",
+            params={"sort": "updated", "per_page": 100},
+            headers=headers,
+        )
+        r.raise_for_status()
+        data = r.json()
+    return [{"full_name": d["full_name"], "private": d.get("private", False)} for d in data]
+
+
+async def _list_gitlab_repos(token: str) -> list[dict]:
+    headers = {"Authorization": f"Bearer {token}"}
+    async with httpx.AsyncClient(timeout=20) as client:
+        r = await client.get(
+            "https://gitlab.com/api/v4/projects",
+            params={"membership": "true", "order_by": "last_activity_at", "per_page": 100},
+            headers=headers,
+        )
+        r.raise_for_status()
+        data = r.json()
+    return [{"full_name": d["path_with_namespace"], "private": d.get("visibility") != "public"} for d in data]
+
+
 @router.post("/connectors/{provider}/fetch")
 async def fetch_file(provider: str, request: Request, account: dict = Depends(require_account)):
     """Fetch one file's raw content from a GitHub or GitLab repo, for attaching to a chat message."""

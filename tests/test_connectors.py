@@ -86,6 +86,48 @@ def test_connectors_are_isolated_per_account(client):
     assert store.connectors[("guest1", "github")]["token"] == "guest-token"
 
 
+def test_list_repos_without_configured_connector_errors(client):
+    c, _ = client
+    resp = c.get("/connectors/github/repos")
+    assert resp.status_code == 400
+    assert "no github connector" in resp.json()["detail"].lower()
+
+
+def test_list_repos_returns_github_repos(client):
+    c, store = client
+    store.connectors[("owner", "github")] = {"token": "ghp_test", "refresh_token": None, "expires_at": None}
+    with respx.mock:
+        respx.get("https://api.github.com/user/repos").mock(
+            return_value=Response(200, json=[
+                {"full_name": "octocat/hello", "private": False},
+                {"full_name": "octocat/secret", "private": True},
+            ])
+        )
+        resp = c.get("/connectors/github/repos")
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "provider": "github",
+        "repos": [
+            {"full_name": "octocat/hello", "private": False},
+            {"full_name": "octocat/secret", "private": True},
+        ],
+    }
+
+
+def test_list_repos_returns_gitlab_repos(client):
+    c, store = client
+    store.connectors[("owner", "gitlab")] = {"token": "glpat_test", "refresh_token": None, "expires_at": None}
+    with respx.mock:
+        respx.get("https://gitlab.com/api/v4/projects").mock(
+            return_value=Response(200, json=[
+                {"path_with_namespace": "group/project", "visibility": "private"},
+            ])
+        )
+        resp = c.get("/connectors/gitlab/repos")
+    assert resp.status_code == 200
+    assert resp.json() == {"provider": "gitlab", "repos": [{"full_name": "group/project", "private": True}]}
+
+
 def test_fetch_without_configured_connector_errors(client):
     c, _ = client
     resp = c.post("/connectors/github/fetch", json={"repo": "octocat/hello", "path": "README.md"})
