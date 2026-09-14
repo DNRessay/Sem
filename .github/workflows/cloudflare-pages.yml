@@ -49,33 +49,26 @@ jobs:
           echo "Baked API URL: $found"
 
       - name: Deploy to Cloudflare Pages
-        # cloudflare/pages-action@v1 calls the deprecated `wrangler pages
-        # publish` internally regardless of the wranglerVersion input (its
-        # own deprecation warning confirms this) — every deploy landed as a
-        # hash-prefixed preview under both wrangler 2 and 3 through this
-        # action, despite production_branch being confirmed "main" via the
-        # Cloudflare API and --branch=main being passed correctly either
-        # way. Calling the modern, non-deprecated `wrangler pages deploy`
-        # directly instead of going through the action.
+        # wrangler's CLI output always prints a fresh, permanent
+        # per-deployment URL (a commit hash prefix) regardless of whether
+        # the deploy was classified production or preview — that's not a
+        # bug, and it's not the URL to share/bookmark. The stable one is
+        # always https://semblance-773.pages.dev (confirmed: it serves this
+        # exact build's asset filenames every time), independent of what
+        # this step prints below.
         working-directory: frontend
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler@3 pages deploy dist --project-name=semblance --branch=main
 
-      - name: Check the stable production subdomain
-        # Every wrangler deploy prints its own permanent per-deployment URL
-        # regardless of production/preview status — that's not necessarily
-        # evidence the bare project subdomain (no hash) isn't already being
-        # kept in sync. Checking it directly, and comparing the JS asset
-        # filename (content-hashed by Vite) against what this build just
-        # produced, to see whether it's actually serving the latest build.
+      - name: Verify the stable production URL served this build
         working-directory: frontend
         run: |
-          echo "--- local dist/assets ---"
-          ls dist/assets/
-          echo "--- what semblance-773.pages.dev serves ---"
+          expected=$(basename dist/assets/index-*.js)
           status=$(curl -s -o /tmp/prod_body.html -w "%{http_code}" https://semblance-773.pages.dev/)
-          echo "status=$status"
-          head -c 500 /tmp/prod_body.html
-          echo
+          if [ "$status" != "200" ] || ! grep -q "$expected" /tmp/prod_body.html; then
+            echo "::error::https://semblance-773.pages.dev (status $status) is not serving this build's $expected"
+            exit 1
+          fi
+          echo "Confirmed: https://semblance-773.pages.dev is serving $expected"
