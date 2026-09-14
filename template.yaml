@@ -82,7 +82,7 @@ Resources:
         Variables:
           AWS_LAMBDA_EXEC_WRAPPER: /opt/bootstrap
           AWS_LWA_INVOKE_MODE: response_stream
-          PORT: 8000
+          PORT: "8000"
       FunctionUrlConfig:
         AuthType: NONE      # app-level auth via x-api-key (see gateway/router.py)
         InvokeMode: RESPONSE_STREAM
