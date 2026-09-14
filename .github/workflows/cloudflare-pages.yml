@@ -55,3 +55,12 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           projectName: semblance
           directory: frontend/dist
+          # The action labels a deploy "production" (stable
+          # semblance-773.pages.dev URL) vs "preview" (a new
+          # <commit-hash>.semblance-773.pages.dev URL every time) based on
+          # whether this branch name matches the Pages project's configured
+          # production branch — it defaults to the actual git branch
+          # (claude/bold-hawking-8o28g3), which doesn't match, hence a fresh
+          # preview URL on every deploy so far. Forcing it to the project's
+          # production branch name here.
+          branch: main
