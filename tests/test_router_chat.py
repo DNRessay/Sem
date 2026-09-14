@@ -79,6 +79,41 @@ def test_a_url_the_user_actually_typed_still_triggers_a_fetch(client, monkeypatc
     assert calls == [("fetch", "https://example.com/page")]
 
 
+def test_web_search_enabled_defaults_to_true_when_omitted(client, monkeypatch):
+    calls = []
+
+    async def fake_run_web_intent(kind, target, session_id=None):
+        calls.append((kind, target))
+        return ""
+
+    monkeypatch.setattr("gateway.router.run_web_intent", fake_run_web_intent)
+
+    resp = client.post("/chat", json={"message": "check out https://example.com/page", "session_id": "sess1"})
+    assert resp.status_code == 200
+    assert calls == [("fetch", "https://example.com/page")]
+
+
+def test_web_search_disabled_skips_detection_entirely(client, monkeypatch):
+    """The attach menu's "Web search" toggle — off means detect_web_intent
+    never even runs for this turn, not just that its result gets ignored."""
+    calls = []
+
+    async def fake_run_web_intent(kind, target, session_id=None):
+        calls.append((kind, target))
+        return ""
+
+    monkeypatch.setattr("gateway.router.run_web_intent", fake_run_web_intent)
+
+    resp = client.post("/chat", json={
+        "message": "check out https://example.com/page",
+        "session_id": "sess1",
+        "web_search_enabled": False,
+    })
+    assert resp.status_code == 200
+    assert calls == []
+    assert "ok" in resp.text  # FakeBootstrap's fixed reply — the normal flow ran instead
+
+
 def test_repo_intent_takes_priority_over_web_intent(client, monkeypatch):
     """'search the repo for X' contains the bare word 'search', which alone
     would trigger a web search — but repo phrasing is more specific and must

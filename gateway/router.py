@@ -123,6 +123,7 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
     session_id = body.get("session_id", "default")
     history = body.get("history", [])
     attachments = body.get("attachments", [])
+    web_search_enabled = body.get("web_search_enabled", True)
 
     if not raw_msg:
         raise HTTPException(400, "message required")
@@ -143,8 +144,9 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
     # any URL-shaped text sitting in an attached file — a regex literal in a
     # workflow script, an example in a README, anything — gets treated as
     # "fetch this," hijacking the user's real question and hanging on a
-    # garbage host until the fetch tool's own timeout.
-    web_intent = detect_web_intent(raw_msg)
+    # garbage host until the fetch tool's own timeout. Also off entirely
+    # when the user has toggled "Web search" off in the attach menu.
+    web_intent = detect_web_intent(raw_msg) if web_search_enabled else None
     # Checked first/preferred over web_intent when both could match ("search
     # the repo for X" contains "search", which alone would trigger a web
     # search) — repo phrasing is the more specific signal, and only ever

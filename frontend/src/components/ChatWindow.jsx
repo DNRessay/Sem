@@ -155,6 +155,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
     const [input, setInput] = useState("");
     const [history, setHistory] = useState(initialHistory);
     const [attachments, setAttachments] = useState([]);
+    const [webSearchEnabled, setWebSearchEnabled] = useState(true);
     const { chunks, streaming, error, status, tool, send, abort } = useStream(API, token, onUnauthorized);
     const bottomRef = useRef(null);
 
@@ -177,7 +178,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
         setInput("");
         setAttachments([]);
         setHistory(h => [...h, { role: "user", content: msg, files: files.map(f => ({ name: f.name, source: f.source, mime: f.mime })) }]);
-        const { reply, tool: toolResult, title } = await send(msg, sessionId, history, files);
+        const { reply, tool: toolResult, title } = await send(msg, sessionId, history, files, webSearchEnabled);
         if (reply) setHistory(h => [...h, { role: "assistant", content: reply, tool: toolResult }]);
         if (title) onTitle?.(sessionId, title);
     };
@@ -273,7 +274,10 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                         style={{ width: "100%", boxSizing: "border-box", background: "transparent", border: "none", padding: "2px 2px 8px", color: "var(--text)", fontSize: "15px", outline: "none" }}
                     />
                     <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        <AttachMenu token={token} sessionId={sessionId} onAttach={addAttachment} />
+                        <AttachMenu
+                            token={token} sessionId={sessionId} onAttach={addAttachment}
+                            webSearchEnabled={webSearchEnabled} onToggleWebSearch={setWebSearchEnabled}
+                        />
                         <span style={{ display: "flex", alignItems: "center", gap: "3px", border: "1px solid var(--border)", borderRadius: "999px", padding: "5px 10px", fontSize: "12px", color: "var(--text-muted)" }}>
                             {MODEL_LABEL} <span style={{ fontSize: "9px" }}>▾</span>
                         </span>

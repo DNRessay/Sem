@@ -8,7 +8,7 @@ export function useStream(baseUrl = "", token = "", onUnauthorized) {
     const [error, setError] = useState(null);
     const abortRef = useRef(null);
 
-    const send = useCallback(async (message, sessionId = "default", history = [], attachments = []) => {
+    const send = useCallback(async (message, sessionId = "default", history = [], attachments = [], webSearchEnabled = true) => {
         setChunks([]);
         setStatus(null);
         setTool(null);
@@ -31,7 +31,7 @@ export function useStream(baseUrl = "", token = "", onUnauthorized) {
                     "Content-Type": "application/json",
                     ...(token ? { Authorization: `Bearer ${token}` } : {}),
                 },
-                body: JSON.stringify({ message, session_id: sessionId, history, attachments }),
+                body: JSON.stringify({ message, session_id: sessionId, history, attachments, web_search_enabled: webSearchEnabled }),
                 signal: abortRef.current.signal,
             });
 

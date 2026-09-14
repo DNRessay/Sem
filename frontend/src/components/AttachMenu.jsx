@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect } from "react";
+import SkillsPanel from "./SkillsPanel";
+import ConnectorsPanel from "./ConnectorsPanel";
 
 const API = import.meta.env.VITE_API_URL || "";
 const TEXT_EXT = /\.(txt|md|mdx|py|js|jsx|ts|tsx|mjs|cjs|json|jsonc|csv|tsv|log|ya?ml|html?|css|scss|sass|less|sql|sh|bash|zsh|env|toml|ini|cfg|conf|xml|svg|graphql|gql|proto|rs|go|java|kt|kts|c|h|cpp|cc|hpp|cs|rb|php|swift|dart|lua|r|jl|vue|svelte|diff|patch|lock|gitignore|editorconfig)$/i;
@@ -68,6 +70,57 @@ export function AttachFileIcon() {
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
             <polyline points="14 2 14 8 20 8" />
+        </svg>
+    );
+}
+
+function SkillIcon() {
+    return (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2l2.4 7.4H22l-6 4.4 2.3 7.2-6.3-4.6-6.3 4.6 2.3-7.2-6-4.4h7.6z" />
+        </svg>
+    );
+}
+
+function ConnectorIcon() {
+    return (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 2v4M15 2v4M6 10h12l-1 9a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2z" />
+        </svg>
+    );
+}
+
+function WebSearchIcon() {
+    return (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="2" y1="12" x2="22" y2="12" />
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+        </svg>
+    );
+}
+
+function ResearchIcon() {
+    return (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="7" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+    );
+}
+
+function CheckIcon() {
+    return (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+        </svg>
+    );
+}
+
+function BackIcon() {
+    return (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="15 18 9 12 15 6" />
         </svg>
     );
 }
@@ -461,9 +514,10 @@ const smallButtonStyle = {
     color: "var(--accent-contrast)", fontSize: "13px", fontWeight: "600", cursor: "pointer",
 };
 
-export default function AttachMenu({ token, sessionId, onAttach }) {
+export default function AttachMenu({ token, sessionId, onAttach, webSearchEnabled, onToggleWebSearch }) {
     const [open, setOpen] = useState(false);
-    const [view, setView] = useState("menu"); // menu | github | gitlab | github-connect | gitlab-connect
+    // menu | github | gitlab | github-connect | gitlab-connect | skills | connectors
+    const [view, setView] = useState("menu");
     const [fileError, setFileError] = useState(null);
     const fileInputRef = useRef(null);
 
@@ -516,14 +570,14 @@ export default function AttachMenu({ token, sessionId, onAttach }) {
                 <>
                     <div onClick={close} style={{ position: "fixed", inset: 0, zIndex: 29 }} />
                     <div style={{
-                        position: "absolute", bottom: "40px", left: 0, minWidth: "220px",
+                        position: "absolute", bottom: "40px", left: 0, minWidth: "240px", maxWidth: "88vw",
                         background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "12px",
                         boxShadow: "0 4px 16px rgba(0,0,0,0.15)", zIndex: 30, overflow: "hidden",
                     }}>
                         {view === "menu" && (
                             <div style={{ display: "flex", flexDirection: "column" }}>
                                 <input ref={fileInputRef} type="file" multiple hidden onChange={handleFiles} />
-                                <MenuRow icon={<UploadIcon />} label="Upload file" onClick={() => { setFileError(null); fileInputRef.current?.click(); }} />
+                                <MenuRow icon={<UploadIcon />} label="Add files or photos" onClick={() => { setFileError(null); fileInputRef.current?.click(); }} />
                                 <MenuRow icon={<GitHubIcon />} label="Add from GitHub" onClick={() => setView("github")} />
                                 <MenuRow icon={<GitLabIcon />} label="Add from GitLab" onClick={() => setView("gitlab")} />
                                 {fileError && (
@@ -531,6 +585,21 @@ export default function AttachMenu({ token, sessionId, onAttach }) {
                                         {fileError}
                                     </div>
                                 )}
+                                <Divider />
+                                <MenuRow icon={<SkillIcon />} label="Skills" onClick={() => setView("skills")} />
+                                <MenuRow icon={<ConnectorIcon />} label="Connectors" onClick={() => setView("connectors")} />
+                                <Divider />
+                                <MenuRow
+                                    icon={<WebSearchIcon />} label="Web search"
+                                    right={webSearchEnabled ? <CheckIcon /> : null}
+                                    onClick={() => onToggleWebSearch?.(v => !v)}
+                                />
+                                <MenuRow
+                                    icon={<ResearchIcon />} label="Deep research"
+                                    right={<span style={{ fontSize: "10px", color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: "999px", padding: "1px 6px" }}>Soon</span>}
+                                    onClick={() => {}}
+                                    muted
+                                />
                             </div>
                         )}
                         {(view === "github" || view === "gitlab") && (
@@ -550,6 +619,16 @@ export default function AttachMenu({ token, sessionId, onAttach }) {
                                 onSaved={() => setView(view.replace("-connect", ""))}
                             />
                         )}
+                        {view === "skills" && (
+                            <PanelView title="Skills" onBack={() => setView("menu")}>
+                                <SkillsPanel token={token} />
+                            </PanelView>
+                        )}
+                        {view === "connectors" && (
+                            <PanelView title="Connectors" onBack={() => setView("menu")}>
+                                <ConnectorsPanel token={token} />
+                            </PanelView>
+                        )}
                     </div>
                 </>
             )}
@@ -557,17 +636,38 @@ export default function AttachMenu({ token, sessionId, onAttach }) {
     );
 }
 
-function MenuRow({ icon, label, onClick }) {
+function MenuRow({ icon, label, onClick, right, muted }) {
     return (
         <button
             onClick={onClick}
             style={{
                 display: "flex", alignItems: "center", gap: "10px", width: "100%", textAlign: "left", padding: "10px 14px",
-                background: "none", border: "none", color: "var(--text)", fontSize: "14px", cursor: "pointer",
+                background: "none", border: "none", color: muted ? "var(--text-muted)" : "var(--text)", fontSize: "14px", cursor: "pointer",
             }}
         >
             <span style={{ display: "flex", color: "var(--text-muted)" }}>{icon}</span>
-            {label}
+            <span style={{ flex: 1 }}>{label}</span>
+            {right && <span style={{ display: "flex", alignItems: "center", color: "var(--accent)" }}>{right}</span>}
         </button>
+    );
+}
+
+function Divider() {
+    return <div style={{ height: "1px", background: "var(--border)", margin: "4px 0" }} />;
+}
+
+function PanelView({ title, onBack, children }) {
+    return (
+        <div style={{ display: "flex", flexDirection: "column", width: "300px", maxWidth: "80vw" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 12px", borderBottom: "1px solid var(--border)" }}>
+                <button onClick={onBack} aria-label="Back" style={{ display: "flex", background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "2px" }}>
+                    <BackIcon />
+                </button>
+                <span style={{ fontSize: "13px", fontWeight: "600", color: "var(--text)" }}>{title}</span>
+            </div>
+            <div style={{ padding: "10px 12px", maxHeight: "50vh", overflowY: "auto" }}>
+                {children}
+            </div>
+        </div>
     );
 }
