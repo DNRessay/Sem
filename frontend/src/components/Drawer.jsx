@@ -11,16 +11,21 @@ function timeAgo(unixSeconds) {
     return `${Math.floor(diff / 86400)}d ago`;
 }
 
-export default function Drawer({ open, onClose, currentSessionId, onNewChat, onOpenSession }) {
+export default function Drawer({ open, onClose, currentSessionId, onNewChat, onOpenSession, token, onLogout }) {
     const [sessions, setSessions] = useState([]);
     const [loading, setLoading] = useState(false);
     const [showFeed, setShowFeed] = useState(false);
 
+    const authHeaders = { Authorization: `Bearer ${token}` };
+
     useEffect(() => {
         if (!open) return;
         setLoading(true);
-        fetch(`${API}/sessions`)
-            .then(r => r.json())
+        fetch(`${API}/sessions`, { headers: authHeaders })
+            .then(r => {
+                if (r.status === 401) { onLogout(); return { sessions: [] }; }
+                return r.json();
+            })
             .then(data => setSessions(data.sessions || []))
             .catch(() => setSessions([]))
             .finally(() => setLoading(false));
@@ -28,7 +33,8 @@ export default function Drawer({ open, onClose, currentSessionId, onNewChat, onO
 
     const openSession = async (id) => {
         try {
-            const r = await fetch(`${API}/history/${id}`);
+            const r = await fetch(`${API}/history/${id}`, { headers: authHeaders });
+            if (r.status === 401) { onLogout(); return; }
             const data = await r.json();
             onOpenSession(id, data.turns || []);
         } catch {
@@ -97,15 +103,18 @@ export default function Drawer({ open, onClose, currentSessionId, onNewChat, onO
                     >
                         AGENT FEED <span>{showFeed ? "▾" : "▸"}</span>
                     </button>
-                    {showFeed && <AgentFeed sessionId={currentSessionId} />}
+                    {showFeed && <AgentFeed sessionId={currentSessionId} token={token} />}
                 </div>
 
-                <div style={{ borderTop: "1px solid var(--border)", padding: "12px 16px", display: "flex", alignItems: "center", gap: "10px" }}>
+                <button
+                    onClick={onLogout}
+                    style={{ borderTop: "1px solid var(--border)", padding: "12px 16px", display: "flex", alignItems: "center", gap: "10px", background: "none", border: "none", borderTopWidth: "1px", borderTopStyle: "solid", borderTopColor: "var(--border)", width: "100%", cursor: "pointer", textAlign: "left" }}
+                >
                     <div style={{ width: "28px", height: "28px", borderRadius: "50%", background: "var(--surface-2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "13px", color: "var(--text-muted)" }}>
                         👤
                     </div>
-                    <div style={{ fontSize: "13px", color: "var(--text)" }}>Profile</div>
-                </div>
+                    <div style={{ fontSize: "13px", color: "var(--text)" }}>Log out</div>
+                </button>
             </div>
         </>
     );

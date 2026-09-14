@@ -30,10 +30,10 @@ function ThinkingIndicator() {
     );
 }
 
-export default function ChatWindow({ sessionId = "default", initialHistory = [], onStreamChange, onNewChat }) {
+export default function ChatWindow({ sessionId = "default", initialHistory = [], onStreamChange, onNewChat, token, onUnauthorized }) {
     const [input, setInput] = useState("");
     const [history, setHistory] = useState(initialHistory);
-    const { chunks, streaming, error, send, abort } = useStream(API);
+    const { chunks, streaming, error, send, abort } = useStream(API, token, onUnauthorized);
     const bottomRef = useRef(null);
 
     const fullResponse = chunks.join("");

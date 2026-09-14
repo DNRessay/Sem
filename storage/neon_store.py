@@ -65,6 +65,14 @@ class NeonStore:
                     updated_at BIGINT NOT NULL
                 )
             """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS accounts (
+                    id TEXT PRIMARY KEY,
+                    passphrase_hash TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'owner',
+                    created_at BIGINT NOT NULL
+                )
+            """)
 
     async def save_memory(self, session_id: str, content: str, salience: float = 0.5,
                            embedding: list[float] | None = None) -> int:
@@ -136,6 +144,22 @@ class NeonStore:
                 session_id, limit,
             )
             return [dict(r) for r in rows]
+
+    async def get_account(self, account_id: str) -> dict | None:
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT id, passphrase_hash, role FROM accounts WHERE id=$1", account_id,
+            )
+            return dict(row) if row else None
+
+    async def upsert_account(self, account_id: str, passphrase_hash: str, role: str = "owner"):
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO accounts (id, passphrase_hash, role, created_at)
+                   VALUES ($1, $2, $3, $4)
+                   ON CONFLICT (id) DO UPDATE SET passphrase_hash=$2, role=$3""",
+                account_id, passphrase_hash, role, int(time.time()),
+            )
 
     async def get_user_model(self, session_id: str) -> dict | None:
         async with self._pool.acquire() as conn:

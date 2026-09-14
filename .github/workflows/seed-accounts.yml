@@ -1,0 +1,30 @@
+name: Seed accounts (one-off)
+
+# Manual-trigger only. Reads the actual passphrase(s) from the
+# OWNER_ACCOUNTS_JSON secret at run time — never committed to a file — and
+# hashes them before they ever touch the database. Safe to keep in a public
+# repo since neither this workflow nor the script contains real credentials.
+# Delete this file (and scripts/seed_accounts.py) once you're done adding
+# accounts, or keep it around and just re-run it (with an updated secret
+# value) whenever you want to add or change one.
+on:
+  workflow_dispatch:
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: pip install asyncpg
+
+      - name: Seed accounts into Neon
+        env:
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          OWNER_ACCOUNTS_JSON: ${{ secrets.OWNER_ACCOUNTS_JSON }}
+        run: python scripts/seed_accounts.py

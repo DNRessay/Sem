@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from "react";
 
-export function useStream(baseUrl = "") {
+export function useStream(baseUrl = "", token = "", onUnauthorized) {
     const [chunks, setChunks] = useState([]);
     const [streaming, setStreaming] = useState(false);
     const [error, setError] = useState(null);
@@ -21,11 +21,18 @@ export function useStream(baseUrl = "") {
         try {
             const res = await fetch(`${baseUrl}/chat`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                },
                 body: JSON.stringify({ message, session_id: sessionId, history }),
                 signal: abortRef.current.signal,
             });
 
+            if (res.status === 401) {
+                onUnauthorized?.();
+                throw new Error("Session expired — please log in again");
+            }
             if (!res.ok || !res.body) {
                 throw new Error(`Request failed: ${res.status}`);
             }
@@ -58,7 +65,7 @@ export function useStream(baseUrl = "") {
         }
 
         return full;
-    }, [baseUrl]);
+    }, [baseUrl, token, onUnauthorized]);
 
     const abort = useCallback(() => abortRef.current?.abort(), []);
 

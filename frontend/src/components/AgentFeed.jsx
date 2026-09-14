@@ -7,19 +7,21 @@ const COLORS = {
     explore: "#3a9b5c", dream: "#a855c9", swarm: "#5b5bc9",
 };
 
-export default function AgentFeed({ sessionId = "default" }) {
+export default function AgentFeed({ sessionId = "default", token }) {
     const [events, setEvents] = useState([]);
 
     useEffect(() => {
         const interval = setInterval(async () => {
             try {
-                const r = await fetch(`${API}/status/${sessionId}`);
+                const r = await fetch(`${API}/status/${sessionId}`, {
+                    headers: token ? { Authorization: `Bearer ${token}` } : {},
+                });
                 const data = await r.json();
                 if (data.event) setEvents(e => [data.event, ...e].slice(0, 50));
             } catch {}
         }, 3000);
         return () => clearInterval(interval);
-    }, [sessionId]);
+    }, [sessionId, token]);
 
     return (
         <div style={{ fontSize: "11px" }}>
