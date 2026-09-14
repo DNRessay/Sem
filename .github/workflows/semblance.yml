@@ -89,8 +89,10 @@ jobs:
           SEMBLANCE_SECRET_KEY: ${{ secrets.SEMBLANCE_SECRET_KEY }}
           SERP_API_KEY: ${{ secrets.SERP_API_KEY }}
           OPENCLAW_URL: ${{ secrets.OPENCLAW_URL }}
-          GITHUB_OAUTH_CLIENT_ID: ${{ secrets.GITHUB_OAUTH_CLIENT_ID }}
-          GITHUB_OAUTH_CLIENT_SECRET: ${{ secrets.GITHUB_OAUTH_CLIENT_SECRET }}
+          # Secret name can't start with GITHUB_ — GitHub Actions reserves
+          # that prefix for its own built-in secrets and refuses to save one.
+          GH_OAUTH_CLIENT_ID: ${{ secrets.GH_OAUTH_CLIENT_ID }}
+          GH_OAUTH_CLIENT_SECRET: ${{ secrets.GH_OAUTH_CLIENT_SECRET }}
           GITLAB_OAUTH_CLIENT_ID: ${{ secrets.GITLAB_OAUTH_CLIENT_ID }}
           GITLAB_OAUTH_CLIENT_SECRET: ${{ secrets.GITLAB_OAUTH_CLIENT_SECRET }}
         run: |
@@ -109,8 +111,8 @@ jobs:
           secret_key=$(printf '%s' "$SEMBLANCE_SECRET_KEY" | tr -d '\r\n')
           serp_api_key=$(printf '%s' "$SERP_API_KEY" | tr -d '\r\n')
           openclaw_url=$(printf '%s' "$OPENCLAW_URL" | tr -d '\r\n')
-          github_oauth_client_id=$(printf '%s' "$GITHUB_OAUTH_CLIENT_ID" | tr -d '\r\n')
-          github_oauth_client_secret=$(printf '%s' "$GITHUB_OAUTH_CLIENT_SECRET" | tr -d '\r\n')
+          github_oauth_client_id=$(printf '%s' "$GH_OAUTH_CLIENT_ID" | tr -d '\r\n')
+          github_oauth_client_secret=$(printf '%s' "$GH_OAUTH_CLIENT_SECRET" | tr -d '\r\n')
           gitlab_oauth_client_id=$(printf '%s' "$GITLAB_OAUTH_CLIENT_ID" | tr -d '\r\n')
           gitlab_oauth_client_secret=$(printf '%s' "$GITLAB_OAUTH_CLIENT_SECRET" | tr -d '\r\n')
 
