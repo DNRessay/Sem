@@ -48,17 +48,6 @@ jobs:
           fi
           echo "Baked API URL: $found"
 
-      - name: Check Pages project's configured production branch
-        # branch: main didn't produce a production deploy (still got a
-        # hash-prefixed preview URL), so the project's actual
-        # production_branch setting isn't "main". Ask the Cloudflare API
-        # directly rather than guessing again.
-        run: |
-          curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects/semblance" \
-            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            | python3 -c "import json,sys; d=json.load(sys.stdin); print('production_branch:', d.get('result',{}).get('production_branch')); print('name:', d.get('result',{}).get('name')); print('subdomain:', d.get('result',{}).get('subdomain'))"
-
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/pages-action@v1
         with:
@@ -66,12 +55,11 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           projectName: semblance
           directory: frontend/dist
-          # The action labels a deploy "production" (stable
-          # semblance-773.pages.dev URL) vs "preview" (a new
-          # <commit-hash>.semblance-773.pages.dev URL every time) based on
-          # whether this branch name matches the Pages project's configured
-          # production branch — it defaults to the actual git branch
-          # (claude/bold-hawking-8o28g3), which doesn't match, hence a fresh
-          # preview URL on every deploy so far. Forcing it to the project's
-          # production branch name here.
+          # The Cloudflare API confirms production_branch is "main" for this
+          # project, and branch: main is what the pages-action forwards to
+          # wrangler — but every deploy still landed as a hash-prefixed
+          # preview under wranglerVersion 2 (this action's default). Pinning
+          # wrangler 3, whose `pages deploy --branch` handling for
+          # production-vs-preview classification is more reliable.
           branch: main
+          wranglerVersion: "3"
