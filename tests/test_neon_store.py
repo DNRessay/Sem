@@ -47,13 +47,13 @@ async def test_seed_default_skills_inserts_every_starter_skill_into_an_empty_tab
     store._pool = _FakePool(count=0)
     calls = []
 
-    async def fake_upsert_skill(skill_id, name, triggers, content, description=""):
-        calls.append(skill_id)
+    async def fake_upsert_skill(skill_id, name, triggers, content, description="", source="manual"):
+        calls.append((skill_id, source))
 
     store.upsert_skill = fake_upsert_skill
     await store._seed_default_skills()
 
-    assert calls == [s["id"] for s in _DEFAULT_SKILLS]
+    assert calls == [(s["id"], "seed") for s in _DEFAULT_SKILLS]
 
 
 @pytest.mark.asyncio
@@ -70,5 +70,36 @@ async def test_seed_default_skills_does_nothing_when_the_table_already_has_rows(
 
     store.upsert_skill = fake_upsert_skill
     await store._seed_default_skills()
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_sync_repo_skills_upserts_every_skill_file_with_repo_source(monkeypatch):
+    store = NeonStore()
+    calls = []
+
+    async def fake_upsert_skill(skill_id, name, triggers, content, description="", source="manual"):
+        calls.append((skill_id, source))
+
+    store.upsert_skill = fake_upsert_skill
+    monkeypatch.setattr("pipeline.skill_files.load_skill_files", lambda: [
+        {"id": "repo-a", "name": "A", "description": "", "triggers": [], "content": "x"},
+        {"id": "repo-b", "name": "B", "description": "", "triggers": [], "content": "y"},
+    ])
+
+    await store._sync_repo_skills()
+
+    assert calls == [("repo-a", "repo"), ("repo-b", "repo")]
+
+
+@pytest.mark.asyncio
+async def test_sync_repo_skills_does_nothing_when_no_skill_files_exist(monkeypatch):
+    store = NeonStore()
+    calls = []
+    store.upsert_skill = lambda *a, **kw: calls.append(a)
+    monkeypatch.setattr("pipeline.skill_files.load_skill_files", lambda: [])
+
+    await store._sync_repo_skills()
 
     assert calls == []

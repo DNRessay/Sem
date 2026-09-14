@@ -50,7 +50,12 @@ export default function SkillsPanel({ token }) {
             {skills.map(s => (
                 <div key={s.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px", border: "1px solid var(--border)", borderRadius: "8px", padding: "6px 8px" }}>
                     <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: "12px", color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                            <span style={{ fontSize: "12px", color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</span>
+                            {s.source === "repo" && (
+                                <span style={{ fontSize: "9px", color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: "999px", padding: "0 5px", flexShrink: 0 }}>from repo</span>
+                            )}
+                        </div>
                         {s.description && (
                             <div style={{ fontSize: "10px", color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                                 {s.description}
@@ -60,7 +65,14 @@ export default function SkillsPanel({ token }) {
                             triggers: {(s.triggers || []).join(", ") || "(none)"}
                         </div>
                     </div>
-                    <button onClick={() => removeSkill(s.id)} aria-label={`Delete ${s.name}`} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: "13px", flexShrink: 0 }}>✕</button>
+                    {s.source === "repo" ? (
+                        <span title="Edit skills/*.md in the repo and redeploy to change this — editing or deleting it here won't stick"
+                            style={{ fontSize: "10px", color: "var(--text-muted)", flexShrink: 0 }}>
+                            🔒
+                        </span>
+                    ) : (
+                        <button onClick={() => removeSkill(s.id)} aria-label={`Delete ${s.name}`} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: "13px", flexShrink: 0 }}>✕</button>
+                    )}
                 </div>
             ))}
 

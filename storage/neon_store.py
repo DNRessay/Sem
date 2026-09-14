@@ -110,6 +110,7 @@ class NeonStore:
         self._pool = await asyncpg.create_pool(url, min_size=0, max_size=5, command_timeout=10)
         await self._init_schema()
         await self._seed_default_skills()
+        await self._sync_repo_skills()
 
     async def close(self):
         if self._pool:
@@ -212,6 +213,14 @@ class NeonStore:
             # its full body, so the model can consider a skill exists even
             # when the deterministic trigger keywords below don't fire.
             await conn.execute("ALTER TABLE skills ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT ''")
+            # source distinguishes who owns a skill row: 'manual' (made in
+            # the app's Skills panel), 'seed' (_seed_default_skills' starter
+            # set), or 'repo' (synced from skills/*.md — see
+            # pipeline/skill_files.py and _sync_repo_skills below). Only
+            # matters for the UI (a 'repo' skill shows read-only, since
+            # editing/deleting it there wouldn't survive the next sync) —
+            # nothing here enforces it server-side.
+            await conn.execute("ALTER TABLE skills ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual'")
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS session_repos (
                     session_id TEXT PRIMARY KEY,
@@ -421,7 +430,7 @@ class NeonStore:
 
     async def list_skills(self, enabled_only: bool = False) -> list[dict]:
         async with self._pool.acquire() as conn:
-            query = "SELECT id, name, description, triggers, content, enabled, created_at FROM skills"
+            query = "SELECT id, name, description, triggers, content, enabled, created_at, source FROM skills"
             if enabled_only:
                 query += " WHERE enabled = true"
             query += " ORDER BY created_at ASC"
@@ -429,14 +438,14 @@ class NeonStore:
             return [dict(r) for r in rows]
 
     async def upsert_skill(self, skill_id: str, name: str, triggers: list[str], content: str,
-                            description: str = "", enabled: bool = True):
+                            description: str = "", enabled: bool = True, source: str = "manual"):
         async with self._pool.acquire() as conn:
             now = int(time.time())
             await conn.execute(
-                """INSERT INTO skills (id, name, description, triggers, content, enabled, created_at, updated_at)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
-                   ON CONFLICT (id) DO UPDATE SET name=$2, description=$3, triggers=$4, content=$5, enabled=$6, updated_at=$7""",
-                skill_id, name, description, triggers, content, enabled, now,
+                """INSERT INTO skills (id, name, description, triggers, content, enabled, source, created_at, updated_at)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
+                   ON CONFLICT (id) DO UPDATE SET name=$2, description=$3, triggers=$4, content=$5, enabled=$6, source=$7, updated_at=$8""",
+                skill_id, name, description, triggers, content, enabled, source, now,
             )
 
     async def _seed_default_skills(self):
@@ -453,7 +462,24 @@ class NeonStore:
         for skill in _DEFAULT_SKILLS:
             await self.upsert_skill(
                 skill["id"], skill["name"], skill["triggers"], skill["content"],
-                description=skill["description"],
+                description=skill["description"], source="seed",
+            )
+
+    async def _sync_repo_skills(self):
+        """Repo-authored skill .md files (skills/*.md — see
+        skills/README.md and pipeline/skill_files.py) sync into the DB on
+        every connect, i.e. shortly after every deploy, since that's when
+        a fresh Lambda container cold-starts. Unlike _seed_default_skills,
+        this always upserts, never gated on an empty-table check — the
+        file is the actual source of truth for its own skill, so a pushed
+        edit should always win. Every id this writes is prefixed 'repo-'
+        (see skill_files.parse_skill_file), so it can never collide with
+        or overwrite a manually-created or seeded skill."""
+        from pipeline.skill_files import load_skill_files
+        for skill in load_skill_files():
+            await self.upsert_skill(
+                skill["id"], skill["name"], skill["triggers"], skill["content"],
+                description=skill["description"], source="repo",
             )
 
     async def delete_skill(self, skill_id: str):
