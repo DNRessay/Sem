@@ -204,3 +204,25 @@ jobs:
             echo "::error::/auth/login returned $login_status, expected 401 (route may be missing/misconfigured)"
             exit 1
           fi
+
+          # A plain curl POST above never sends an Origin header, so it never
+          # triggers the browser's CORS preflight — a real frontend request
+          # does. Simulate that preflight explicitly, since a genuine browser
+          # login attempt is failing with "Not Found" despite the direct POST
+          # above working fine, and this is the one code path curl alone
+          # can't reach.
+          echo "Testing OPTIONS $url/auth/login (CORS preflight, as a browser would send it)"
+          preflight_status=$(curl -s -o /tmp/preflight_body.txt -w "%{http_code}" -X OPTIONS "$url/auth/login" \
+            -H "Origin: https://semblance-773.pages.dev" \
+            -H "Access-Control-Request-Method: POST" \
+            -H "Access-Control-Request-Headers: content-type")
+          preflight_headers=$(curl -s -D - -o /dev/null -X OPTIONS "$url/auth/login" \
+            -H "Origin: https://semblance-773.pages.dev" \
+            -H "Access-Control-Request-Method: POST" \
+            -H "Access-Control-Request-Headers: content-type")
+          echo "status=$preflight_status body=$(cat /tmp/preflight_body.txt)"
+          echo "headers: $preflight_headers"
+          if [ "$preflight_status" -ge 300 ]; then
+            echo "::error::OPTIONS preflight on /auth/login returned $preflight_status — this is likely why real browser logins fail"
+            exit 1
+          fi
