@@ -1,0 +1,28 @@
+name: Seed owner profile (one-off)
+
+# Manual-trigger only, deliberately no push/pull_request trigger. Reads the
+# actual profile content from the OWNER_PROFILE_JSON secret at run time —
+# never committed to a file — so this workflow contains no personal data
+# itself and is safe to keep in a public repo. Delete this file (and
+# scripts/seed_owner_profile.py) once it's been run successfully.
+on:
+  workflow_dispatch:
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: pip install asyncpg
+
+      - name: Seed owner profile into Neon
+        env:
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          OWNER_PROFILE_JSON: ${{ secrets.OWNER_PROFILE_JSON }}
+        run: python scripts/seed_owner_profile.py
