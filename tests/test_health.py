@@ -12,8 +12,3 @@ def test_health_endpoint_does_not_require_db_or_cache():
     resp = client.get("/health")
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
-
-
-def test_lambda_handler_importable():
-    from lambda_handler import handler
-    assert callable(handler)

@@ -10,7 +10,8 @@ React frontend (Cloudflare Pages, free)
         │  VITE_API_URL
         ▼
 Lambda Function URL  ──────────────►  ChatFunction (Light tier)
-  (no API Gateway)                     FastAPI + Mangum
+  (no API Gateway,                     FastAPI + uvicorn,
+   RESPONSE_STREAM)                    via Lambda Web Adapter
                                         │
                     ┌───────────────────┼───────────────────┐
                     ▼                   ▼                   ▼

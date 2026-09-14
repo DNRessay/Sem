@@ -37,8 +37,9 @@ Stateless-per-call: given a request, produce a response, done.
 | **Embeddings** | `storage/embeddings.py` | Resolved below — an HTTP call to Modal, not an in-process model. |
 | **Cache** | `cache/*.py`, `cache/ddb_backend.py` | Resolved below — DynamoDB-backed, in-memory L1 for warm invocations. |
 
-**Deploy shape:** FastAPI + Mangum on Lambda, behind a Function URL (not API
-Gateway — see `docs/AWS_DEPLOYMENT.md` for why). `main.py`'s lifespan detects
+**Deploy shape:** FastAPI run directly under uvicorn via AWS Lambda Web
+Adapter, behind a Function URL in RESPONSE_STREAM mode (not API Gateway —
+see `docs/AWS_DEPLOYMENT.md` for why). `main.py`'s lifespan detects
 `AWS_LAMBDA_FUNCTION_NAME` and skips starting the KAIROS daemon loop.
 
 ---
