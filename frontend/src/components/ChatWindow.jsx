@@ -12,6 +12,59 @@ function renderMarkdown(text) {
     return { __html: DOMPurify.sanitize(marked.parse(text, { breaks: true })) };
 }
 
+function CopyIcon() {
+    return (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+        </svg>
+    );
+}
+
+function CheckIcon() {
+    return (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+        </svg>
+    );
+}
+
+function CopyButton({ text }) {
+    const [copied, setCopied] = useState(false);
+
+    const handleCopy = async () => {
+        try {
+            await navigator.clipboard.writeText(text);
+        } catch {
+            const ta = document.createElement("textarea");
+            ta.value = text;
+            ta.style.position = "fixed";
+            ta.style.opacity = "0";
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand("copy");
+            document.body.removeChild(ta);
+        }
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+    };
+
+    return (
+        <button
+            onClick={handleCopy}
+            aria-label={copied ? "Copied" : "Copy"}
+            title={copied ? "Copied" : "Copy"}
+            style={{
+                width: "26px", height: "26px", display: "flex", alignItems: "center", justifyContent: "center",
+                background: "none", border: "none", borderRadius: "6px",
+                color: copied ? "var(--accent)" : "var(--text-muted)", cursor: "pointer",
+            }}
+        >
+            {copied ? <CheckIcon /> : <CopyIcon />}
+        </button>
+    );
+}
+
 function ThinkingIndicator() {
     const [i, setI] = useState(0);
     const [elapsed, setElapsed] = useState(0);
@@ -65,12 +118,14 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                             {m.content}
                         </div>
                     ) : (
-                        <div
-                            key={i}
-                            className="md-content"
-                            style={{ alignSelf: "flex-start", maxWidth: "88%", padding: "0 2px", fontSize: "15px", lineHeight: "1.7" }}
-                            dangerouslySetInnerHTML={renderMarkdown(m.content)}
-                        />
+                        <div key={i} style={{ alignSelf: "flex-start", maxWidth: "88%" }}>
+                            <div
+                                className="md-content"
+                                style={{ padding: "0 2px", fontSize: "15px", lineHeight: "1.7" }}
+                                dangerouslySetInnerHTML={renderMarkdown(m.content)}
+                            />
+                            <CopyButton text={m.content} />
+                        </div>
                     )
                 ))}
                 {isThinking && (
