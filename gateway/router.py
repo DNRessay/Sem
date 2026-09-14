@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from config import settings
 from gateway.auth import issue_token, require_account, verify_passphrase
 from pipeline.bootstrap import Bootstrap
+from pipeline.web_context import detect_web_intent, run_web_intent, status_label
 from storage.neon_store import get_store
 from tau.tau_engine import TAUEngine
 
@@ -114,9 +115,18 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
     user_msg = _fold_attachments(user_msg, text_attachments)
     tau_ctx = await _tau.observe_and_inject(session_id, user_msg, history)
     bootstrap = Bootstrap(trust_mode=trust, tau_context=tau_ctx)
+    web_intent = detect_web_intent(user_msg)
 
     async def stream_gen():
-        async for chunk in bootstrap.run(user_msg, session_id, history, images=images):
+        msg = user_msg
+        if web_intent:
+            kind, target = web_intent
+            yield f"data: {json.dumps({'status': status_label(kind, target)})}\n\n"
+            web_block = await run_web_intent(kind, target)
+            if web_block:
+                msg = f"{msg}\n\n{web_block}"
+
+        async for chunk in bootstrap.run(msg, session_id, history, images=images):
             yield f"data: {json.dumps({'chunk': chunk})}\n\n"
         yield "data: [DONE]\n\n"
 

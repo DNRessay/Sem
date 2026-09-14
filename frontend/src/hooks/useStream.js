@@ -2,12 +2,14 @@ import { useState, useCallback, useRef } from "react";
 
 export function useStream(baseUrl = "", token = "", onUnauthorized) {
     const [chunks, setChunks] = useState([]);
+    const [status, setStatus] = useState(null);
     const [streaming, setStreaming] = useState(false);
     const [error, setError] = useState(null);
     const abortRef = useRef(null);
 
     const send = useCallback(async (message, sessionId = "default", history = [], attachments = []) => {
         setChunks([]);
+        setStatus(null);
         setError(null);
         setStreaming(true);
         abortRef.current = new AbortController();
@@ -50,9 +52,12 @@ export function useStream(baseUrl = "", token = "", onUnauthorized) {
                         if (data === "[DONE]") break;
                         try {
                             const parsed = JSON.parse(data);
-                            if (parsed.chunk) {
+                            if (parsed.status) {
+                                setStatus(parsed.status);
+                            } else if (parsed.chunk) {
                                 full += parsed.chunk;
                                 setChunks(c => [...c, parsed.chunk]);
+                                setStatus(null); // clear the breadcrumb once real content starts
                             }
                         } catch {}
                     }
@@ -69,5 +74,5 @@ export function useStream(baseUrl = "", token = "", onUnauthorized) {
 
     const abort = useCallback(() => abortRef.current?.abort(), []);
 
-    return { chunks, streaming, error, send, abort };
+    return { chunks, streaming, error, status, send, abort };
 }

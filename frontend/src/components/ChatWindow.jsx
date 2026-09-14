@@ -73,6 +73,24 @@ function CopyButton({ text }) {
     );
 }
 
+function GlobeIcon() {
+    return (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="2" y1="12" x2="22" y2="12" />
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+        </svg>
+    );
+}
+
+function WebStatusIndicator({ label }) {
+    return (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "var(--text-muted)", fontSize: "14px" }}>
+            <GlobeIcon /> {label}
+        </span>
+    );
+}
+
 function ThinkingIndicator() {
     const [i, setI] = useState(0);
     const [elapsed, setElapsed] = useState(0);
@@ -95,11 +113,11 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
     const [input, setInput] = useState("");
     const [history, setHistory] = useState(initialHistory);
     const [attachments, setAttachments] = useState([]);
-    const { chunks, streaming, error, send, abort } = useStream(API, token, onUnauthorized);
+    const { chunks, streaming, error, status, send, abort } = useStream(API, token, onUnauthorized);
     const bottomRef = useRef(null);
 
     const fullResponse = chunks.join("");
-    const isThinking = streaming && fullResponse.length === 0;
+    const isThinking = streaming && fullResponse.length === 0 && !status;
 
     useEffect(() => {
         onStreamChange?.(streaming);
@@ -158,12 +176,17 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                         </div>
                     )
                 ))}
+                {streaming && status && fullResponse.length === 0 && (
+                    <div style={{ alignSelf: "flex-start", padding: "6px 2px" }}>
+                        <WebStatusIndicator label={status} />
+                    </div>
+                )}
                 {isThinking && (
                     <div style={{ alignSelf: "flex-start", padding: "6px 2px" }}>
                         <ThinkingIndicator />
                     </div>
                 )}
-                {streaming && !isThinking && (
+                {streaming && !isThinking && !status && (
                     <div
                         className="md-content"
                         style={{ alignSelf: "flex-start", maxWidth: "88%", padding: "0 2px", fontSize: "15px", lineHeight: "1.7" }}
