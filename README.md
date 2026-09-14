@@ -239,7 +239,7 @@ DREAM consolidates memories on a 3-gate trigger (24hr + 5 sessions + lock), scor
 
 | Component | Service | Tier |
 |-----------|---------|------|
-| Chat API | AWS Lambda + Function URL, streaming (FastAPI via Lambda Web Adapter) | Free (1M req/mo forever) |
+| Chat API | AWS Lambda + Function URL (FastAPI via Mangum) | Free (1M req/mo forever) |
 | Scheduled KAIROS tick | AWS Lambda + EventBridge (rate: 15 min) | Free |
 | LLM Backend | Groq (Qwen3.8-27B) | Free |
 | Planning LLM | Groq (GPT-OSS-120B) | Free |
@@ -301,7 +301,7 @@ Each level overrides the previous. Total limit: 40,000 characters.
 ```
 semblance/
 ├── main.py                 ← FastAPI app (local dev entrypoint)
-├── run.sh                   ← Light tier — starts uvicorn under Lambda Web Adapter
+├── lambda_handler.py        ← Light tier — Mangum wrapper for AWS Lambda
 ├── tick_handler.py          ← Medium tier — scheduled KAIROS tick (EventBridge)
 ├── template.yaml             ← AWS SAM stack (Lambda, DynamoDB, EventBridge)
 ├── modal_app/

@@ -176,12 +176,12 @@ jobs:
             }'
 
       - name: Smoke test deployed endpoint
-        # Confirms the Function URL is actually serving the FastAPI app after
-        # the switch to AWS Lambda Web Adapter (run.sh + RESPONSE_STREAM) —
-        # a routing/startup regression there would silently 404 or hang
-        # instead of failing the deploy itself, since CloudFormation only
-        # checks that the *resources* converged, not that the app inside
-        # answers correctly.
+        # Confirms the Function URL is actually serving the FastAPI app —
+        # a routing/startup regression would silently 404 or hang instead
+        # of failing the deploy itself, since CloudFormation only checks
+        # that the *resources* converged, not that the app inside answers
+        # correctly. Kept from the (reverted) streaming attempt since it's
+        # cheap, real regression coverage regardless of invoke mode.
         run: |
           region="${{ secrets.AWS_REGION || 'eu-west-1' }}"
           url=$(aws cloudformation describe-stacks --stack-name semblance --region "$region" \
