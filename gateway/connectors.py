@@ -36,13 +36,13 @@ _OAUTH = {
 
 
 @router.get("/connectors")
-async def list_connectors(_account: dict = Depends(require_account)):
+async def list_connectors(account: dict = Depends(require_account)):
     db = await get_store()
-    return {"connectors": await db.list_connectors()}
+    return {"connectors": await db.list_connectors(account["account_id"])}
 
 
 @router.post("/connectors/{provider}")
-async def save_connector(provider: str, request: Request, _account: dict = Depends(require_account)):
+async def save_connector(provider: str, request: Request, account: dict = Depends(require_account)):
     if provider not in _PROVIDERS:
         raise HTTPException(400, f"Unknown provider '{provider}' — must be one of {sorted(_PROVIDERS)}")
     body = await request.json()
@@ -51,23 +51,26 @@ async def save_connector(provider: str, request: Request, _account: dict = Depen
         raise HTTPException(400, "token required")
 
     db = await get_store()
-    await db.upsert_connector(provider, token)
+    await db.upsert_connector(account["account_id"], provider, token)
     return {"provider": provider, "connected": True}
 
 
 @router.delete("/connectors/{provider}")
-async def remove_connector(provider: str, _account: dict = Depends(require_account)):
+async def remove_connector(provider: str, account: dict = Depends(require_account)):
     db = await get_store()
-    await db.delete_connector(provider)
+    await db.delete_connector(account["account_id"], provider)
     return {"provider": provider, "connected": False}
 
 
 @router.get("/connectors/{provider}/authorize")
-async def authorize(provider: str, _account: dict = Depends(require_account)):
+async def authorize(provider: str, account: dict = Depends(require_account)):
     """Returns the URL to send the browser to for the provider's OAuth
     consent screen. Requires a real Bearer token to call (this is a normal
-    authenticated fetch from the app, not the browser redirect itself), so
-    the state it mints is only ever issued to an already-logged-in owner."""
+    authenticated fetch from the app, not the browser redirect itself) — the
+    signed state it mints embeds *this* account's id, so any SEMBLANCE user
+    (owner or guest) can connect their own GitHub/GitLab independently and
+    the callback (which has no Authorization header to read account_id
+    from) still knows whose connector row to write."""
     if provider not in _PROVIDERS:
         raise HTTPException(400, f"Unknown provider '{provider}' — must be one of {sorted(_PROVIDERS)}")
     cfg = _OAUTH[provider]
@@ -82,7 +85,7 @@ async def authorize(provider: str, _account: dict = Depends(require_account)):
         raise HTTPException(400, "PUBLIC_API_URL isn't configured on this deployment yet")
 
     redirect_uri = f"{settings.PUBLIC_API_URL}/connectors/{provider}/callback"
-    state = _make_state(provider)
+    state = _make_state(provider, account["account_id"])
     params = {
         "client_id": client_id,
         "redirect_uri": redirect_uri,
@@ -111,7 +114,8 @@ async def oauth_callback(provider: str, request: Request):
     error = request.query_params.get("error")
     if error:
         return _callback_page(provider, ok=False, message=request.query_params.get("error_description", error))
-    if not code or not _verify_state(state, provider):
+    account_id = _verify_state(state, provider)
+    if not code or not account_id:
         return _callback_page(provider, ok=False, message="Invalid or expired authorization request — try connecting again.")
 
     cfg = _OAUTH[provider]
@@ -143,7 +147,7 @@ async def oauth_callback(provider: str, request: Request):
     expires_at = int(time.time()) + int(expires_in) if expires_in else None
 
     db = await get_store()
-    await db.upsert_connector(provider, access_token, refresh_token, expires_at)
+    await db.upsert_connector(account_id, provider, access_token, refresh_token, expires_at)
     return _callback_page(provider, ok=True)
 
 
@@ -154,24 +158,28 @@ def _callback_page(provider: str, ok: bool, message: str = "") -> HTMLResponse:
                          f"<h2>{title}</h2><p>{body}</p></body>")
 
 
-def _make_state(provider: str) -> str:
-    payload = json.dumps({"provider": provider, "exp": int(time.time()) + 600}).encode()
+def _make_state(provider: str, account_id: str) -> str:
+    payload = json.dumps({"provider": provider, "account_id": account_id, "exp": int(time.time()) + 600}).encode()
     sig = hmac.new(settings.SECRET_KEY.encode(), payload, hashlib.sha256).digest()
     return _b64url(payload) + "." + _b64url(sig)
 
 
-def _verify_state(state: str, provider: str) -> bool:
+def _verify_state(state: str, provider: str) -> str | None:
+    """Returns the embedded account_id if the state is a valid, unexpired,
+    unmodified state minted for this provider — None otherwise."""
     try:
         payload_b64, sig_b64 = state.split(".")
         payload = _b64url_decode(payload_b64)
         sig = _b64url_decode(sig_b64)
         expected_sig = hmac.new(settings.SECRET_KEY.encode(), payload, hashlib.sha256).digest()
         if not hmac.compare_digest(sig, expected_sig):
-            return False
+            return None
         data = json.loads(payload)
-        return data.get("provider") == provider and data.get("exp", 0) > time.time()
+        if data.get("provider") != provider or data.get("exp", 0) <= time.time():
+            return None
+        return data.get("account_id")
     except Exception:
-        return False
+        return None
 
 
 def _b64url(data: bytes) -> str:
@@ -183,7 +191,7 @@ def _b64url_decode(data: str) -> bytes:
 
 
 @router.post("/connectors/{provider}/fetch")
-async def fetch_file(provider: str, request: Request, _account: dict = Depends(require_account)):
+async def fetch_file(provider: str, request: Request, account: dict = Depends(require_account)):
     """Fetch one file's raw content from a GitHub or GitLab repo, for attaching to a chat message."""
     if provider not in _PROVIDERS:
         raise HTTPException(400, f"Unknown provider '{provider}' — must be one of {sorted(_PROVIDERS)}")
@@ -196,7 +204,7 @@ async def fetch_file(provider: str, request: Request, _account: dict = Depends(r
         raise HTTPException(400, "repo and path required")
 
     db = await get_store()
-    connector = await db.get_connector(provider)
+    connector = await db.get_connector(account["account_id"], provider)
     if not connector:
         raise HTTPException(400, f"No {provider} connector configured — add a token first")
 
@@ -204,7 +212,7 @@ async def fetch_file(provider: str, request: Request, _account: dict = Depends(r
         if provider == "github":
             content = await _fetch_github(repo, path, ref, connector["token"])
         else:
-            token = await _ensure_fresh_gitlab_token(connector, db)
+            token = await _ensure_fresh_gitlab_token(account["account_id"], connector, db)
             content = await _fetch_gitlab(repo, path, ref, token)
     except httpx.HTTPStatusError as e:
         raise HTTPException(e.response.status_code, f"{provider} error: {e.response.text[:300]}")
@@ -243,7 +251,7 @@ async def _fetch_gitlab(repo: str, path: str, ref: str, token: str) -> str:
         return r.text
 
 
-async def _ensure_fresh_gitlab_token(connector: dict, db) -> str:
+async def _ensure_fresh_gitlab_token(account_id: str, connector: dict, db) -> str:
     """OAuth-issued GitLab access tokens expire in ~2h; a manually pasted PAT
     has no expires_at/refresh_token and is returned as-is. Refreshes and
     persists the new token/expiry when it's within 60s of expiring, so a
@@ -267,5 +275,5 @@ async def _ensure_fresh_gitlab_token(connector: dict, db) -> str:
     new_token = data["access_token"]
     new_refresh = data.get("refresh_token", refresh_token)
     new_expires_at = int(time.time()) + int(data["expires_in"]) if data.get("expires_in") else None
-    await db.upsert_connector("gitlab", new_token, new_refresh, new_expires_at)
+    await db.upsert_connector(account_id, "gitlab", new_token, new_refresh, new_expires_at)
     return new_token

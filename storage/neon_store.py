@@ -88,6 +88,29 @@ class NeonStore:
             # environment that deployed before this column was added.
             await conn.execute("ALTER TABLE connectors ADD COLUMN IF NOT EXISTS refresh_token TEXT")
             await conn.execute("ALTER TABLE connectors ADD COLUMN IF NOT EXISTS expires_at BIGINT")
+            # account_id + composite PK: connectors started out global-per-
+            # provider, which meant a guest connecting their own GitHub would
+            # silently overwrite the owner's. Existing rows (from before any
+            # account scoping existed) are backfilled to 'owner', the only
+            # account that could have created them. The named-constraint
+            # check makes this idempotent — a plain DROP+ADD PRIMARY KEY
+            # would error on every deploy after the first, since the second
+            # attempt to add the already-composite key hits Postgres'
+            # "multiple primary keys" restriction.
+            await conn.execute("ALTER TABLE connectors ADD COLUMN IF NOT EXISTS account_id TEXT NOT NULL DEFAULT 'owner'")
+            await conn.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.table_constraints
+                        WHERE table_name = 'connectors' AND constraint_type = 'PRIMARY KEY'
+                        AND constraint_name = 'connectors_account_provider_pkey'
+                    ) THEN
+                        ALTER TABLE connectors DROP CONSTRAINT IF EXISTS connectors_pkey;
+                        ALTER TABLE connectors ADD CONSTRAINT connectors_account_provider_pkey PRIMARY KEY (account_id, provider);
+                    END IF;
+                END $$;
+            """)
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS skills (
                     id TEXT PRIMARY KEY,
@@ -194,32 +217,35 @@ class NeonStore:
                 account_id, passphrase_hash, role, int(time.time()),
             )
 
-    async def get_connector(self, provider: str) -> dict | None:
+    async def get_connector(self, account_id: str, provider: str) -> dict | None:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT provider, token, refresh_token, expires_at FROM connectors WHERE provider=$1", provider,
+                "SELECT provider, token, refresh_token, expires_at FROM connectors WHERE account_id=$1 AND provider=$2",
+                account_id, provider,
             )
             return dict(row) if row else None
 
-    async def list_connectors(self) -> list[str]:
-        """Provider names only — never the token."""
+    async def list_connectors(self, account_id: str) -> list[str]:
+        """Provider names only, for this account — never the token."""
         async with self._pool.acquire() as conn:
-            rows = await conn.fetch("SELECT provider FROM connectors ORDER BY provider")
+            rows = await conn.fetch(
+                "SELECT provider FROM connectors WHERE account_id=$1 ORDER BY provider", account_id,
+            )
             return [r["provider"] for r in rows]
 
-    async def upsert_connector(self, provider: str, token: str,
+    async def upsert_connector(self, account_id: str, provider: str, token: str,
                                 refresh_token: str | None = None, expires_at: int | None = None):
         async with self._pool.acquire() as conn:
             await conn.execute(
-                """INSERT INTO connectors (provider, token, refresh_token, expires_at, updated_at)
-                   VALUES ($1, $2, $3, $4, $5)
-                   ON CONFLICT (provider) DO UPDATE SET token=$2, refresh_token=$3, expires_at=$4, updated_at=$5""",
-                provider, token, refresh_token, expires_at, int(time.time()),
+                """INSERT INTO connectors (account_id, provider, token, refresh_token, expires_at, updated_at)
+                   VALUES ($1, $2, $3, $4, $5, $6)
+                   ON CONFLICT (account_id, provider) DO UPDATE SET token=$3, refresh_token=$4, expires_at=$5, updated_at=$6""",
+                account_id, provider, token, refresh_token, expires_at, int(time.time()),
             )
 
-    async def delete_connector(self, provider: str):
+    async def delete_connector(self, account_id: str, provider: str):
         async with self._pool.acquire() as conn:
-            await conn.execute("DELETE FROM connectors WHERE provider=$1", provider)
+            await conn.execute("DELETE FROM connectors WHERE account_id=$1 AND provider=$2", account_id, provider)
 
     async def list_skills(self, enabled_only: bool = False) -> list[dict]:
         async with self._pool.acquire() as conn:

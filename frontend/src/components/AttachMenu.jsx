@@ -3,10 +3,37 @@ import { useState, useRef } from "react";
 const API = import.meta.env.VITE_API_URL || "";
 const TEXT_EXT = /\.(txt|md|py|js|jsx|ts|tsx|json|csv|log|ya?ml|html?|css|sql|sh|env|toml|ini|xml)$/i;
 
-function ClipIcon() {
+export function UploadIcon() {
     return (
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="17 8 12 3 7 8" />
+            <line x1="12" y1="3" x2="12" y2="15" />
+        </svg>
+    );
+}
+
+export function GitHubIcon() {
+    return (
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <path fillRule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z" />
+        </svg>
+    );
+}
+
+export function GitLabIcon() {
+    return (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M22.65 14.39L12 22.13 1.35 14.39a.84.84 0 0 1-.3-.94l1.22-3.78L4.71 2.16a.42.42 0 0 1 .8 0l2.44 7.51h8.1l2.44-7.51a.42.42 0 0 1 .8 0l2.44 7.51 1.22 3.78a.84.84 0 0 1-.3.94z" />
+        </svg>
+    );
+}
+
+export function AttachFileIcon() {
+    return (
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
         </svg>
     );
 }
@@ -36,7 +63,7 @@ function RepoForm({ provider, token, onAttach, onNeedConnector, onClose }) {
                 }
                 throw new Error(data.detail || `Fetch failed (${res.status})`);
             }
-            onAttach({ name: `${repo}/${path}`, content: data.content });
+            onAttach({ name: `${repo}/${path}`, content: data.content, source: provider });
             onClose();
         } catch (e) {
             setError(e.message);
@@ -157,7 +184,7 @@ export default function AttachMenu({ token, onAttach }) {
         for (const file of files) {
             if (!TEXT_EXT.test(file.name)) continue; // skip binaries — these models read text, not images
             const content = await file.text();
-            onAttach({ name: file.name, content });
+            onAttach({ name: file.name, content, source: "file" });
         }
         e.target.value = "";
         close();
@@ -167,14 +194,14 @@ export default function AttachMenu({ token, onAttach }) {
         <div style={{ position: "relative" }}>
             <button
                 onClick={() => setOpen(v => !v)}
-                aria-label="Attach"
+                aria-label="Add"
                 style={{
                     width: "32px", height: "32px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
                     background: "none", border: "1px solid var(--border)", borderRadius: "50%",
-                    color: "var(--text-muted)", cursor: "pointer",
+                    color: "var(--text-muted)", cursor: "pointer", fontSize: "17px", lineHeight: 1,
                 }}
             >
-                <ClipIcon />
+                +
             </button>
 
             {open && (
@@ -188,9 +215,9 @@ export default function AttachMenu({ token, onAttach }) {
                         {view === "menu" && (
                             <div style={{ display: "flex", flexDirection: "column" }}>
                                 <input ref={fileInputRef} type="file" multiple hidden onChange={handleFiles} />
-                                <MenuRow label="Upload file" onClick={() => fileInputRef.current?.click()} />
-                                <MenuRow label="Add from GitHub" onClick={() => setView("github")} />
-                                <MenuRow label="Add from GitLab" onClick={() => setView("gitlab")} />
+                                <MenuRow icon={<UploadIcon />} label="Upload file" onClick={() => fileInputRef.current?.click()} />
+                                <MenuRow icon={<GitHubIcon />} label="Add from GitHub" onClick={() => setView("github")} />
+                                <MenuRow icon={<GitLabIcon />} label="Add from GitLab" onClick={() => setView("gitlab")} />
                             </div>
                         )}
                         {(view === "github" || view === "gitlab") && (
@@ -216,15 +243,16 @@ export default function AttachMenu({ token, onAttach }) {
     );
 }
 
-function MenuRow({ label, onClick }) {
+function MenuRow({ icon, label, onClick }) {
     return (
         <button
             onClick={onClick}
             style={{
-                display: "block", width: "100%", textAlign: "left", padding: "10px 14px",
+                display: "flex", alignItems: "center", gap: "10px", width: "100%", textAlign: "left", padding: "10px 14px",
                 background: "none", border: "none", color: "var(--text)", fontSize: "14px", cursor: "pointer",
             }}
         >
+            <span style={{ display: "flex", color: "var(--text-muted)" }}>{icon}</span>
             {label}
         </button>
     );

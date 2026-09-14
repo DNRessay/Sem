@@ -11,19 +11,21 @@ from main import app
 
 class FakeStore:
     def __init__(self):
-        self.connectors = {}
+        self.connectors = {}  # (account_id, provider) -> dict
 
-    async def list_connectors(self):
-        return sorted(self.connectors.keys())
+    async def list_connectors(self, account_id):
+        return sorted(p for (a, p) in self.connectors if a == account_id)
 
-    async def upsert_connector(self, provider, token, refresh_token=None, expires_at=None):
-        self.connectors[provider] = {"token": token, "refresh_token": refresh_token, "expires_at": expires_at}
+    async def upsert_connector(self, account_id, provider, token, refresh_token=None, expires_at=None):
+        self.connectors[(account_id, provider)] = {
+            "token": token, "refresh_token": refresh_token, "expires_at": expires_at,
+        }
 
-    async def delete_connector(self, provider):
-        self.connectors.pop(provider, None)
+    async def delete_connector(self, account_id, provider):
+        self.connectors.pop((account_id, provider), None)
 
-    async def get_connector(self, provider):
-        c = self.connectors.get(provider)
+    async def get_connector(self, account_id, provider):
+        c = self.connectors.get((account_id, provider))
         return {"provider": provider, **c} if c else None
 
 
@@ -48,7 +50,7 @@ def test_save_and_list_connector(client):
 
     resp = c.get("/connectors")
     assert resp.json() == {"connectors": ["github"]}
-    assert store.connectors["github"]["token"] == "ghp_test123"
+    assert store.connectors[("owner", "github")]["token"] == "ghp_test123"
 
 
 def test_save_connector_rejects_unknown_provider(client):
@@ -68,7 +70,20 @@ def test_delete_connector(client):
     c.post("/connectors/gitlab", json={"token": "glpat_test"})
     resp = c.delete("/connectors/gitlab")
     assert resp.status_code == 200
-    assert "gitlab" not in store.connectors
+    assert ("owner", "gitlab") not in store.connectors
+
+
+def test_connectors_are_isolated_per_account(client):
+    c, store = client
+    c.post("/connectors/github", json={"token": "owner-token"})
+
+    app.dependency_overrides[require_account] = lambda: {"account_id": "guest1", "role": "guest"}
+    resp = c.get("/connectors")
+    assert resp.json() == {"connectors": []}  # guest sees none of the owner's
+
+    c.post("/connectors/github", json={"token": "guest-token"})
+    assert store.connectors[("owner", "github")]["token"] == "owner-token"  # unchanged
+    assert store.connectors[("guest1", "github")]["token"] == "guest-token"
 
 
 def test_fetch_without_configured_connector_errors(client):
@@ -80,7 +95,7 @@ def test_fetch_without_configured_connector_errors(client):
 
 def test_fetch_requires_repo_and_path(client):
     c, store = client
-    store.connectors["github"] = {"token": "ghp_test", "refresh_token": None, "expires_at": None}
+    store.connectors[("owner", "github")] = {"token": "ghp_test", "refresh_token": None, "expires_at": None}
     resp = c.post("/connectors/github/fetch", json={"repo": "", "path": ""})
     assert resp.status_code == 400
 
@@ -107,10 +122,15 @@ def test_authorize_returns_provider_consent_url(client, monkeypatch):
 
 
 def test_state_round_trips_and_rejects_tampering():
-    state = _make_state("github")
-    assert _verify_state(state, "github") is True
-    assert _verify_state(state, "gitlab") is False  # wrong provider
-    assert _verify_state(state + "x", "github") is False  # tampered
+    state = _make_state("github", "owner")
+    assert _verify_state(state, "github") == "owner"
+    assert _verify_state(state, "gitlab") is None  # wrong provider
+    assert _verify_state(state + "x", "github") is None  # tampered
+
+
+def test_state_carries_the_authorizing_account_not_just_owner():
+    state = _make_state("github", "guest7")
+    assert _verify_state(state, "github") == "guest7"
 
 
 def test_callback_rejects_missing_or_invalid_state(client):
@@ -120,13 +140,16 @@ def test_callback_rejects_missing_or_invalid_state(client):
     assert "failed" in resp.text.lower()
 
 
-def test_callback_exchanges_code_and_stores_token(client, monkeypatch):
+def test_callback_exchanges_code_and_stores_token_for_the_authorizing_account(client, monkeypatch):
     monkeypatch.setattr(settings, "GITHUB_CLIENT_ID", "abc123")
     monkeypatch.setattr(settings, "GITHUB_CLIENT_SECRET", "shh")
     monkeypatch.setattr(settings, "PUBLIC_API_URL", "https://api.example.com")
     c, store = client
 
-    state = _make_state("github")
+    # A guest's own /authorize call would mint a state carrying their id —
+    # the callback (no auth header available) must honor that, not silently
+    # attribute the connection to whichever account is "current" server-side.
+    state = _make_state("github", "guest3")
     with respx.mock:
         respx.post("https://github.com/login/oauth/access_token").mock(
             return_value=Response(200, json={"access_token": "gho_realtoken", "token_type": "bearer"})
@@ -135,4 +158,5 @@ def test_callback_exchanges_code_and_stores_token(client, monkeypatch):
 
     assert resp.status_code == 200
     assert "connected" in resp.text.lower()
-    assert store.connectors["github"]["token"] == "gho_realtoken"
+    assert store.connectors[("guest3", "github")]["token"] == "gho_realtoken"
+    assert ("owner", "github") not in store.connectors

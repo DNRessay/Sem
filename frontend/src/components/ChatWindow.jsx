@@ -3,7 +3,7 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { useStream } from "../hooks/useStream";
 import VoiceInput from "./VoiceInput";
-import AttachMenu from "./AttachMenu";
+import AttachMenu, { GitHubIcon, GitLabIcon, AttachFileIcon } from "./AttachMenu";
 
 const API = import.meta.env.VITE_API_URL || "";
 const MODEL_LABEL = "Qwen";
@@ -22,13 +22,10 @@ function CopyIcon() {
     );
 }
 
-function FileIcon() {
-    return (
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-            <polyline points="14 2 14 8 20 8" />
-        </svg>
-    );
+function iconForSource(source) {
+    if (source === "github") return <GitHubIcon />;
+    if (source === "gitlab") return <GitLabIcon />;
+    return <AttachFileIcon />;
 }
 
 function CheckIcon() {
@@ -93,7 +90,7 @@ function ThinkingIndicator() {
     );
 }
 
-export default function ChatWindow({ sessionId = "default", initialHistory = [], onStreamChange, onNewChat, token, onUnauthorized }) {
+export default function ChatWindow({ sessionId = "default", initialHistory = [], onStreamChange, token, onUnauthorized }) {
     const [input, setInput] = useState("");
     const [history, setHistory] = useState(initialHistory);
     const [attachments, setAttachments] = useState([]);
@@ -117,7 +114,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
         const files = attachments;
         setInput("");
         setAttachments([]);
-        setHistory(h => [...h, { role: "user", content: msg, files: files.map(f => f.name) }]);
+        setHistory(h => [...h, { role: "user", content: msg, files: files.map(f => ({ name: f.name, source: f.source })) }]);
         const reply = await send(msg, sessionId, history, files);
         if (reply) setHistory(h => [...h, { role: "assistant", content: reply }]);
     };
@@ -132,12 +129,15 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                     m.role === "user" ? (
                         <div key={i} style={{ alignSelf: "flex-end", maxWidth: "80%", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px" }}>
                             {m.files?.length > 0 && (
-                                <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", justifyContent: "flex-end" }}>
-                                    {m.files.map(name => (
-                                        <span key={name} style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "11px", color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: "6px", padding: "2px 6px" }}>
-                                            <FileIcon /> {name}
-                                        </span>
-                                    ))}
+                                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "3px" }}>
+                                    <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>Attached files</span>
+                                    <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", justifyContent: "flex-end" }}>
+                                        {m.files.map(f => (
+                                            <span key={f.name} style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "11px", color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: "6px", padding: "2px 6px" }}>
+                                                {iconForSource(f.source)} {f.name}
+                                            </span>
+                                        ))}
+                                    </div>
                                 </div>
                             )}
                             {m.content && (
@@ -179,13 +179,16 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
             <div style={{ padding: "8px 8px 24px", width: "100%", boxSizing: "border-box" }}>
                 <div style={{ display: "flex", flexDirection: "column", width: "100%", boxSizing: "border-box", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "26px", padding: "10px 14px 8px" }}>
                     {attachments.length > 0 && (
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", padding: "0 2px 8px" }}>
-                            {attachments.map(f => (
-                                <span key={f.name} style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "var(--text)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "8px", padding: "4px 8px" }}>
-                                    <FileIcon /> {f.name}
-                                    <button onClick={() => removeAttachment(f.name)} aria-label={`Remove ${f.name}`} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: "13px", lineHeight: 1, padding: 0 }}>✕</button>
-                                </span>
-                            ))}
+                        <div style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "0 2px 8px" }}>
+                            <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>Attached files</span>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                                {attachments.map(f => (
+                                    <span key={f.name} style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "var(--text)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "8px", padding: "4px 8px" }}>
+                                        {iconForSource(f.source)} {f.name}
+                                        <button onClick={() => removeAttachment(f.name)} aria-label={`Remove ${f.name}`} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: "13px", lineHeight: 1, padding: 0 }}>✕</button>
+                                    </span>
+                                ))}
+                            </div>
                         </div>
                     )}
                     <input
@@ -196,17 +199,6 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                         style={{ width: "100%", boxSizing: "border-box", background: "transparent", border: "none", padding: "2px 2px 8px", color: "var(--text)", fontSize: "15px", outline: "none" }}
                     />
                     <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        <button
-                            onClick={onNewChat}
-                            aria-label="New chat"
-                            style={{
-                                width: "32px", height: "32px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
-                                background: "none", border: "1px solid var(--border)", borderRadius: "50%",
-                                color: "var(--text-muted)", cursor: "pointer", fontSize: "17px", lineHeight: 1,
-                            }}
-                        >
-                            +
-                        </button>
                         <AttachMenu token={token} onAttach={addAttachment} />
                         <span style={{ display: "flex", alignItems: "center", gap: "3px", border: "1px solid var(--border)", borderRadius: "999px", padding: "5px 10px", fontSize: "12px", color: "var(--text-muted)" }}>
                             {MODEL_LABEL} <span style={{ fontSize: "9px" }}>▾</span>
