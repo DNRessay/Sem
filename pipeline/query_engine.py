@@ -16,6 +16,14 @@ CACHE_BREAK_VECTORS = [
 
 assert len(CACHE_BREAK_VECTORS) == 14
 
+# Groq has rejected live requests at max_tokens=1024 with "Request too large
+# ... on output tokens per minute (OTPM): Limit 1000, Requested 1024" for
+# qwen/qwen3.8-27b — that request alone exceeded the account's per-minute
+# output-token budget on this tier, independent of any other traffic that
+# minute. 800 leaves real headroom under a 1000 OTPM cap; if Groq's limit for
+# this model/tier is raised, this can go back up.
+_DEFAULT_MAX_TOKENS = 800
+
 
 class QueryEngine:
     def __init__(self):
@@ -29,7 +37,7 @@ class QueryEngine:
         messages: list,
         model: str = settings.GROQ_MODEL,
         session_id: str = "default",
-        max_tokens: int = 1024,
+        max_tokens: int = _DEFAULT_MAX_TOKENS,
         temperature: float = 0.5,
     ) -> dict:
         # Hash the whole conversation, not just the first two messages —
@@ -77,7 +85,7 @@ class QueryEngine:
         messages: list,
         model: str = settings.GROQ_MODEL,
         session_id: str = "default",
-        max_tokens: int = 1024,
+        max_tokens: int = _DEFAULT_MAX_TOKENS,
         temperature: float = 0.5,
     ):
         """
