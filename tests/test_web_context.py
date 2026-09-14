@@ -19,6 +19,14 @@ def test_detect_web_intent_finds_search_phrase():
     assert detect_web_intent("google the current bitcoin price")[0] == "search"
 
 
+def test_detect_web_intent_finds_search_phrased_with_on_the_web():
+    # "search on the web" has "search" nowhere adjacent to either fixed
+    # phrase ("search the web", "search ... for") the old regex required —
+    # this used to fall through to no web intent at all.
+    assert detect_web_intent("can you search on the web who angus McLeod is?")[0] == "search"
+    assert detect_web_intent("please search who won the match")[0] == "search"
+
+
 def test_detect_web_intent_finds_weather_phrase_without_other_trigger_words():
     assert detect_web_intent("what's the weather like in Pretoria 2day")[0] == "search"
     assert detect_web_intent("weather forecast for durban")[0] == "search"

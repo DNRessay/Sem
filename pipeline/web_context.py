@@ -11,7 +11,12 @@ _NEWS_RE = re.compile(
     re.I,
 )
 _SEARCH_RE = re.compile(
-    r"\b(search (?:the web )?for|search the web|look up|google|"
+    # A bare "search" trigger, not just "search the web for"/"search the web"
+    # literally — a phrasing like "search on the web who X is" or "can you
+    # search who X is" has "search" nowhere near either fixed phrase and used
+    # to fall through to no web intent at all, silently answering from
+    # training knowledge with no search chip shown.
+    r"\b(search|look up|google|"
     r"what'?s the latest|find (?:me )?(?:info|information) (?:on|about)|"
     r"what'?s the weather|weather (?:in|for|at|like)|weather forecast)\b",
     re.I,
