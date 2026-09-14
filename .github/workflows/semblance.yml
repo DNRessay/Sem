@@ -226,3 +226,13 @@ jobs:
             echo "::error::OPTIONS preflight on /auth/login returned $preflight_status — this is likely why real browser logins fail"
             exit 1
           fi
+
+          for path in /connectors /skills; do
+            echo "Testing GET $url$path (expect 401 unauthenticated, confirms routing works)"
+            status=$(curl -s -o /tmp/route_body.txt -w "%{http_code}" "$url$path")
+            echo "status=$status body=$(cat /tmp/route_body.txt)"
+            if [ "$status" != "401" ]; then
+              echo "::error::$path returned $status, expected 401 (route may be missing/misconfigured)"
+              exit 1
+            fi
+          done

@@ -35,16 +35,34 @@ async def login(request: Request):
     return {"token": issue_token(account["id"], account["role"])}
 
 
+def _fold_attachments(user_msg: str, attachments: list) -> str:
+    """Appends uploaded/fetched file content to the query as fenced blocks the
+    model can read like any other context — there's no separate multimodal
+    file channel on the Groq models this app runs on, so text is folded
+    straight into the message rather than sent out-of-band."""
+    if not attachments:
+        return user_msg
+    blocks = ["<attachments>"]
+    for a in attachments:
+        name = a.get("name", "file")
+        content = a.get("content", "")
+        blocks.append(f'<file name="{name}">\n{content}\n</file>')
+    blocks.append("</attachments>")
+    return f"{user_msg}\n\n" + "\n".join(blocks)
+
+
 @router.post("/chat")
 async def chat(request: Request, trust: str = Depends(_get_trust), _account: dict = Depends(require_account)):
     body = await request.json()
     user_msg = body.get("message", "")
     session_id = body.get("session_id", "default")
     history = body.get("history", [])
+    attachments = body.get("attachments", [])
 
     if not user_msg:
         raise HTTPException(400, "message required")
 
+    user_msg = _fold_attachments(user_msg, attachments)
     tau_ctx = await _tau.observe_and_inject(session_id, user_msg, history)
     bootstrap = Bootstrap(trust_mode=trust, tau_context=tau_ctx)
 

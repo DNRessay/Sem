@@ -73,6 +73,24 @@ class NeonStore:
                     created_at BIGINT NOT NULL
                 )
             """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS connectors (
+                    provider TEXT PRIMARY KEY,
+                    token TEXT NOT NULL,
+                    updated_at BIGINT NOT NULL
+                )
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS skills (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    triggers TEXT[] NOT NULL DEFAULT '{}',
+                    content TEXT NOT NULL,
+                    enabled BOOLEAN NOT NULL DEFAULT true,
+                    created_at BIGINT NOT NULL,
+                    updated_at BIGINT NOT NULL
+                )
+            """)
 
     async def save_memory(self, session_id: str, content: str, salience: float = 0.5,
                            embedding: list[float] | None = None) -> int:
@@ -160,6 +178,52 @@ class NeonStore:
                    ON CONFLICT (id) DO UPDATE SET passphrase_hash=$2, role=$3""",
                 account_id, passphrase_hash, role, int(time.time()),
             )
+
+    async def get_connector(self, provider: str) -> dict | None:
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT provider, token FROM connectors WHERE provider=$1", provider)
+            return dict(row) if row else None
+
+    async def list_connectors(self) -> list[str]:
+        """Provider names only — never the token."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch("SELECT provider FROM connectors ORDER BY provider")
+            return [r["provider"] for r in rows]
+
+    async def upsert_connector(self, provider: str, token: str):
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO connectors (provider, token, updated_at) VALUES ($1, $2, $3)
+                   ON CONFLICT (provider) DO UPDATE SET token=$2, updated_at=$3""",
+                provider, token, int(time.time()),
+            )
+
+    async def delete_connector(self, provider: str):
+        async with self._pool.acquire() as conn:
+            await conn.execute("DELETE FROM connectors WHERE provider=$1", provider)
+
+    async def list_skills(self, enabled_only: bool = False) -> list[dict]:
+        async with self._pool.acquire() as conn:
+            query = "SELECT id, name, triggers, content, enabled, created_at FROM skills"
+            if enabled_only:
+                query += " WHERE enabled = true"
+            query += " ORDER BY created_at ASC"
+            rows = await conn.fetch(query)
+            return [dict(r) for r in rows]
+
+    async def upsert_skill(self, skill_id: str, name: str, triggers: list[str], content: str, enabled: bool = True):
+        async with self._pool.acquire() as conn:
+            now = int(time.time())
+            await conn.execute(
+                """INSERT INTO skills (id, name, triggers, content, enabled, created_at, updated_at)
+                   VALUES ($1, $2, $3, $4, $5, $6, $6)
+                   ON CONFLICT (id) DO UPDATE SET name=$2, triggers=$3, content=$4, enabled=$5, updated_at=$6""",
+                skill_id, name, triggers, content, enabled, now,
+            )
+
+    async def delete_skill(self, skill_id: str):
+        async with self._pool.acquire() as conn:
+            await conn.execute("DELETE FROM skills WHERE id=$1", skill_id)
 
     async def get_user_model(self, session_id: str) -> dict | None:
         async with self._pool.acquire() as conn:

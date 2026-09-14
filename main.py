@@ -5,7 +5,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from cache.sys_cache import SysCache
+from gateway.connectors import router as connectors_router
 from gateway.router import router
+from gateway.skills import router as skills_router
 from gateway.webhooks import webhook_router
 from storage.neon_store import get_store
 
@@ -51,4 +53,6 @@ app.add_middleware(
 )
 
 app.include_router(router)
+app.include_router(connectors_router)
+app.include_router(skills_router)
 app.include_router(webhook_router)

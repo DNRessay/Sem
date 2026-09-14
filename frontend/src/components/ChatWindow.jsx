@@ -3,6 +3,7 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { useStream } from "../hooks/useStream";
 import VoiceInput from "./VoiceInput";
+import AttachMenu from "./AttachMenu";
 
 const API = import.meta.env.VITE_API_URL || "";
 const MODEL_LABEL = "Qwen";
@@ -17,6 +18,15 @@ function CopyIcon() {
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="9" y="9" width="13" height="13" rx="2" />
             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+        </svg>
+    );
+}
+
+function FileIcon() {
+    return (
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
         </svg>
     );
 }
@@ -86,6 +96,7 @@ function ThinkingIndicator() {
 export default function ChatWindow({ sessionId = "default", initialHistory = [], onStreamChange, onNewChat, token, onUnauthorized }) {
     const [input, setInput] = useState("");
     const [history, setHistory] = useState(initialHistory);
+    const [attachments, setAttachments] = useState([]);
     const { chunks, streaming, error, send, abort } = useStream(API, token, onUnauthorized);
     const bottomRef = useRef(null);
 
@@ -101,21 +112,39 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
     }, [chunks, history]);
 
     const submit = async () => {
-        if (!input.trim() || streaming) return;
+        if ((!input.trim() && attachments.length === 0) || streaming) return;
         const msg = input.trim();
+        const files = attachments;
         setInput("");
-        setHistory(h => [...h, { role: "user", content: msg }]);
-        const reply = await send(msg, sessionId, history);
+        setAttachments([]);
+        setHistory(h => [...h, { role: "user", content: msg, files: files.map(f => f.name) }]);
+        const reply = await send(msg, sessionId, history, files);
         if (reply) setHistory(h => [...h, { role: "assistant", content: reply }]);
     };
+
+    const addAttachment = (file) => setAttachments(a => [...a, file]);
+    const removeAttachment = (name) => setAttachments(a => a.filter(f => f.name !== name));
 
     return (
         <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, height: "100%", background: "var(--bg)", color: "var(--text)" }}>
             <div style={{ flex: 1, overflowY: "auto", padding: "20px 16px", display: "flex", flexDirection: "column", gap: "18px" }}>
                 {history.map((m, i) => (
                     m.role === "user" ? (
-                        <div key={i} style={{ alignSelf: "flex-end", maxWidth: "80%", background: "var(--surface)", padding: "10px 14px", borderRadius: "18px", fontSize: "15px", lineHeight: "1.6" }}>
-                            {m.content}
+                        <div key={i} style={{ alignSelf: "flex-end", maxWidth: "80%", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px" }}>
+                            {m.files?.length > 0 && (
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", justifyContent: "flex-end" }}>
+                                    {m.files.map(name => (
+                                        <span key={name} style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "11px", color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: "6px", padding: "2px 6px" }}>
+                                            <FileIcon /> {name}
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
+                            {m.content && (
+                                <div style={{ background: "var(--surface)", padding: "10px 14px", borderRadius: "18px", fontSize: "15px", lineHeight: "1.6" }}>
+                                    {m.content}
+                                </div>
+                            )}
                         </div>
                     ) : (
                         <div key={i} style={{ alignSelf: "flex-start", maxWidth: "88%" }}>
@@ -149,6 +178,16 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
             </div>
             <div style={{ padding: "8px 8px 24px", width: "100%", boxSizing: "border-box" }}>
                 <div style={{ display: "flex", flexDirection: "column", width: "100%", boxSizing: "border-box", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "26px", padding: "10px 14px 8px" }}>
+                    {attachments.length > 0 && (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", padding: "0 2px 8px" }}>
+                            {attachments.map(f => (
+                                <span key={f.name} style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "var(--text)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "8px", padding: "4px 8px" }}>
+                                    <FileIcon /> {f.name}
+                                    <button onClick={() => removeAttachment(f.name)} aria-label={`Remove ${f.name}`} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: "13px", lineHeight: 1, padding: 0 }}>✕</button>
+                                </span>
+                            ))}
+                        </div>
+                    )}
                     <input
                         value={input}
                         onChange={e => setInput(e.target.value)}
@@ -168,6 +207,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                         >
                             +
                         </button>
+                        <AttachMenu token={token} onAttach={addAttachment} />
                         <span style={{ display: "flex", alignItems: "center", gap: "3px", border: "1px solid var(--border)", borderRadius: "999px", padding: "5px 10px", fontSize: "12px", color: "var(--text-muted)" }}>
                             {MODEL_LABEL} <span style={{ fontSize: "9px" }}>▾</span>
                         </span>

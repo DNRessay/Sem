@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import AgentFeed from "./AgentFeed";
+import ConnectorsPanel from "./ConnectorsPanel";
+import SkillsPanel from "./SkillsPanel";
 
 const API = import.meta.env.VITE_API_URL || "";
 
@@ -15,6 +17,8 @@ export default function Drawer({ open, onClose, currentSessionId, onNewChat, onO
     const [sessions, setSessions] = useState([]);
     const [loading, setLoading] = useState(false);
     const [showFeed, setShowFeed] = useState(false);
+    const [showConnectors, setShowConnectors] = useState(false);
+    const [showSkills, setShowSkills] = useState(false);
 
     const authHeaders = { Authorization: `Bearer ${token}` };
 
@@ -104,6 +108,22 @@ export default function Drawer({ open, onClose, currentSessionId, onNewChat, onO
                         AGENT FEED <span>{showFeed ? "▾" : "▸"}</span>
                     </button>
                     {showFeed && <AgentFeed sessionId={currentSessionId} token={token} />}
+
+                    <button
+                        onClick={() => setShowConnectors(v => !v)}
+                        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", background: "none", border: "none", color: "var(--text-muted)", fontSize: "11px", fontWeight: "600", letterSpacing: "1px", margin: "16px 0 8px", padding: 0, cursor: "pointer" }}
+                    >
+                        CONNECTORS <span>{showConnectors ? "▾" : "▸"}</span>
+                    </button>
+                    {showConnectors && <ConnectorsPanel token={token} />}
+
+                    <button
+                        onClick={() => setShowSkills(v => !v)}
+                        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", background: "none", border: "none", color: "var(--text-muted)", fontSize: "11px", fontWeight: "600", letterSpacing: "1px", margin: "16px 0 8px", padding: 0, cursor: "pointer" }}
+                    >
+                        SKILLS <span>{showSkills ? "▾" : "▸"}</span>
+                    </button>
+                    {showSkills && <SkillsPanel token={token} />}
                 </div>
 
                 <button

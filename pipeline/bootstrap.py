@@ -39,8 +39,10 @@ class Bootstrap:
         memories = await self.sem_retrieval.retrieve(query)
         memory_block = self._format_memories(memories)
 
+        skills_block = await self._match_skills(query)
+
         # Step 6 - ctx pressure before we hit the LLM
-        full_ctx = self.ctx_pressure.apply(f"{ctx}\n\n{memory_block}")
+        full_ctx = self.ctx_pressure.apply(f"{ctx}\n\n{memory_block}\n\n{skills_block}")
 
         # Step 4 - query engine: direct Groq call, cached, cost-tracked,
         # streamed token-by-token as Groq generates it
@@ -57,6 +59,25 @@ class Bootstrap:
         db = await get_store()
         await db.save_turn(session_id, "user", query)
         await db.save_turn(session_id, "assistant", reply)
+
+    async def _match_skills(self, query: str) -> str:
+        """Keyword-triggered skill injection — a skill's content is pulled
+        into context only when one of its trigger words appears in the
+        query, not on every turn. Simple substring matching rather than an
+        agentic tool-search: Groq's function-calling reliability on the
+        current models (Qwen3.8-27B, GPT-OSS-120B) isn't something to bet
+        every message on."""
+        db = await get_store()
+        skills = await db.list_skills(enabled_only=True)
+        query_lower = query.lower()
+        matched = [s for s in skills if any(t in query_lower for t in s["triggers"])]
+        if not matched:
+            return ""
+        lines = ["<semblance_skills>"]
+        for s in matched:
+            lines.append(f"  <skill name=\"{s['name']}\">\n{s['content']}\n  </skill>")
+        lines.append("</semblance_skills>")
+        return "\n".join(lines)
 
     def _format_memories(self, memories: list) -> str:
         if not memories:
