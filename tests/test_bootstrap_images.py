@@ -186,6 +186,44 @@ async def test_run_persists_display_query_not_the_augmented_one(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_surfaces_llm_errors_instead_of_dying_silently(monkeypatch):
+    """A Groq API failure (context length exceeded — easy to hit with a big
+    repo attach, rate limit, bad key, network blip) used to propagate
+    straight out of this generator and silently kill the whole streamed
+    response: nothing shown, nothing saved, no error surfaced to the client.
+    Same failure shape as the earlier news-tool KeyError bug, one level up —
+    any LLM-call failure at all, not just one tool's."""
+    saved_turns = []
+
+    class RecordingStore(FakeStore):
+        async def save_turn(self, session_id, role, content):
+            saved_turns.append((role, content))
+
+    async def fake_get_store():
+        return RecordingStore()
+
+    monkeypatch.setattr("pipeline.bootstrap.get_store", fake_get_store)
+    bootstrap = Bootstrap()
+
+    async def fake_retrieve(query, top_k=5):
+        return []
+
+    bootstrap.sem_retrieval.retrieve = fake_retrieve
+
+    async def fake_stream_llm(messages, model=None, session_id="default", **kwargs):
+        raise RuntimeError("Groq API error (status 400) for model 'x': context_length_exceeded")
+        yield  # pragma: no cover - unreachable, keeps this an async generator function
+
+    bootstrap.query_engine.stream_llm = fake_stream_llm
+
+    result = [piece async for piece in bootstrap.run("hello", "sess1", [])]
+    reply = "".join(result)
+    assert reply  # something was yielded, not a silent dead stream
+    assert "context_length_exceeded" in reply
+    assert ("assistant", reply) in saved_turns  # still persisted, not dropped
+
+
+@pytest.mark.asyncio
 async def test_run_prepends_assistant_prefix_only_to_persisted_content(monkeypatch):
     saved_turns = []
 

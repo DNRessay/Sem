@@ -85,9 +85,21 @@ class Bootstrap:
             model = settings.GROQ_MODEL
 
         reply_parts = []
-        async for piece in self.query_engine.stream_llm(messages, session_id=session_id, model=model):
-            reply_parts.append(piece)
-            yield piece
+        try:
+            async for piece in self.query_engine.stream_llm(messages, session_id=session_id, model=model):
+                reply_parts.append(piece)
+                yield piece
+        except Exception as e:
+            # A Groq API failure (context length exceeded — easy to hit with
+            # a big repo attach, rate limit, bad key, network blip) used to
+            # propagate straight out of this generator and silently kill the
+            # whole streamed response: nothing shown, nothing saved, no error
+            # surfaced. Same failure shape as the earlier news-tool KeyError
+            # bug, one level up — any LLM-call failure at all, not just one
+            # tool's. Surface it as the reply instead of dying silently.
+            error_msg = f"Something went wrong generating a reply — {str(e)[:300]}"
+            reply_parts.append(error_msg)
+            yield error_msg
         reply = "".join(reply_parts)
 
         db = await get_store()
