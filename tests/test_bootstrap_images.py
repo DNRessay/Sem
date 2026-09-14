@@ -224,6 +224,73 @@ async def test_run_surfaces_llm_errors_instead_of_dying_silently(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_trims_old_history_to_fit_the_char_budget(monkeypatch):
+    """`history` is the frontend's full accumulated conversation, resent on
+    every turn with no windowing on its own — a session with a few long
+    exchanges eventually blows this account's tight Groq ITPM budget on
+    history alone, even for a short unrelated follow-up. Only the most
+    recent turns that fit the budget should reach Groq."""
+    async def fake_get_store():
+        return FakeStore()
+
+    monkeypatch.setattr("pipeline.bootstrap.get_store", fake_get_store)
+    monkeypatch.setattr("pipeline.bootstrap._MAX_HISTORY_CHARS", 15)
+    bootstrap = Bootstrap()
+
+    async def fake_retrieve(query, top_k=5):
+        return []
+
+    bootstrap.sem_retrieval.retrieve = fake_retrieve
+
+    captured = {}
+
+    async def fake_stream_llm(messages, model=None, session_id="default", **kwargs):
+        captured["messages"] = messages
+        yield "ok"
+
+    bootstrap.query_engine.stream_llm = fake_stream_llm
+
+    history = [
+        {"role": "user", "content": "a" * 40},
+        {"role": "assistant", "content": "b" * 40},
+        {"role": "user", "content": "c" * 10},  # only this most-recent turn fits under 15 chars
+    ]
+    [piece async for piece in bootstrap.run("new question", "sess1", history)]
+
+    history_in_request = captured["messages"][1:-1]  # system prompt first, new user query last
+    assert history_in_request == [{"role": "user", "content": "c" * 10}]
+
+
+@pytest.mark.asyncio
+async def test_run_keeps_the_single_most_recent_turn_even_if_it_alone_exceeds_budget(monkeypatch):
+    async def fake_get_store():
+        return FakeStore()
+
+    monkeypatch.setattr("pipeline.bootstrap.get_store", fake_get_store)
+    monkeypatch.setattr("pipeline.bootstrap._MAX_HISTORY_CHARS", 10)
+    bootstrap = Bootstrap()
+
+    async def fake_retrieve(query, top_k=5):
+        return []
+
+    bootstrap.sem_retrieval.retrieve = fake_retrieve
+
+    captured = {}
+
+    async def fake_stream_llm(messages, model=None, session_id="default", **kwargs):
+        captured["messages"] = messages
+        yield "ok"
+
+    bootstrap.query_engine.stream_llm = fake_stream_llm
+
+    history = [{"role": "assistant", "content": "x" * 500}]
+    [piece async for piece in bootstrap.run("new question", "sess1", history)]
+
+    history_in_request = captured["messages"][1:-1]
+    assert history_in_request == [{"role": "assistant", "content": "x" * 500}]
+
+
+@pytest.mark.asyncio
 async def test_run_prepends_assistant_prefix_only_to_persisted_content(monkeypatch):
     saved_turns = []
 

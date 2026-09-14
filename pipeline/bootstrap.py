@@ -14,6 +14,14 @@ from storage.neon_store import get_store
 
 _SAST = timezone(timedelta(hours=2))  # South Africa Standard Time — no DST
 
+# `history` is the frontend's full accumulated conversation state, resent in
+# full on every single turn with no windowing — a session with a few long
+# exchanges (a big repo-overview reply, say) eventually blows this account's
+# already-tight Groq ITPM (input tokens/minute) budget on history alone,
+# even for a short unrelated follow-up. Keeps only the most recent turns
+# that fit this char budget, dropping the oldest first.
+_MAX_HISTORY_CHARS = 8_000
+
 
 class Bootstrap:
     """
@@ -67,7 +75,10 @@ class Bootstrap:
         # Step 4 - query engine: direct Groq call, cached, cost-tracked,
         # streamed token-by-token as Groq generates it
         messages = [{"role": "system", "content": full_ctx}]
-        messages.extend({"role": h.get("role", "user"), "content": h.get("content", "")} for h in history)
+        messages.extend(
+            {"role": h.get("role", "user"), "content": h.get("content", "")}
+            for h in self._trim_history(history)
+        )
 
         if images:
             # GROQ_MODEL (Qwen/GPT-OSS) can't read images — only the vision
@@ -153,6 +164,23 @@ class Bootstrap:
             active_lines.append("</active_skills>")
 
         return "\n".join(catalog_lines + active_lines)
+
+    def _trim_history(self, history: list) -> list:
+        """Keeps the most recent turns that fit `_MAX_HISTORY_CHARS`,
+        dropping the oldest first. Always keeps at least the single most
+        recent turn even if it alone exceeds the budget — trimming a turn's
+        own content isn't this function's job, and an over-budget most-
+        recent turn will surface as its own clear Groq error rather than a
+        silently empty history."""
+        kept = []
+        total = 0
+        for h in reversed(history):
+            content_len = len(h.get("content", ""))
+            if kept and total + content_len > _MAX_HISTORY_CHARS:
+                break
+            kept.append(h)
+            total += content_len
+        return list(reversed(kept))
 
     def _inject_current_time(self, ctx: str) -> str:
         # Computed fresh every call, never baked into the cached system
