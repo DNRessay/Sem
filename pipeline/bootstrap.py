@@ -19,8 +19,17 @@ _SAST = timezone(timedelta(hours=2))  # South Africa Standard Time — no DST
 # exchanges (a big repo-overview reply, say) eventually blows this account's
 # already-tight Groq ITPM (input tokens/minute) budget on history alone,
 # even for a short unrelated follow-up. Keeps only the most recent turns
-# that fit this char budget, dropping the oldest first.
-_MAX_HISTORY_CHARS = 8_000
+# that fit this char budget, dropping the oldest first. Lowered from 8000:
+# ITPM (7000 tokens) is a rolling per-minute window shared across every
+# request that minute, not a per-request cap, so a smaller history isn't
+# just "safer for one big request" — it's a smaller bite out of the same
+# shared budget every ordinary back-to-back turn takes, which is what
+# actually determines how many turns fit in a minute before a 429.
+_MAX_HISTORY_CHARS = 3_000
+
+# See _skills_context below — caps the combined size of full skill content
+# injected for whatever matched this turn, same ITPM-budget reasoning.
+_MAX_SKILL_CONTENT_CHARS = 3_000
 
 
 class Bootstrap:
@@ -175,8 +184,21 @@ class Bootstrap:
         active_lines = []
         if matched:
             active_lines.append("<active_skills>")
-            for s in matched:
+            # A handful of the larger skill files run 5-8k chars each on
+            # their own (see skills/*.md) — several matching one query
+            # (plausible: broad trigger words like "prompt" or "write")
+            # used to inject all of them uncapped, which alone could eat
+            # most of ctx_pressure's whole system-prompt budget. Always
+            # includes at least the first match even if it alone exceeds
+            # the budget (same "keep at least one" principle as
+            # _trim_history below), then stops adding more once over.
+            total_chars = 0
+            for i, s in enumerate(matched):
+                content_len = len(s["content"])
+                if i > 0 and total_chars + content_len > _MAX_SKILL_CONTENT_CHARS:
+                    break
                 active_lines.append(f"  <skill name=\"{s['name']}\">\n{s['content']}\n  </skill>")
+                total_chars += content_len
             active_lines.append("</active_skills>")
 
         return "\n".join(catalog_lines + active_lines)

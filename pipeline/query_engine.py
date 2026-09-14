@@ -1,4 +1,6 @@
+import asyncio
 import json
+import re
 
 import httpx
 
@@ -23,6 +25,31 @@ assert len(CACHE_BREAK_VECTORS) == 14
 # minute. 800 leaves real headroom under a 1000 OTPM cap; if Groq's limit for
 # this model/tier is raised, this can go back up.
 _DEFAULT_MAX_TOKENS = 800
+
+# Groq's ITPM (input tokens/minute) quota is a *rolling* per-account window
+# shared across every request that minute, not a per-request cap — a short
+# burst of ordinary back-to-back turns can exhaust it even when each
+# individual request is well within budget on its own, and the 429 it
+# returns names exactly how long until the window clears ("Please try again
+# in 13.86s"). Retrying once after that wait turns a burst-timing hiccup
+# into a normal (if slightly slower) reply instead of a raw error dumped
+# into the chat. Capped well under Lambda's own timeout — a wait this
+# function decided not to honor is worse than just failing fast.
+_MAX_RETRY_WAIT_SECONDS = 20.0
+_RETRY_AFTER_RE = re.compile(r"try again in (\d+(?:\.\d+)?)s", re.I)
+
+
+def _retry_after_seconds(response: httpx.Response, body: bytes = b"") -> float:
+    header = response.headers.get("retry-after")
+    if header:
+        try:
+            return min(float(header), _MAX_RETRY_WAIT_SECONDS)
+        except ValueError:
+            pass
+    m = _RETRY_AFTER_RE.search(body.decode(errors="replace"))
+    if m:
+        return min(float(m.group(1)), _MAX_RETRY_WAIT_SECONDS)
+    return 5.0  # Groq didn't say — a sane default rather than not retrying at all
 
 
 class QueryEngine:
@@ -68,6 +95,12 @@ class QueryEngine:
                 "https://api.groq.com/openai/v1/chat/completions",
                 json=payload, headers=headers,
             )
+            if r.status_code == 429:
+                await asyncio.sleep(_retry_after_seconds(r, r.content))
+                r = await client.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    json=payload, headers=headers,
+                )
             data = r.json()
             if "choices" not in data:
                 # Surface whatever Groq actually said (bad API key, unknown
@@ -118,31 +151,39 @@ class QueryEngine:
             "stream": True,
         }
         full_parts = []
+        finish_reason = None
         async with httpx.AsyncClient(timeout=60) as client:
-            async with client.stream(
-                "POST", "https://api.groq.com/openai/v1/chat/completions",
-                json=payload, headers=headers,
-            ) as r:
-                if r.status_code != 200:
-                    body = await r.aread()
-                    raise RuntimeError(
-                        f"Groq API error (status {r.status_code}) for model '{model}': {body.decode(errors='replace')}"
-                    )
-                finish_reason = None
-                async for line in r.aiter_lines():
-                    if not line.startswith("data: "):
+            retried = False
+            while True:
+                async with client.stream(
+                    "POST", "https://api.groq.com/openai/v1/chat/completions",
+                    json=payload, headers=headers,
+                ) as r:
+                    if r.status_code == 429 and not retried:
+                        body = await r.aread()
+                        retried = True
+                        await asyncio.sleep(_retry_after_seconds(r, body))
                         continue
-                    data_str = line[len("data: "):]
-                    if data_str == "[DONE]":
-                        break
-                    chunk = json.loads(data_str)
-                    choice = chunk["choices"][0]
-                    delta = choice["delta"].get("content")
-                    if delta:
-                        full_parts.append(delta)
-                        yield delta
-                    if choice.get("finish_reason"):
-                        finish_reason = choice["finish_reason"]
+                    if r.status_code != 200:
+                        body = await r.aread()
+                        raise RuntimeError(
+                            f"Groq API error (status {r.status_code}) for model '{model}': {body.decode(errors='replace')}"
+                        )
+                    async for line in r.aiter_lines():
+                        if not line.startswith("data: "):
+                            continue
+                        data_str = line[len("data: "):]
+                        if data_str == "[DONE]":
+                            break
+                        chunk = json.loads(data_str)
+                        choice = chunk["choices"][0]
+                        delta = choice["delta"].get("content")
+                        if delta:
+                            full_parts.append(delta)
+                            yield delta
+                        if choice.get("finish_reason"):
+                            finish_reason = choice["finish_reason"]
+                break
 
         if finish_reason == "length":
             # _DEFAULT_MAX_TOKENS is set low enough to stay under this

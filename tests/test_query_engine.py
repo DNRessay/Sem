@@ -4,9 +4,29 @@ import pytest
 import respx
 from httpx import Response
 
-from pipeline.query_engine import QueryEngine
+from pipeline.query_engine import QueryEngine, _retry_after_seconds
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+
+def test_retry_after_seconds_prefers_the_header():
+    resp = Response(429, headers={"retry-after": "4.5"}, content=b"try again in 99s")
+    assert _retry_after_seconds(resp, resp.content) == 4.5
+
+
+def test_retry_after_seconds_falls_back_to_parsing_the_message():
+    resp = Response(429)
+    assert _retry_after_seconds(resp, b"Rate limit reached. Please try again in 7.25s") == 7.25
+
+
+def test_retry_after_seconds_defaults_when_nothing_is_parseable():
+    resp = Response(429)
+    assert _retry_after_seconds(resp, b"no timing info here") == 5.0
+
+
+def test_retry_after_seconds_is_capped():
+    resp = Response(429, headers={"retry-after": "9999"})
+    assert _retry_after_seconds(resp) == 20.0
 
 
 def _groq_response(content: str):
@@ -83,6 +103,49 @@ async def test_call_llm_raises_clear_error_when_groq_returns_no_choices(moto_cac
             return_value=Response(401, json={"error": {"message": "Invalid API Key"}})
         )
         with pytest.raises(RuntimeError, match="Invalid API Key"):
+            await engine.call_llm([{"role": "user", "content": "hi"}], session_id="s1")
+
+
+@pytest.mark.asyncio
+async def test_call_llm_retries_once_after_a_429_and_returns_the_retry_s_content(moto_cache_table, monkeypatch):
+    """Groq's ITPM quota is a rolling per-account window, not a per-request
+    cap — a 429 mid-burst usually clears itself within the wait Groq names
+    ("Please try again in 13.86s"). One retry after that wait turns it into
+    a normal reply instead of a raw error shown to the user."""
+    engine = QueryEngine()
+    sleeps = []
+
+    async def fake_sleep(s):
+        sleeps.append(s)
+
+    monkeypatch.setattr("pipeline.query_engine.asyncio.sleep", fake_sleep)
+
+    with respx.mock:
+        route = respx.post(GROQ_URL).mock(side_effect=[
+            Response(429, json={"error": {"message": "Rate limit reached... Please try again in 2.5s"}}),
+            _groq_response("worked on retry"),
+        ])
+        result = await engine.call_llm([{"role": "user", "content": "hi"}], session_id="s1")
+
+    assert result["content"] == "worked on retry"
+    assert route.call_count == 2
+    assert sleeps == [2.5]
+
+
+@pytest.mark.asyncio
+async def test_call_llm_raises_if_the_retry_also_429s(moto_cache_table, monkeypatch):
+    engine = QueryEngine()
+
+    async def fake_sleep(s):
+        pass
+
+    monkeypatch.setattr("pipeline.query_engine.asyncio.sleep", fake_sleep)
+
+    with respx.mock:
+        respx.post(GROQ_URL).mock(
+            return_value=Response(429, json={"error": {"message": "Please try again in 1s"}})
+        )
+        with pytest.raises(RuntimeError, match="429"):
             await engine.call_llm([{"role": "user", "content": "hi"}], session_id="s1")
 
 
@@ -181,6 +244,44 @@ async def test_stream_llm_raises_clear_error_when_groq_returns_no_choices(moto_c
             return_value=Response(401, json={"error": {"message": "Invalid API Key"}})
         )
         with pytest.raises(RuntimeError, match="Invalid API Key"):
+            async for _ in engine.stream_llm([{"role": "user", "content": "hi"}], session_id="s1"):
+                pass
+
+
+@pytest.mark.asyncio
+async def test_stream_llm_retries_once_after_a_429_and_streams_the_retry(moto_cache_table, monkeypatch):
+    engine = QueryEngine()
+    sleeps = []
+
+    async def fake_sleep(s):
+        sleeps.append(s)
+
+    monkeypatch.setattr("pipeline.query_engine.asyncio.sleep", fake_sleep)
+
+    with respx.mock:
+        route = respx.post(GROQ_URL).mock(side_effect=[
+            Response(429, content=b"Please try again in 3.1s"),
+            _groq_sse_response(["worked on retry"]),
+        ])
+        pieces = [p async for p in engine.stream_llm([{"role": "user", "content": "hi"}], session_id="s1")]
+
+    assert "".join(pieces) == "worked on retry"
+    assert route.call_count == 2
+    assert sleeps == [3.1]
+
+
+@pytest.mark.asyncio
+async def test_stream_llm_raises_if_the_retry_also_429s(moto_cache_table, monkeypatch):
+    engine = QueryEngine()
+
+    async def fake_sleep(s):
+        pass
+
+    monkeypatch.setattr("pipeline.query_engine.asyncio.sleep", fake_sleep)
+
+    with respx.mock:
+        respx.post(GROQ_URL).mock(return_value=Response(429, content=b"Please try again in 1s"))
+        with pytest.raises(RuntimeError, match="429"):
             async for _ in engine.stream_llm([{"role": "user", "content": "hi"}], session_id="s1"):
                 pass
 
