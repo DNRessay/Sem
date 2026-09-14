@@ -48,6 +48,17 @@ jobs:
           fi
           echo "Baked API URL: $found"
 
+      - name: Check Pages project's configured production branch
+        # branch: main didn't produce a production deploy (still got a
+        # hash-prefixed preview URL), so the project's actual
+        # production_branch setting isn't "main". Ask the Cloudflare API
+        # directly rather than guessing again.
+        run: |
+          curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects/semblance" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); print('production_branch:', d.get('result',{}).get('production_branch')); print('name:', d.get('result',{}).get('name')); print('subdomain:', d.get('result',{}).get('subdomain'))"
+
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/pages-action@v1
         with:
