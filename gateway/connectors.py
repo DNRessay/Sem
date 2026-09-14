@@ -15,7 +15,14 @@ from storage.neon_store import get_store
 router = APIRouter()
 
 _PROVIDERS = {"github", "gitlab"}
-_MAX_FETCH_CHARS = 60_000  # keeps one repo file from blowing the model's context on its own
+# A live request against this account's Groq tier for qwen/qwen3.8-27b was
+# rejected at 14,074 input tokens against a 7,000 ITPM (input tokens/minute)
+# cap — a single attach was, on its own, roughly double the account's entire
+# per-minute input budget, before the system prompt, memory, or conversation
+# history even factored in. 12,000 chars (~3,000-3,400 tokens at typical
+# code/prose density) leaves real headroom under that cap for everything
+# else in the request. If the account's tier/limit changes, these can move.
+_MAX_FETCH_CHARS = 12_000
 
 _OAUTH = {
     "github": {
@@ -430,7 +437,7 @@ async def _fetch_gitlab(repo: str, path: str, ref: str, token: str) -> str:
         return r.text
 
 
-_MAX_REPO_CHARS = 50_000  # whole-repo attach budget — bigger than one file, still bounded
+_MAX_REPO_CHARS = 12_000  # see _MAX_FETCH_CHARS — same account ITPM headroom, same reasoning
 _MAX_REPO_FILES = 40
 _SKIP_EXT = {
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".svg", ".pdf", ".zip", ".gz",
