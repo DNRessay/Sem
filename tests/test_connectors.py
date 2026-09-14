@@ -257,6 +257,109 @@ def test_fetch_requires_repo_and_path(client):
     assert resp.status_code == 400
 
 
+def test_fetch_repo_without_configured_connector_errors(client):
+    c, _ = client
+    resp = c.post("/connectors/github/fetch-repo", json={"repo": "octocat/hello"})
+    assert resp.status_code == 400
+    assert "no github connector" in resp.json()["detail"].lower()
+
+
+def test_fetch_repo_requires_repo(client):
+    c, store = client
+    store.connectors[("owner", "github")] = {"token": "ghp_test", "refresh_token": None, "expires_at": None}
+    resp = c.post("/connectors/github/fetch-repo", json={"repo": ""})
+    assert resp.status_code == 400
+
+
+def test_fetch_github_repo_bundles_tree_and_file_contents(client):
+    import base64 as b64mod
+
+    c, store = client
+    store.connectors[("owner", "github")] = {"token": "ghp_test", "refresh_token": None, "expires_at": None}
+    with respx.mock:
+        respx.get("https://api.github.com/repos/octocat/hello/git/trees/main").mock(
+            return_value=Response(200, json={
+                "tree": [
+                    {"path": "README.md", "type": "blob", "sha": "sha1"},
+                    {"path": "src/main.py", "type": "blob", "sha": "sha2"},
+                    {"path": "src", "type": "tree", "sha": "sha3"},
+                    {"path": "logo.png", "type": "blob", "sha": "sha4"},
+                    {"path": "node_modules/pkg/index.js", "type": "blob", "sha": "sha5"},
+                ],
+                "truncated": False,
+            })
+        )
+        respx.get("https://api.github.com/repos/octocat/hello/git/blobs/sha1").mock(
+            return_value=Response(200, json={"content": b64mod.b64encode(b"# Hello").decode(), "encoding": "base64"})
+        )
+        respx.get("https://api.github.com/repos/octocat/hello/git/blobs/sha2").mock(
+            return_value=Response(200, json={"content": b64mod.b64encode(b"print('hi')").decode(), "encoding": "base64"})
+        )
+        resp = c.post("/connectors/github/fetch-repo", json={"repo": "octocat/hello", "ref": "main"})
+    assert resp.status_code == 200
+    data = resp.json()
+    tree_part, _, files_part = data["content"].partition("</repo_tree>")
+    assert "logo.png" in tree_part  # listed in the tree overview
+    assert "logo.png" not in files_part  # but its binary content was never fetched (extension-filtered)
+    assert "node_modules" not in files_part  # build/dep dir filtered too
+    assert "# Hello" in files_part
+    assert "print('hi')" in files_part
+    assert data["file_count"] == 2
+    assert data["truncated"] is False
+
+
+def test_fetch_github_repo_truncates_when_file_cap_exceeded(client, monkeypatch):
+    import base64 as b64mod
+
+    monkeypatch.setattr("gateway.connectors._MAX_REPO_FILES", 1)
+    c, store = client
+    store.connectors[("owner", "github")] = {"token": "ghp_test", "refresh_token": None, "expires_at": None}
+    with respx.mock:
+        respx.get("https://api.github.com/repos/octocat/hello/git/trees/HEAD").mock(
+            return_value=Response(200, json={
+                "tree": [
+                    {"path": "a.py", "type": "blob", "sha": "sha1"},
+                    {"path": "b.py", "type": "blob", "sha": "sha2"},
+                ],
+                "truncated": False,
+            })
+        )
+        respx.get("https://api.github.com/repos/octocat/hello/git/blobs/sha1").mock(
+            return_value=Response(200, json={"content": b64mod.b64encode(b"one").decode(), "encoding": "base64"})
+        )
+        resp = c.post("/connectors/github/fetch-repo", json={"repo": "octocat/hello"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["file_count"] == 1
+    assert data["truncated"] is True
+
+
+def test_fetch_gitlab_repo_bundles_tree_and_file_contents(client):
+    c, store = client
+    store.connectors[("owner", "gitlab")] = {"token": "glpat_test", "refresh_token": None, "expires_at": None}
+    with respx.mock:
+        respx.get("https://gitlab.com/api/v4/projects/group%2Fproject/repository/tree").mock(
+            return_value=Response(200, json=[
+                {"path": "README.md", "type": "blob", "id": "blob1"},
+                {"path": "src/main.py", "type": "blob", "id": "blob2"},
+                {"path": "src", "type": "tree", "id": "tree1"},
+            ])
+        )
+        respx.get("https://gitlab.com/api/v4/projects/group%2Fproject/repository/blobs/blob1/raw").mock(
+            return_value=Response(200, content=b"# Hello")
+        )
+        respx.get("https://gitlab.com/api/v4/projects/group%2Fproject/repository/blobs/blob2/raw").mock(
+            return_value=Response(200, content=b"print('hi')")
+        )
+        resp = c.post("/connectors/gitlab/fetch-repo", json={"repo": "group/project"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "# Hello" in data["content"]
+    assert "print('hi')" in data["content"]
+    assert data["file_count"] == 2
+    assert data["truncated"] is False
+
+
 def test_authorize_errors_when_oauth_not_configured(client, monkeypatch):
     monkeypatch.setattr(settings, "GITHUB_CLIENT_ID", "")
     c, _ = client

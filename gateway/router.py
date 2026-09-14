@@ -141,7 +141,9 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
                     "<system_note>The web data below was already retrieved for "
                     "this message before you saw it. Do not say you are fetching, "
                     "grabbing, or searching for it — just answer directly using "
-                    "it now.</system_note>\n"
+                    "it now. If it's generic/unrelated and doesn't actually answer "
+                    "the question, say the search didn't find it — never invent "
+                    "specific facts to fill the gap.</system_note>\n"
                     f"{web_block}"
                 )
                 tool = {"kind": kind, "label": status_label(kind, target).rstrip("…"), "detail": web_block}

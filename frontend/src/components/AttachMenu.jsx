@@ -157,6 +157,7 @@ function RepoForm({ provider, token, onAttach, onNeedConnector, onClose }) {
     const [entriesLoading, setEntriesLoading] = useState(false);
     const [selected, setSelected] = useState(""); // chosen file path
     const [busy, setBusy] = useState(false);
+    const [repoBusy, setRepoBusy] = useState(false);
     const [error, setError] = useState(null);
 
     useEffect(() => {
@@ -245,6 +246,34 @@ function RepoForm({ provider, token, onAttach, onNeedConnector, onClose }) {
 
     const crumbs = dirPath ? dirPath.split("/") : [];
 
+    const submitRepo = async () => {
+        if (repoBusy) return;
+        if (!repo) { setError("Pick a repository first"); return; }
+        setRepoBusy(true);
+        setError(null);
+        try {
+            const res = await fetch(`${API}/connectors/${provider}/fetch-repo`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ repo, ref: branch }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                if (res.status === 400 && (data.detail || "").toLowerCase().includes("no ")) {
+                    onNeedConnector();
+                    return;
+                }
+                throw new Error(data.detail || `Fetch failed (${res.status})`);
+            }
+            onAttach({ name: repo, content: data.content, source: provider });
+            onClose();
+        } catch (e) {
+            setError(e.message);
+        } finally {
+            setRepoBusy(false);
+        }
+    };
+
     const submit = async () => {
         if (busy) return;
         if (!repo) { setError("Pick a repository first"); return; }
@@ -291,6 +320,10 @@ function RepoForm({ provider, token, onAttach, onNeedConnector, onClose }) {
                             {branches.map(b => <option key={b} value={b}>{b}</option>)}
                         </select>
                     )}
+                    <button onClick={submitRepo} disabled={repoBusy} style={smallButtonStyle}>
+                        {repoBusy ? "Adding repo…" : `Add ${repo}`}
+                    </button>
+                    <div style={{ fontSize: "11px", color: "var(--text-muted)", textAlign: "center" }}>or pick a single file</div>
                     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "2px", fontSize: "11px", color: "var(--text-muted)" }}>
                         <button onClick={() => setDirPath("")} style={crumbStyle}>{repo.split("/")[1] || repo}</button>
                         {crumbs.map((c, i) => (
