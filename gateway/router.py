@@ -1,3 +1,5 @@
+import base64
+import io
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -35,17 +37,61 @@ async def login(request: Request):
     return {"token": issue_token(account["id"], account["role"])}
 
 
+def _is_image(attachment: dict) -> bool:
+    return (attachment.get("mime") or "").startswith("image/")
+
+
+def _extract_pdf_text(raw: bytes) -> str:
+    from pypdf import PdfReader
+
+    reader = PdfReader(io.BytesIO(raw))
+    return "\n".join(page.extract_text() or "" for page in reader.pages)
+
+
+def _extract_docx_text(raw: bytes) -> str:
+    import docx
+
+    document = docx.Document(io.BytesIO(raw))
+    return "\n".join(p.text for p in document.paragraphs)
+
+
+def _attachment_text(a: dict) -> str:
+    """Plain-text attachments (from the frontend's client-side FileReader
+    path) carry their text directly in `content`. Binary formats we can't
+    read client-side (PDF, Word) instead carry base64 + a mime type, and get
+    extracted here, server-side, into the same plain text."""
+    if a.get("content") is not None:
+        return a["content"]
+
+    mime = a.get("mime", "")
+    b64 = a.get("base64", "")
+    if not b64:
+        return ""
+    raw = base64.b64decode(b64)
+
+    if mime == "application/pdf":
+        return _extract_pdf_text(raw)
+    if mime in (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ):
+        return _extract_docx_text(raw)
+    return ""
+
+
 def _fold_attachments(user_msg: str, attachments: list) -> str:
     """Appends uploaded/fetched file content to the query as fenced blocks the
     model can read like any other context — there's no separate multimodal
-    file channel on the Groq models this app runs on, so text is folded
-    straight into the message rather than sent out-of-band."""
+    text channel on the Groq models this app runs on, so text (including
+    text extracted server-side from PDF/Word attachments) is folded straight
+    into the message rather than sent out-of-band. Image attachments are
+    handled separately by Bootstrap, not folded here — see gateway/router.py
+    `chat()`."""
     if not attachments:
         return user_msg
     blocks = ["<attachments>"]
     for a in attachments:
         name = a.get("name", "file")
-        content = a.get("content", "")
+        content = _attachment_text(a)
         blocks.append(f'<file name="{name}">\n{content}\n</file>')
     blocks.append("</attachments>")
     return f"{user_msg}\n\n" + "\n".join(blocks)
@@ -62,12 +108,15 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
     if not user_msg:
         raise HTTPException(400, "message required")
 
-    user_msg = _fold_attachments(user_msg, attachments)
+    images = [a for a in attachments if _is_image(a)]
+    text_attachments = [a for a in attachments if not _is_image(a)]
+
+    user_msg = _fold_attachments(user_msg, text_attachments)
     tau_ctx = await _tau.observe_and_inject(session_id, user_msg, history)
     bootstrap = Bootstrap(trust_mode=trust, tau_context=tau_ctx)
 
     async def stream_gen():
-        async for chunk in bootstrap.run(user_msg, session_id, history):
+        async for chunk in bootstrap.run(user_msg, session_id, history, images=images):
             yield f"data: {json.dumps({'chunk': chunk})}\n\n"
         yield "data: [DONE]\n\n"
 

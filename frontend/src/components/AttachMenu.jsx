@@ -1,7 +1,31 @@
 import { useState, useRef } from "react";
 
 const API = import.meta.env.VITE_API_URL || "";
-const TEXT_EXT = /\.(txt|md|py|js|jsx|ts|tsx|json|csv|log|ya?ml|html?|css|sql|sh|env|toml|ini|xml)$/i;
+const TEXT_EXT = /\.(txt|md|mdx|py|js|jsx|ts|tsx|mjs|cjs|json|jsonc|csv|tsv|log|ya?ml|html?|css|scss|sass|less|sql|sh|bash|zsh|env|toml|ini|cfg|conf|xml|svg|graphql|gql|proto|rs|go|java|kt|kts|c|h|cpp|cc|hpp|cs|rb|php|swift|dart|lua|r|jl|vue|svelte|diff|patch|lock|gitignore|editorconfig)$/i;
+const BARE_TEXT_NAMES = /^(dockerfile|makefile|license|readme|procfile|jenkinsfile|vagrantfile)$/i;
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp)$/i;
+const DOC_EXT = /\.(pdf|docx)$/i;
+const MAX_BINARY_BYTES = 4 * 1024 * 1024; // Lambda Function URL request body caps around 6MB; base64 adds ~33%
+const MIME_BY_EXT = {
+    pdf: "application/pdf",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp",
+};
+
+function extOf(name) {
+    return (name.split(".").pop() || "").toLowerCase();
+}
+
+async function readAsBase64(file) {
+    const buf = await file.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let binary = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    }
+    return btoa(binary);
+}
 
 export function UploadIcon() {
     return (
@@ -25,6 +49,16 @@ export function GitLabIcon() {
     return (
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
             <path d="M22.65 14.39L12 22.13 1.35 14.39a.84.84 0 0 1-.3-.94l1.22-3.78L4.71 2.16a.42.42 0 0 1 .8 0l2.44 7.51h8.1l2.44-7.51a.42.42 0 0 1 .8 0l2.44 7.51 1.22 3.78a.84.84 0 0 1-.3.94z" />
+        </svg>
+    );
+}
+
+export function ImageIcon() {
+    return (
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <circle cx="8.5" cy="8.5" r="1.5" />
+            <path d="M21 15l-5-5L5 21" />
         </svg>
     );
 }
@@ -184,13 +218,26 @@ export default function AttachMenu({ token, onAttach }) {
         const files = Array.from(e.target.files || []);
         const skipped = [];
         for (const file of files) {
-            if (!TEXT_EXT.test(file.name)) { skipped.push(file.name); continue; } // these models read text, not images/binaries
-            const content = await file.text();
-            onAttach({ name: file.name, content, source: "file" });
+            const isText = TEXT_EXT.test(file.name) || BARE_TEXT_NAMES.test(file.name);
+            const isBinary = IMAGE_EXT.test(file.name) || DOC_EXT.test(file.name);
+            if (isText) {
+                const content = await file.text();
+                onAttach({ name: file.name, content, source: "file" });
+            } else if (isBinary) {
+                if (file.size > MAX_BINARY_BYTES) {
+                    skipped.push(`${file.name} (too large — 4MB max)`);
+                    continue;
+                }
+                const base64 = await readAsBase64(file);
+                const mime = file.type || MIME_BY_EXT[extOf(file.name)] || "application/octet-stream";
+                onAttach({ name: file.name, base64, mime, source: "file" });
+            } else {
+                skipped.push(file.name);
+            }
         }
         e.target.value = "";
         if (skipped.length > 0) {
-            setFileError(`Can't attach ${skipped.join(", ")} — only text-based files are supported (.txt, .md, .py, .js, .json, .csv, etc.)`);
+            setFileError(`Can't attach ${skipped.join(", ")} — unsupported file type.`);
         } else {
             close();
         }

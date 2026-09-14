@@ -3,6 +3,7 @@ from typing import AsyncIterator
 from cache.cache_ctrl import CacheController
 from cache.conv_cache import ConvCache
 from cache.sys_cache import SysCache
+from config import settings
 from memory.sem_retrieval import SEMRetrieval
 from pipeline.ctx_assembly import CTXAssembly
 from pipeline.ctx_pressure import CTXPressure
@@ -30,7 +31,7 @@ class Bootstrap:
         self.ctx_pressure = CTXPressure()
         self.query_engine = QueryEngine()
 
-    async def run(self, query: str, session_id: str, history: list) -> AsyncIterator[str]:
+    async def run(self, query: str, session_id: str, history: list, images: list | None = None) -> AsyncIterator[str]:
         # Step 2 - CTX assembly
         ctx = self.sys_cache.read("system_prompt") or self.ctx_assembly.load_hierarchy()
         ctx = self.ctx_assembly.inject_tau_context(ctx, self.tau_context)
@@ -48,10 +49,24 @@ class Bootstrap:
         # streamed token-by-token as Groq generates it
         messages = [{"role": "system", "content": full_ctx}]
         messages.extend({"role": h.get("role", "user"), "content": h.get("content", "")} for h in history)
-        messages.append({"role": "user", "content": query})
+
+        if images:
+            # GROQ_MODEL (Qwen/GPT-OSS) can't read images — only the vision
+            # model accepts this OpenAI-style content-parts shape, so both
+            # the message content and the model switch together.
+            content_parts = [{"type": "text", "text": query}]
+            for img in images:
+                mime = img.get("mime") or "image/png"
+                b64 = img.get("base64", "")
+                content_parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+            messages.append({"role": "user", "content": content_parts})
+            model = settings.GROQ_VISION_MODEL
+        else:
+            messages.append({"role": "user", "content": query})
+            model = settings.GROQ_MODEL
 
         reply_parts = []
-        async for piece in self.query_engine.stream_llm(messages, session_id=session_id):
+        async for piece in self.query_engine.stream_llm(messages, session_id=session_id, model=model):
             reply_parts.append(piece)
             yield piece
         reply = "".join(reply_parts)

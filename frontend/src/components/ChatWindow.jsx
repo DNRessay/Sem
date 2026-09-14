@@ -3,7 +3,7 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { useStream } from "../hooks/useStream";
 import VoiceInput from "./VoiceInput";
-import AttachMenu, { GitHubIcon, GitLabIcon, AttachFileIcon } from "./AttachMenu";
+import AttachMenu, { GitHubIcon, GitLabIcon, AttachFileIcon, ImageIcon } from "./AttachMenu";
 
 const API = import.meta.env.VITE_API_URL || "";
 const MODEL_LABEL = "Qwen";
@@ -22,9 +22,10 @@ function CopyIcon() {
     );
 }
 
-function iconForSource(source) {
+function iconForSource(source, mime) {
     if (source === "github") return <GitHubIcon />;
     if (source === "gitlab") return <GitLabIcon />;
+    if ((mime || "").startsWith("image/")) return <ImageIcon />;
     return <AttachFileIcon />;
 }
 
@@ -114,7 +115,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
         const files = attachments;
         setInput("");
         setAttachments([]);
-        setHistory(h => [...h, { role: "user", content: msg, files: files.map(f => ({ name: f.name, source: f.source })) }]);
+        setHistory(h => [...h, { role: "user", content: msg, files: files.map(f => ({ name: f.name, source: f.source, mime: f.mime })) }]);
         const reply = await send(msg, sessionId, history, files);
         if (reply) setHistory(h => [...h, { role: "assistant", content: reply }]);
     };
@@ -134,7 +135,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                                     <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", justifyContent: "flex-end" }}>
                                         {m.files.map(f => (
                                             <span key={f.name} style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "11px", color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: "6px", padding: "2px 6px" }}>
-                                                {iconForSource(f.source)} {f.name}
+                                                {iconForSource(f.source, f.mime)} {f.name}
                                             </span>
                                         ))}
                                     </div>
@@ -182,12 +183,18 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                         <div style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "0 2px 8px" }}>
                             <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>Attached files</span>
                             <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                                {attachments.map(f => (
-                                    <span key={f.name} style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "var(--text)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "8px", padding: "4px 8px" }}>
-                                        {iconForSource(f.source)} {f.name}
-                                        <button onClick={() => removeAttachment(f.name)} aria-label={`Remove ${f.name}`} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: "13px", lineHeight: 1, padding: 0 }}>✕</button>
-                                    </span>
-                                ))}
+                                {attachments.map(f => {
+                                    const isImage = (f.mime || "").startsWith("image/") && f.base64;
+                                    return (
+                                        <span key={f.name} style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "var(--text)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "8px", padding: "4px 8px" }}>
+                                            {isImage ? (
+                                                <img src={`data:${f.mime};base64,${f.base64}`} alt="" style={{ width: "20px", height: "20px", objectFit: "cover", borderRadius: "4px" }} />
+                                            ) : iconForSource(f.source, f.mime)}
+                                            {f.name}
+                                            <button onClick={() => removeAttachment(f.name)} aria-label={`Remove ${f.name}`} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: "13px", lineHeight: 1, padding: 0 }}>✕</button>
+                                        </span>
+                                    );
+                                })}
                             </div>
                         </div>
                     )}

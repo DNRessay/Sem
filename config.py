@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     GROQ_MODEL: str = "qwen/qwen3.8-27b"          # primary conversational model
     GROQ_PLANNING_MODEL: str = "openai/gpt-oss-120b"  # ULTRAPLAN deep reasoning
+    # Neither model above accepts image input — when a message has an image
+    # attached, Bootstrap switches to this one instead. Same "re-verify
+    # against this account's actual model list" caveat as above.
+    GROQ_VISION_MODEL: str = "meta-llama/llama-4-scout-17b-16e-instruct"
 
     # Storage — Neon serverless Postgres (+ pgvector) replaces Aiven MySQL + ChromaDB.
     # One database, two roles: raw records and vector search over the same rows.
