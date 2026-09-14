@@ -1,13 +1,21 @@
+from pathlib import Path
+
 import pytest
 
 from agents.explore import ExploreAgent
+
+# ExploreAgent._code_search walks relative directories (".", "pipeline",
+# "agents", ...) from the process cwd — repo root here, computed from this
+# test file's own location rather than hardcoded, since CI checks the repo
+# out to a different absolute path than a local dev sandbox.
+_REPO_ROOT = str(Path(__file__).resolve().parent.parent)
 
 
 @pytest.mark.asyncio
 async def test_run_code_scope_finds_a_real_match_in_this_deployed_source(tmp_path, monkeypatch):
     """No LLM call, no external service — a local grep over SEMBLANCE's own
     deployed source, always safe to run from a live chat message."""
-    monkeypatch.chdir("/home/user/Sem")
+    monkeypatch.chdir(_REPO_ROOT)
     agent = ExploreAgent(session_id="s1")
     result = await agent.run({"query": "_DEFAULT_MAX_TOKENS", "scope": "code"})
 
@@ -20,7 +28,7 @@ async def test_run_code_scope_finds_a_real_match_in_this_deployed_source(tmp_pat
 
 @pytest.mark.asyncio
 async def test_run_code_scope_returns_no_matches_for_a_nonsense_term(monkeypatch):
-    monkeypatch.chdir("/home/user/Sem")
+    monkeypatch.chdir(_REPO_ROOT)
     agent = ExploreAgent(session_id="s1")
     result = await agent.run({"query": "xyzzy_not_a_real_symbol_anywhere", "scope": "code"})
     assert result["results"]["code"] == []
@@ -28,7 +36,7 @@ async def test_run_code_scope_returns_no_matches_for_a_nonsense_term(monkeypatch
 
 @pytest.mark.asyncio
 async def test_run_code_scope_caps_at_20_matches(monkeypatch):
-    monkeypatch.chdir("/home/user/Sem")
+    monkeypatch.chdir(_REPO_ROOT)
     agent = ExploreAgent(session_id="s1")
     # "def" appears far more than 20 times across pipeline/agents/tools/etc.
     result = await agent.run({"query": "def ", "scope": "code"})
