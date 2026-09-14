@@ -148,6 +148,8 @@ jobs:
             echo "--- describe-change-set: $latest ---"
             aws cloudformation describe-change-set --stack-name semblance --region "$region" --change-set-name "$latest" || true
           fi
+          echo "--- describe-stack-events (last 30) ---"
+          aws cloudformation describe-stack-events --stack-name semblance --region "$region" --max-items 30 || true
 
       - name: Expire old build artifacts in the SAM deployment bucket
         # `sam deploy --resolve-s3` keeps every historical build zip forever
