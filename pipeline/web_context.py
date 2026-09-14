@@ -12,7 +12,8 @@ _NEWS_RE = re.compile(
 )
 _SEARCH_RE = re.compile(
     r"\b(search (?:the web )?for|search the web|look up|google|"
-    r"what'?s the latest|find (?:me )?(?:info|information) (?:on|about))\b",
+    r"what'?s the latest|find (?:me )?(?:info|information) (?:on|about)|"
+    r"what'?s the weather|weather (?:in|for|at|like)|weather forecast)\b",
     re.I,
 )
 # Strips the generic scaffolding around a news request ("what's on the
@@ -79,22 +80,33 @@ async def _personalized_topic(session_id: str) -> str | None:
 
 async def _fetch_news(registry, topic: str) -> str:
     result = await registry.execute("web_news", {"topic": topic})
-    if not result or result[0].get("error"):
+    # ToolsRegistry.execute catches any exception the tool itself raises
+    # (a SerpAPI quota/network failure, not just "no key configured") and
+    # returns a plain {"error": ...} dict — NewsTool's own success/no-key
+    # paths return a list instead, so indexing result[0] on that dict
+    # crashed this whole request mid-stream with nothing surfaced to the
+    # client. Anything that isn't the expected list shape is just "no news
+    # this time", same as any other failure here.
+    if not isinstance(result, list) or not result or result[0].get("error"):
         return ""
     lines = [f"- {r.get('title')} ({r.get('source')}, {r.get('date')}): {r.get('link')}" for r in result[:5]]
     return f'<web_news topic="{topic}">\n' + "\n".join(lines) + "\n</web_news>"
 
 
 async def _fetch_search(registry, query: str) -> str:
-    """One call (web_search_full) returns both Google's own AI Overview
-    (when it shows one — roughly half of queries don't get one) and the
-    regular organic results, so the model sees what Google's AI already
-    said about this *and* the raw sources to check it against, instead of
-    just raw snippets alone."""
+    """One call (web_search_full) returns Google's direct answer box
+    (weather, calculator, unit/currency conversion — a structured answer,
+    not generative), its AI Overview (roughly half of queries don't get
+    one), and the regular organic results — so a query like "what's the
+    weather in Pretoria" gets an actual answer instead of "I don't have a
+    weather tool", the same basic lookup a plain script could always do
+    without any AI involved."""
     result = await registry.execute("web_search_full", {"query": query, "num": 5})
     if not result or result.get("error"):
         return ""
     blocks = []
+    if result.get("answer_box"):
+        blocks.append(f'<google_answer query="{query}">\n{result["answer_box"]}\n</google_answer>')
     if result.get("ai_overview"):
         blocks.append(f'<google_ai_overview query="{query}">\n{result["ai_overview"]}\n</google_ai_overview>')
     results = result.get("results") or []

@@ -53,32 +53,39 @@ export function useStream(baseUrl = "", token = "", onUnauthorized) {
             // partial one for the next read) is the standard fix.
             let buffer = "";
 
+            const processLine = (line) => {
+                if (!line.startsWith("data: ")) return;
+                const data = line.slice(6);
+                if (data === "[DONE]") return;
+                try {
+                    const parsed = JSON.parse(data);
+                    if (parsed.tool) {
+                        toolLocal = parsed.tool;
+                        setTool(parsed.tool);
+                        setStatus(null); // the search/fetch is done — the chip replaces the breadcrumb
+                    } else if (parsed.status) {
+                        setStatus(parsed.status);
+                    } else if (parsed.chunk) {
+                        full += parsed.chunk;
+                        setChunks(c => [...c, parsed.chunk]);
+                        setStatus(null);
+                    }
+                } catch {}
+            };
+
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
                 buffer += decoder.decode(value, { stream: true });
                 const lines = buffer.split("\n");
                 buffer = lines.pop() ?? "";
-                for (const line of lines) {
-                    if (!line.startsWith("data: ")) continue;
-                    const data = line.slice(6);
-                    if (data === "[DONE]") continue;
-                    try {
-                        const parsed = JSON.parse(data);
-                        if (parsed.tool) {
-                            toolLocal = parsed.tool;
-                            setTool(parsed.tool);
-                            setStatus(null); // the search/fetch is done — the chip replaces the breadcrumb
-                        } else if (parsed.status) {
-                            setStatus(parsed.status);
-                        } else if (parsed.chunk) {
-                            full += parsed.chunk;
-                            setChunks(c => [...c, parsed.chunk]);
-                            setStatus(null);
-                        }
-                    } catch {}
-                }
+                lines.forEach(processLine);
             }
+            // The stream can end with a complete-but-unterminated final line
+            // still sitting in the buffer (no trailing \n arrived before the
+            // connection closed) — without this, that last event is silently
+            // lost instead of processed.
+            if (buffer) processLine(buffer);
         } catch (e) {
             if (e.name !== "AbortError") setError(e.message);
         } finally {

@@ -19,6 +19,12 @@ def test_detect_web_intent_finds_search_phrase():
     assert detect_web_intent("google the current bitcoin price")[0] == "search"
 
 
+def test_detect_web_intent_finds_weather_phrase_without_other_trigger_words():
+    assert detect_web_intent("what's the weather like in Pretoria 2day")[0] == "search"
+    assert detect_web_intent("weather forecast for durban")[0] == "search"
+    assert detect_web_intent("weather in joburg")[0] == "search"
+
+
 def test_detect_web_intent_finds_news_phrase():
     assert detect_web_intent("what's on the latest news")[0] == "news"
     assert detect_web_intent("any breaking news today?")[0] == "news"
@@ -101,6 +107,22 @@ async def test_run_web_intent_search_includes_ai_overview_when_present(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_run_web_intent_search_includes_answer_box_for_weather(monkeypatch):
+    class FakeRegistry:
+        async def execute(self, tool_name, args):
+            return {
+                "results": [],
+                "ai_overview": None,
+                "answer_box": "24°C Sunny in Pretoria, South Africa",
+            }
+
+    monkeypatch.setattr("pipeline.web_context.get_registry", lambda: FakeRegistry())
+    result = await run_web_intent("search", "what's the weather like in pretoria")
+    assert '<google_answer query="what\'s the weather like in pretoria">' in result
+    assert "24°C Sunny in Pretoria, South Africa" in result
+
+
+@pytest.mark.asyncio
 async def test_run_web_intent_search_costs_one_registry_call(monkeypatch):
     calls = []
 
@@ -156,6 +178,23 @@ async def test_run_web_intent_news_empty_on_missing_key(monkeypatch):
     class FakeRegistry:
         async def execute(self, tool_name, args):
             return [{"error": "SERP_API_KEY not set"}]
+
+    monkeypatch.setattr("pipeline.web_context.get_registry", lambda: FakeRegistry())
+    result = await run_web_intent("news", "what's on the latest news")
+    assert result == ""
+
+
+@pytest.mark.asyncio
+async def test_run_web_intent_news_survives_a_tool_exception(monkeypatch):
+    """ToolsRegistry.execute catches any exception the underlying tool call
+    raises (a SerpAPI quota/network failure, not just a missing key) and
+    returns a plain {"error": ...} dict — a different shape than NewsTool's
+    own list-based success/no-key paths. Indexing that dict with result[0]
+    used to raise a KeyError that silently killed the whole /chat stream
+    mid-response with nothing surfaced to the client."""
+    class FakeRegistry:
+        async def execute(self, tool_name, args):
+            return {"error": "quota exceeded"}  # what ToolsRegistry.execute returns on an exception
 
     monkeypatch.setattr("pipeline.web_context.get_registry", lambda: FakeRegistry())
     result = await run_web_intent("news", "what's on the latest news")

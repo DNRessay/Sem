@@ -77,3 +77,57 @@ def test_web_search_full_is_registered():
     from tools.registry import get_registry
     registry = get_registry()
     assert "web_search_full" in registry.list_all()
+
+
+@pytest.mark.asyncio
+async def test_search_full_extracts_weather_answer_box(monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "SERP_API_KEY", "fake_key")
+
+    with respx.mock:
+        respx.get("https://serpapi.com/search").mock(
+            return_value=httpx.Response(200, json={
+                "organic_results": [],
+                "answer_box": {
+                    "type": "weather_result",
+                    "temperature": "24",
+                    "unit": "C",
+                    "weather": "Sunny",
+                    "location": "Pretoria, South Africa",
+                },
+            })
+        )
+        result = await SerpTool().search_full("weather in pretoria")
+
+    assert result["answer_box"] == "24°C Sunny in Pretoria, South Africa"
+
+
+@pytest.mark.asyncio
+async def test_search_full_extracts_generic_answer_box(monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "SERP_API_KEY", "fake_key")
+
+    with respx.mock:
+        respx.get("https://serpapi.com/search").mock(
+            return_value=httpx.Response(200, json={
+                "organic_results": [],
+                "answer_box": {"answer": "42"},
+            })
+        )
+        result = await SerpTool().search_full("6 times 7")
+
+    assert result["answer_box"] == "42"
+
+
+@pytest.mark.asyncio
+async def test_search_full_answer_box_is_none_when_absent(monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "SERP_API_KEY", "fake_key")
+
+    with respx.mock:
+        respx.get("https://serpapi.com/search").mock(
+            return_value=httpx.Response(200, json={"organic_results": []})
+        )
+        result = await SerpTool().search_full("test query")
+
+    assert result["answer_box"] is None

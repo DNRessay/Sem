@@ -3,6 +3,35 @@ import httpx
 from config import settings
 
 
+def _extract_answer_box(raw: dict | None) -> str | None:
+    """Google's long-standing "answer box" (weather, calculator, currency
+    and unit conversion, dictionary, sports scores...) — a direct
+    structured answer, not the newer generative AI Overview. Shape varies
+    a lot by type, so this only handles the common cases rather than every
+    possible one: a plain `answer` field (most conversions/calculators), a
+    `snippet` (generic featured-snippet style box), or the weather type's
+    own temperature/location/weather fields."""
+    if not raw:
+        return None
+    if raw.get("type") == "weather_result":
+        temp = raw.get("temperature")
+        unit = raw.get("unit") or ""
+        weather = raw.get("weather")
+        location = raw.get("location")
+        parts = []
+        if temp is not None:
+            parts.append(f"{temp}°{unit}")
+        if weather:
+            parts.append(weather)
+        if location:
+            parts.append(f"in {location}")
+        return " ".join(parts) if parts else None
+    for key in ("answer", "snippet", "result"):
+        if raw.get(key):
+            return str(raw[key])
+    return None
+
+
 class SerpTool:
     BASE = "https://serpapi.com/search"
 
@@ -43,7 +72,11 @@ class SerpTool:
         ]
         blocks = (data.get("ai_overview") or {}).get("text_blocks") or []
         text = "\n".join(b["snippet"] for b in blocks if b.get("snippet"))
-        return {"results": results, "ai_overview": text or None}
+        return {
+            "results": results,
+            "ai_overview": text or None,
+            "answer_box": _extract_answer_box(data.get("answer_box")),
+        }
 
     async def news(self, query: str) -> list[dict]:
         if not settings.SERP_API_KEY:
