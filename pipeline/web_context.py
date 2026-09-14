@@ -13,6 +13,20 @@ _SEARCH_RE = re.compile(
     r"what'?s the latest|find (?:me )?(?:info|information) (?:on|about))\b",
     re.I,
 )
+# Strips the generic scaffolding around a news request ("what's on the
+# latest news", "any breaking news today?") so what's left, if anything, is
+# an actual topic — feeding the whole sentence to a news search returns
+# stale/irrelevant results because it's matched too literally.
+_NEWS_FILLER_RE = re.compile(
+    r"\b(what'?s|on|in|the|any|breaking|latest|news|about|today|happening|for|me)\b",
+    re.I,
+)
+
+
+def _news_topic(query: str) -> str:
+    cleaned = _NEWS_FILLER_RE.sub("", query)
+    cleaned = re.sub(r"[?!.]+", "", cleaned).strip()
+    return cleaned if len(cleaned) >= 3 else "top stories"
 
 
 def detect_web_intent(query: str) -> tuple[str, str] | None:
@@ -58,7 +72,7 @@ async def run_web_intent(kind: str, target: str) -> str:
         return f'<web_fetch url="{target}">\n{content}\n</web_fetch>'
 
     if kind == "news":
-        result = await registry.execute("web_news", {"topic": target})
+        result = await registry.execute("web_news", {"topic": _news_topic(target)})
         if not result or result[0].get("error"):
             return ""
         lines = [f"- {r.get('title')} ({r.get('source')}, {r.get('date')}): {r.get('link')}" for r in result]

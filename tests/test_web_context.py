@@ -1,6 +1,6 @@
 import pytest
 
-from pipeline.web_context import detect_web_intent, run_web_intent, status_label
+from pipeline.web_context import _news_topic, detect_web_intent, run_web_intent, status_label
 
 
 def test_detect_web_intent_finds_url():
@@ -82,6 +82,16 @@ async def test_run_web_intent_search_empty_on_missing_key(monkeypatch):
     assert result == ""
 
 
+def test_news_topic_strips_generic_filler_to_a_fallback():
+    assert _news_topic("what's on the latest news") == "top stories"
+    assert _news_topic("any breaking news today?") == "top stories"
+
+
+def test_news_topic_keeps_the_actual_subject():
+    assert _news_topic("news about load shedding") == "load shedding"
+    assert _news_topic("what's the latest news on the springboks") == "springboks"
+
+
 @pytest.mark.asyncio
 async def test_run_web_intent_news_wraps_results(monkeypatch):
     class FakeRegistry:
@@ -93,6 +103,20 @@ async def test_run_web_intent_news_wraps_results(monkeypatch):
     result = await run_web_intent("news", "what's on the latest news")
     assert "<web_news>" in result
     assert "A (News24, 1 hour ago): https://a.example" in result
+
+
+@pytest.mark.asyncio
+async def test_run_web_intent_news_passes_extracted_topic_not_raw_sentence(monkeypatch):
+    captured = {}
+
+    class FakeRegistry:
+        async def execute(self, tool_name, args):
+            captured["args"] = args
+            return [{"title": "A", "source": "S", "date": "d", "link": "l"}]
+
+    monkeypatch.setattr("pipeline.web_context.get_registry", lambda: FakeRegistry())
+    await run_web_intent("news", "news about load shedding")
+    assert captured["args"] == {"topic": "load shedding"}
 
 
 @pytest.mark.asyncio
