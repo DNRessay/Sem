@@ -58,26 +58,21 @@ def repo_status_label(kind: str, target: str) -> str:
     return f'Searching the repo for "{target}"…'
 
 
-async def run_repo_intent(kind: str, target: str, session_id: str) -> str:
-    """Executes against the session's active (persistently cloned) repo —
-    empty string if there's no active repo, or on any tool failure, so a
-    missing/unset Modal repo tool degrades to "no repo context added,"
-    never a chat-breaking error."""
+async def run_repo_intent(target: str, session_id: str) -> str:
+    """Grep-only: executes against the session's active (persistently
+    cloned) repo and returns a context block to fold into the model's
+    message for it to reason about. Empty string if there's no active repo,
+    or on any tool failure, so a missing/unset Modal repo tool degrades to
+    "no repo context added," never a chat-breaking error. A file read is
+    handled separately by fetch_repo_file_raw (see gateway/router.py) —
+    reproducing a file's exact content is not something to route through
+    the model at all, let alone reason about first."""
     db = await get_store()
     active = await db.get_active_repo(session_id)
     if not active:
         return ""
 
     registry = get_registry()
-
-    if kind == "read":
-        result = await registry.execute(
-            "repo_read", {"provider": active["provider"], "repo": active["repo"], "path": target},
-        )
-        if not isinstance(result, dict) or not result.get("ok"):
-            return ""
-        return f'<repo_file repo="{active["repo"]}" path="{target}">\n{result.get("content", "")}\n</repo_file>'
-
     result = await registry.execute(
         "repo_grep", {"provider": active["provider"], "repo": active["repo"], "term": target},
     )
@@ -85,3 +80,26 @@ async def run_repo_intent(kind: str, target: str, session_id: str) -> str:
         return ""
     lines = [f'{m["path"]}:{m["line"]}: {m["text"]}' for m in result["matches"][:20]]
     return f'<repo_grep repo="{active["repo"]}" term="{target}">\n' + "\n".join(lines) + "\n</repo_grep>"
+
+
+async def fetch_repo_file_raw(target: str, session_id: str) -> tuple[str, str] | None:
+    """Fetches one file's exact content from the session's active repo for
+    the router to stream straight back to the client, bypassing the LLM
+    entirely. A max_tokens-limited model re-typing content it already has
+    verbatim doesn't just waste its (rate-limited) output budget — for
+    anything more than a couple thousand characters it reliably truncates
+    partway through, and there's no reasoning involved in reproducing exact
+    bytes anyway. Returns (path, content), or None if there's no active
+    repo or the read failed for any reason."""
+    db = await get_store()
+    active = await db.get_active_repo(session_id)
+    if not active:
+        return None
+
+    registry = get_registry()
+    result = await registry.execute(
+        "repo_read", {"provider": active["provider"], "repo": active["repo"], "path": target},
+    )
+    if not isinstance(result, dict) or not result.get("ok"):
+        return None
+    return result.get("path", target), result.get("content", "")

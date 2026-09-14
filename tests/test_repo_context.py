@@ -1,6 +1,11 @@
 import pytest
 
-from pipeline.repo_context import detect_repo_intent, repo_status_label, run_repo_intent
+from pipeline.repo_context import (
+    detect_repo_intent,
+    fetch_repo_file_raw,
+    repo_status_label,
+    run_repo_intent,
+)
 
 
 def test_detect_repo_intent_finds_readme_phrasing():
@@ -65,12 +70,26 @@ async def test_run_repo_intent_returns_empty_with_no_active_repo(monkeypatch):
         return FakeStore()
 
     monkeypatch.setattr("pipeline.repo_context.get_store", fake_get_store)
-    result = await run_repo_intent("read", "README.md", "sess1")
+    result = await run_repo_intent("TODO", "sess1")
     assert result == ""
 
 
 @pytest.mark.asyncio
-async def test_run_repo_intent_read_wraps_content(monkeypatch):
+async def test_fetch_repo_file_raw_returns_none_with_no_active_repo(monkeypatch):
+    class FakeStore:
+        async def get_active_repo(self, session_id):
+            return None
+
+    async def fake_get_store():
+        return FakeStore()
+
+    monkeypatch.setattr("pipeline.repo_context.get_store", fake_get_store)
+    result = await fetch_repo_file_raw("README.md", "sess1")
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_repo_file_raw_returns_path_and_content(monkeypatch):
     class FakeStore:
         async def get_active_repo(self, session_id):
             return {"provider": "github", "repo": "octocat/hello", "ref": "main"}
@@ -86,13 +105,12 @@ async def test_run_repo_intent_read_wraps_content(monkeypatch):
 
     monkeypatch.setattr("pipeline.repo_context.get_store", fake_get_store)
     monkeypatch.setattr("pipeline.repo_context.get_registry", lambda: FakeRegistry())
-    result = await run_repo_intent("read", "README.md", "sess1")
-    assert '<repo_file repo="octocat/hello" path="README.md">' in result
-    assert "# Hello" in result
+    result = await fetch_repo_file_raw("README.md", "sess1")
+    assert result == ("README.md", "# Hello")
 
 
 @pytest.mark.asyncio
-async def test_run_repo_intent_read_returns_empty_on_tool_failure(monkeypatch):
+async def test_fetch_repo_file_raw_returns_none_on_tool_failure(monkeypatch):
     class FakeStore:
         async def get_active_repo(self, session_id):
             return {"provider": "github", "repo": "octocat/hello", "ref": ""}
@@ -106,8 +124,8 @@ async def test_run_repo_intent_read_returns_empty_on_tool_failure(monkeypatch):
 
     monkeypatch.setattr("pipeline.repo_context.get_store", fake_get_store)
     monkeypatch.setattr("pipeline.repo_context.get_registry", lambda: FakeRegistry())
-    result = await run_repo_intent("read", "missing.py", "sess1")
-    assert result == ""
+    result = await fetch_repo_file_raw("missing.py", "sess1")
+    assert result is None
 
 
 @pytest.mark.asyncio
@@ -127,7 +145,7 @@ async def test_run_repo_intent_grep_wraps_matches(monkeypatch):
 
     monkeypatch.setattr("pipeline.repo_context.get_store", fake_get_store)
     monkeypatch.setattr("pipeline.repo_context.get_registry", lambda: FakeRegistry())
-    result = await run_repo_intent("grep", "TODO", "sess1")
+    result = await run_repo_intent("TODO", "sess1")
     assert 'a.py:3: # TODO fix this' in result
     assert '<repo_grep repo="octocat/hello" term="TODO">' in result
 
@@ -147,5 +165,5 @@ async def test_run_repo_intent_grep_returns_empty_with_no_matches(monkeypatch):
 
     monkeypatch.setattr("pipeline.repo_context.get_store", fake_get_store)
     monkeypatch.setattr("pipeline.repo_context.get_registry", lambda: FakeRegistry())
-    result = await run_repo_intent("grep", "nonexistent_term", "sess1")
+    result = await run_repo_intent("nonexistent_term", "sess1")
     assert result == ""

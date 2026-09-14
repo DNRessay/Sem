@@ -83,8 +83,8 @@ def test_repo_intent_takes_priority_over_web_intent(client, monkeypatch):
         web_calls.append((kind, target))
         return ""
 
-    async def fake_run_repo_intent(kind, target, session_id):
-        repo_calls.append((kind, target, session_id))
+    async def fake_run_repo_intent(target, session_id):
+        repo_calls.append((target, session_id))
         return ""
 
     monkeypatch.setattr("gateway.router.run_web_intent", fake_run_web_intent)
@@ -96,19 +96,59 @@ def test_repo_intent_takes_priority_over_web_intent(client, monkeypatch):
     })
     assert resp.status_code == 200
     assert web_calls == []
-    assert repo_calls == [("grep", "save_turn", "sess1")]
+    assert repo_calls == [("save_turn", "sess1")]
 
 
-def test_readme_question_triggers_repo_intent_and_streams_the_result(client, monkeypatch):
+def test_readme_question_bypasses_the_llm_and_streams_the_raw_file(client, monkeypatch):
+    """A file read never reaches bootstrap.run/the LLM at all — see
+    pipeline.repo_context.fetch_repo_file_raw's docstring: reproducing exact
+    content through a max_tokens-limited model reliably truncates larger
+    files, and there's no reasoning involved in the task anyway."""
     calls = []
 
-    async def fake_run_repo_intent(kind, target, session_id):
-        calls.append((kind, target, session_id))
-        return '<repo_file repo="octocat/hello" path="README.md">hello world</repo_file>'
+    async def fake_fetch_repo_file_raw(target, session_id):
+        calls.append((target, session_id))
+        return ("README.md", "hello world")
 
-    monkeypatch.setattr("gateway.router.run_repo_intent", fake_run_repo_intent)
+    class RecordingStore:
+        def __init__(self):
+            self.turns = []
+            self.memories = []
+
+        async def save_turn(self, session_id, role, content):
+            self.turns.append((session_id, role, content))
+
+        async def save_memory(self, session_id, content, salience=0.5, embedding=None):
+            self.memories.append((session_id, content))
+
+    store = RecordingStore()
+
+    async def fake_get_store():
+        return store
+
+    monkeypatch.setattr("gateway.router.fetch_repo_file_raw", fake_fetch_repo_file_raw)
+    monkeypatch.setattr("gateway.router.get_store", fake_get_store)
 
     resp = client.post("/chat", json={"message": "what's in the readme", "session_id": "sess1"})
     assert resp.status_code == 200
-    assert calls == [("read", "README.md", "sess1")]
-    assert "hello world" in resp.text  # the repo block rides through as a tool SSE event
+    assert calls == [("README.md", "sess1")]
+    assert "hello world" in resp.text  # streamed directly, not through the LLM
+    assert ("sess1", "user", "what's in the readme") in store.turns
+    assert any(role == "assistant" and "hello world" in content for _, role, content in store.turns)
+    # only the query gets embedded — the reply is tool-derived, matches
+    # Bootstrap.run's skip-embedding-tool-output behavior
+    assert store.memories == [("sess1", "what's in the readme")]
+
+
+def test_repo_read_falls_back_to_normal_flow_when_fetch_fails(client, monkeypatch):
+    """No active repo, or the read failed — falls through to the ordinary
+    LLM flow (with no repo context folded in) rather than the request just
+    going silent."""
+    async def fake_fetch_repo_file_raw(target, session_id):
+        return None
+
+    monkeypatch.setattr("gateway.router.fetch_repo_file_raw", fake_fetch_repo_file_raw)
+
+    resp = client.post("/chat", json={"message": "what's in the readme", "session_id": "sess1"})
+    assert resp.status_code == 200
+    assert "ok" in resp.text  # FakeBootstrap's fixed reply — the normal flow ran

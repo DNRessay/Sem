@@ -8,8 +8,14 @@ from fastapi.responses import StreamingResponse
 from config import settings
 from gateway.auth import issue_token, require_account, verify_passphrase
 from pipeline.bootstrap import Bootstrap
-from pipeline.repo_context import detect_repo_intent, repo_status_label, run_repo_intent
+from pipeline.repo_context import (
+    detect_repo_intent,
+    fetch_repo_file_raw,
+    repo_status_label,
+    run_repo_intent,
+)
 from pipeline.web_context import detect_web_intent, run_web_intent, status_label
+from storage.embeddings import embed_text
 from storage.neon_store import get_store
 from tau.tau_engine import TAUEngine
 
@@ -137,10 +143,48 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
     async def stream_gen():
         msg = augmented
         tool_marker = ""
-        if repo_intent:
+        if repo_intent and repo_intent[0] == "read":
+            # A file read bypasses the LLM entirely — see
+            # pipeline.repo_context.fetch_repo_file_raw for why: reproducing
+            # exact file content through a max_tokens-limited model both
+            # wastes its (rate-limited) output budget and reliably
+            # truncates partway through anything more than a couple
+            # thousand characters, with no reasoning involved in the task
+            # anyway. Falls through to the normal flow below only if there's
+            # no active repo or the read failed, so the model can still say
+            # something sensible rather than the request just going silent.
+            _, target = repo_intent
+            yield f"data: {json.dumps({'status': repo_status_label('read', target)})}\n\n"
+            raw = await fetch_repo_file_raw(target, session_id)
+            if raw:
+                path, content = raw
+                ext = path.rsplit(".", 1)[-1] if "." in path else ""
+                reply = f"Here's the full `{path}` from the repo:\n\n```{ext}\n{content}\n```"
+                label = f"Reading {path}"
+                tool = {"kind": "read", "label": label, "detail": f'<repo_file path="{path}">\n{content}\n</repo_file>'}
+                yield f"data: {json.dumps({'tool': tool})}\n\n"
+                for i in range(0, len(reply), 400):
+                    yield f"data: {json.dumps({'chunk': reply[i:i + 400]})}\n\n"
+
+                db = await get_store()
+                marker = f"[[SEMBLANCE_TOOL:{json.dumps({'kind': 'read', 'label': label})}]]\n"
+                await db.save_turn(session_id, "user", raw_msg)
+                await db.save_turn(session_id, "assistant", f"{marker}{reply}")
+                # Only the query gets embedded, not the reply — the file's
+                # real content already lives in the repo clone and would
+                # just go stale/duplicate there the next time it's asked
+                # about (same reasoning as pipeline.bootstrap.Bootstrap.run's
+                # tool-driven-reply skip).
+                query_embedding = await embed_text(raw_msg)
+                await db.save_memory(session_id, raw_msg, embedding=query_embedding)
+
+                yield "data: [DONE]\n\n"
+                return
+
+        if repo_intent and repo_intent[0] == "grep":
             kind, target = repo_intent
             yield f"data: {json.dumps({'status': repo_status_label(kind, target)})}\n\n"
-            repo_block = await run_repo_intent(kind, target, session_id)
+            repo_block = await run_repo_intent(target, session_id)
             if repo_block:
                 msg = (
                     f"{msg}\n\n"
