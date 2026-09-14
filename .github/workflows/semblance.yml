@@ -174,3 +174,33 @@ jobs:
                 "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 1}
               }]
             }'
+
+      - name: Smoke test deployed endpoint
+        # Confirms the Function URL is actually serving the FastAPI app after
+        # the switch to AWS Lambda Web Adapter (run.sh + RESPONSE_STREAM) —
+        # a routing/startup regression there would silently 404 or hang
+        # instead of failing the deploy itself, since CloudFormation only
+        # checks that the *resources* converged, not that the app inside
+        # answers correctly.
+        run: |
+          region="${{ secrets.AWS_REGION || 'eu-west-1' }}"
+          url=$(aws cloudformation describe-stacks --stack-name semblance --region "$region" \
+            --query "Stacks[0].Outputs[?OutputKey=='ChatFunctionUrl'].OutputValue" --output text)
+          url="${url%/}"
+
+          echo "Testing $url/health"
+          health_status=$(curl -s -o /tmp/health_body.txt -w "%{http_code}" "$url/health")
+          echo "status=$health_status body=$(cat /tmp/health_body.txt)"
+          if [ "$health_status" != "200" ]; then
+            echo "::error::/health returned $health_status, expected 200"
+            exit 1
+          fi
+
+          echo "Testing POST $url/auth/login (expect 401, confirms routing works)"
+          login_status=$(curl -s -o /tmp/login_body.txt -w "%{http_code}" -X POST "$url/auth/login" \
+            -H "Content-Type: application/json" -d '{"passphrase":"__smoke_test_wrong__"}')
+          echo "status=$login_status body=$(cat /tmp/login_body.txt)"
+          if [ "$login_status" != "401" ]; then
+            echo "::error::/auth/login returned $login_status, expected 401 (route may be missing/misconfigured)"
+            exit 1
+          fi
