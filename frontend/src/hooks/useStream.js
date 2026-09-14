@@ -44,30 +44,39 @@ export function useStream(baseUrl = "", token = "", onUnauthorized) {
 
             const reader = res.body.getReader();
             const decoder = new TextDecoder();
+            // A tool event's `detail` can carry many KB of fetched/searched
+            // text, easily spanning more than one network chunk — reading
+            // one chunk at a time and splitting it in isolation (the
+            // previous version) silently truncated/dropped any SSE line
+            // that landed across a chunk boundary. Buffering across reads
+            // and only processing complete lines (keeping the trailing
+            // partial one for the next read) is the standard fix.
+            let buffer = "";
 
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
-                const lines = decoder.decode(value).split("\n").filter(Boolean);
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split("\n");
+                buffer = lines.pop() ?? "";
                 for (const line of lines) {
-                    if (line.startsWith("data: ")) {
-                        const data = line.slice(6);
-                        if (data === "[DONE]") break;
-                        try {
-                            const parsed = JSON.parse(data);
-                            if (parsed.tool) {
-                                toolLocal = parsed.tool;
-                                setTool(parsed.tool);
-                                setStatus(null); // the search/fetch is done — the chip replaces the breadcrumb
-                            } else if (parsed.status) {
-                                setStatus(parsed.status);
-                            } else if (parsed.chunk) {
-                                full += parsed.chunk;
-                                setChunks(c => [...c, parsed.chunk]);
-                                setStatus(null);
-                            }
-                        } catch {}
-                    }
+                    if (!line.startsWith("data: ")) continue;
+                    const data = line.slice(6);
+                    if (data === "[DONE]") continue;
+                    try {
+                        const parsed = JSON.parse(data);
+                        if (parsed.tool) {
+                            toolLocal = parsed.tool;
+                            setTool(parsed.tool);
+                            setStatus(null); // the search/fetch is done — the chip replaces the breadcrumb
+                        } else if (parsed.status) {
+                            setStatus(parsed.status);
+                        } else if (parsed.chunk) {
+                            full += parsed.chunk;
+                            setChunks(c => [...c, parsed.chunk]);
+                            setStatus(null);
+                        }
+                    } catch {}
                 }
             }
         } catch (e) {

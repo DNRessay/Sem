@@ -83,10 +83,39 @@ function GlobeIcon() {
     );
 }
 
-function WebStatusIndicator({ label }) {
+function useElapsedSeconds(active) {
+    // Lives in the parent, not in whichever indicator happens to be
+    // showing — searching and thinking used to each own a separate timer
+    // that reset when the UI swapped between them, so the clock visibly
+    // jumped back to 0s the moment a search finished. One timer for the
+    // whole wait, started once when it begins and reset only when a brand
+    // new wait begins.
+    const [elapsed, setElapsed] = useState(0);
+    const startRef = useRef(null);
+
+    useEffect(() => {
+        if (!active) return;
+        startRef.current = Date.now();
+        setElapsed(0);
+        const id = setInterval(() => setElapsed(Math.round((Date.now() - startRef.current) / 1000)), 1000);
+        return () => clearInterval(id);
+    }, [active]);
+
+    return elapsed;
+}
+
+function WaitLabel({ elapsed, status }) {
+    const [i, setI] = useState(0);
+
+    useEffect(() => {
+        const id = setInterval(() => setI(v => (v + 1) % THINKING_WORDS.length), 1100);
+        return () => clearInterval(id);
+    }, []);
+
     return (
         <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "var(--text-muted)", fontSize: "14px" }}>
-            <GlobeIcon /> {label}
+            {status && <GlobeIcon />}
+            {elapsed}s · {status || `${THINKING_WORDS[i]}…`}
         </span>
     );
 }
@@ -122,24 +151,6 @@ function ToolChip({ tool }) {
     );
 }
 
-function ThinkingIndicator() {
-    const [i, setI] = useState(0);
-    const [elapsed, setElapsed] = useState(0);
-    const startRef = useRef(Date.now());
-
-    useEffect(() => {
-        const wordId = setInterval(() => setI(v => (v + 1) % THINKING_WORDS.length), 1100);
-        const tickId = setInterval(() => setElapsed(Math.round((Date.now() - startRef.current) / 1000)), 1000);
-        return () => { clearInterval(wordId); clearInterval(tickId); };
-    }, []);
-
-    return (
-        <span style={{ color: "var(--text-muted)", fontSize: "14px" }}>
-            {elapsed}s · {THINKING_WORDS[i]}…
-        </span>
-    );
-}
-
 export default function ChatWindow({ sessionId = "default", initialHistory = [], onStreamChange, token, onUnauthorized }) {
     const [input, setInput] = useState("");
     const [history, setHistory] = useState(initialHistory);
@@ -148,8 +159,8 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
     const bottomRef = useRef(null);
 
     const fullResponse = chunks.join("");
-    const isSearching = streaming && status && !tool && fullResponse.length === 0;
-    const isThinking = streaming && fullResponse.length === 0 && !status && !tool;
+    const isWaiting = streaming && fullResponse.length === 0;
+    const elapsed = useElapsedSeconds(isWaiting);
 
     useEffect(() => {
         onStreamChange?.(streaming);
@@ -209,20 +220,10 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                         </div>
                     )
                 ))}
-                {isSearching && (
+                {isWaiting && (
                     <div style={{ alignSelf: "flex-start", padding: "6px 2px" }}>
-                        <WebStatusIndicator label={status} />
-                    </div>
-                )}
-                {isThinking && (
-                    <div style={{ alignSelf: "flex-start", padding: "6px 2px" }}>
-                        <ThinkingIndicator />
-                    </div>
-                )}
-                {streaming && tool && fullResponse.length === 0 && (
-                    <div style={{ alignSelf: "flex-start", padding: "6px 2px" }}>
-                        <ToolChip tool={tool} />
-                        <ThinkingIndicator />
+                        {tool && <ToolChip tool={tool} />}
+                        <WaitLabel elapsed={elapsed} status={status} />
                     </div>
                 )}
                 {streaming && fullResponse.length > 0 && (

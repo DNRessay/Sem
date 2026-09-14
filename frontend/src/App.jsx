@@ -3,6 +3,7 @@ import ChatWindow from "./components/ChatWindow";
 import StatusBar from "./components/StatusBar";
 import Drawer from "./components/Drawer";
 import Login from "./components/Login";
+import ErrorBoundary from "./components/ErrorBoundary";
 import { turnsToHistory } from "./utils/toolMarker";
 
 const API = import.meta.env.VITE_API_URL || "";
@@ -93,15 +94,16 @@ export default function App() {
             <StatusBar sessionId={sessionId} streaming={streaming} onMenu={() => setMenuOpen(true)} />
             <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
                 {!restoring && (
-                    <ChatWindow
-                        key={sessionId}
-                        sessionId={sessionId}
-                        initialHistory={initialHistory}
-                        onStreamChange={setStreaming}
-                        onNewChat={startNewChat}
-                        token={token}
-                        onUnauthorized={logout}
-                    />
+                    <ErrorBoundary key={sessionId}>
+                        <ChatWindow
+                            sessionId={sessionId}
+                            initialHistory={initialHistory}
+                            onStreamChange={setStreaming}
+                            onNewChat={startNewChat}
+                            token={token}
+                            onUnauthorized={logout}
+                        />
+                    </ErrorBoundary>
                 )}
             </div>
             <Drawer
