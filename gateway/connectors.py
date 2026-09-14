@@ -224,7 +224,10 @@ async def _list_github_repos(token: str) -> list[dict]:
         )
         r.raise_for_status()
         data = r.json()
-    return [{"full_name": d["full_name"], "private": d.get("private", False)} for d in data]
+    return [
+        {"full_name": d["full_name"], "private": d.get("private", False), "default_branch": d.get("default_branch")}
+        for d in data
+    ]
 
 
 async def _list_gitlab_repos(token: str) -> list[dict]:
@@ -237,7 +240,133 @@ async def _list_gitlab_repos(token: str) -> list[dict]:
         )
         r.raise_for_status()
         data = r.json()
-    return [{"full_name": d["path_with_namespace"], "private": d.get("visibility") != "public"} for d in data]
+    return [
+        {
+            "full_name": d["path_with_namespace"],
+            "private": d.get("visibility") != "public",
+            "default_branch": d.get("default_branch"),
+        }
+        for d in data
+    ]
+
+
+@router.get("/connectors/{provider}/branches")
+async def list_branches(provider: str, repo: str, account: dict = Depends(require_account)):
+    """Lists a repo's branches, so ref selection can be a dropdown instead of
+    a free-text field the user has to already know."""
+    if provider not in _PROVIDERS:
+        raise HTTPException(400, f"Unknown provider '{provider}' — must be one of {sorted(_PROVIDERS)}")
+    if not repo:
+        raise HTTPException(400, "repo required")
+
+    db = await get_store()
+    connector = await db.get_connector(account["account_id"], provider)
+    if not connector:
+        raise HTTPException(400, f"No {provider} connector configured — add a token first")
+
+    try:
+        if provider == "github":
+            branches = await _list_github_branches(repo, connector["token"])
+        else:
+            token = await _ensure_fresh_gitlab_token(account["account_id"], connector, db)
+            branches = await _list_gitlab_branches(repo, token)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(e.response.status_code, f"{provider} error: {e.response.text[:300]}")
+
+    return {"provider": provider, "repo": repo, "branches": branches}
+
+
+async def _list_github_branches(repo: str, token: str) -> list[str]:
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
+    async with httpx.AsyncClient(timeout=20) as client:
+        r = await client.get(
+            f"https://api.github.com/repos/{repo}/branches",
+            params={"per_page": 100},
+            headers=headers,
+        )
+        r.raise_for_status()
+        data = r.json()
+    return [b["name"] for b in data]
+
+
+async def _list_gitlab_branches(repo: str, token: str) -> list[str]:
+    project_enc = repo.replace("/", "%2F")
+    headers = {"Authorization": f"Bearer {token}"}
+    async with httpx.AsyncClient(timeout=20) as client:
+        r = await client.get(
+            f"https://gitlab.com/api/v4/projects/{project_enc}/repository/branches",
+            params={"per_page": 100},
+            headers=headers,
+        )
+        r.raise_for_status()
+        data = r.json()
+    return [b["name"] for b in data]
+
+
+@router.get("/connectors/{provider}/tree")
+async def list_tree(provider: str, repo: str, path: str = "", ref: str = "", account: dict = Depends(require_account)):
+    """Lists one directory's contents (files and subfolders) in a repo, so
+    the frontend can offer a folder browser instead of asking the user to
+    type a file path from memory."""
+    if provider not in _PROVIDERS:
+        raise HTTPException(400, f"Unknown provider '{provider}' — must be one of {sorted(_PROVIDERS)}")
+    if not repo:
+        raise HTTPException(400, "repo required")
+
+    db = await get_store()
+    connector = await db.get_connector(account["account_id"], provider)
+    if not connector:
+        raise HTTPException(400, f"No {provider} connector configured — add a token first")
+
+    try:
+        if provider == "github":
+            entries = await _list_github_tree(repo, path, ref, connector["token"])
+        else:
+            token = await _ensure_fresh_gitlab_token(account["account_id"], connector, db)
+            entries = await _list_gitlab_tree(repo, path, ref, token)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(e.response.status_code, f"{provider} error: {e.response.text[:300]}")
+
+    return {"provider": provider, "repo": repo, "path": path, "entries": entries}
+
+
+def _sorted_entries(entries: list[dict]) -> list[dict]:
+    return sorted(entries, key=lambda e: (e["type"] != "dir", e["name"].lower()))
+
+
+async def _list_github_tree(repo: str, path: str, ref: str, token: str) -> list[dict]:
+    url = f"https://api.github.com/repos/{repo}/contents/{path}" if path else f"https://api.github.com/repos/{repo}/contents"
+    params = {"ref": ref} if ref else {}
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
+    async with httpx.AsyncClient(timeout=20) as client:
+        r = await client.get(url, params=params, headers=headers)
+        r.raise_for_status()
+        data = r.json()
+    if not isinstance(data, list):
+        raise HTTPException(400, f"'{path}' is a file, not a directory")
+    return _sorted_entries([
+        {"name": d["name"], "path": d["path"], "type": "dir" if d["type"] == "dir" else "file"} for d in data
+    ])
+
+
+async def _list_gitlab_tree(repo: str, path: str, ref: str, token: str) -> list[dict]:
+    project_enc = repo.replace("/", "%2F")
+    headers = {"Authorization": f"Bearer {token}"}
+    params = {"per_page": 100}
+    if path:
+        params["path"] = path
+    if ref:
+        params["ref"] = ref
+    async with httpx.AsyncClient(timeout=20) as client:
+        r = await client.get(
+            f"https://gitlab.com/api/v4/projects/{project_enc}/repository/tree",
+            params=params, headers=headers,
+        )
+        r.raise_for_status()
+        data = r.json()
+    return _sorted_entries([
+        {"name": d["name"], "path": d["path"], "type": "dir" if d["type"] == "tree" else "file"} for d in data
+    ])
 
 
 @router.post("/connectors/{provider}/fetch")

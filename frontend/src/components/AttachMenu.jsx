@@ -72,6 +72,23 @@ export function AttachFileIcon() {
     );
 }
 
+function FolderIcon() {
+    return (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+        </svg>
+    );
+}
+
+function FileIcon() {
+    return (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+        </svg>
+    );
+}
+
 function RepoPicker({ repos, value, onChange }) {
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState("");
@@ -133,8 +150,12 @@ function RepoForm({ provider, token, onAttach, onNeedConnector, onClose }) {
     const [repos, setRepos] = useState(null); // null = still loading
     const [loadError, setLoadError] = useState(null);
     const [repo, setRepo] = useState("");
-    const [path, setPath] = useState("");
-    const [ref, setRef] = useState("");
+    const [branch, setBranch] = useState("");
+    const [branches, setBranches] = useState([]);
+    const [dirPath, setDirPath] = useState(""); // folder currently being browsed, "" = root
+    const [entries, setEntries] = useState([]);
+    const [entriesLoading, setEntriesLoading] = useState(false);
+    const [selected, setSelected] = useState(""); // chosen file path
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
 
@@ -164,17 +185,77 @@ function RepoForm({ provider, token, onAttach, onNeedConnector, onClose }) {
         return () => { cancelled = true; };
     }, [provider, token]);
 
+    // Picking a different repo resets the browser back to its root and
+    // reloads that repo's branches, defaulting to its actual default branch
+    // instead of leaving the user to type one from memory.
+    useEffect(() => {
+        if (!repo) return;
+        let cancelled = false;
+        setDirPath("");
+        setSelected("");
+        setEntries([]);
+        setError(null);
+        const defaultBranch = repos?.find(r => r.full_name === repo)?.default_branch || "";
+        setBranch(defaultBranch);
+        (async () => {
+            try {
+                const res = await fetch(`${API}/connectors/${provider}/branches?repo=${encodeURIComponent(repo)}`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) return;
+                if (cancelled) return;
+                const list = data.branches || [];
+                setBranches(list);
+                if (!defaultBranch && list.length > 0) setBranch(list[0]);
+            } catch {
+                // Branch dropdown is a convenience, not required — the tree/
+                // fetch calls below fall back to the provider's own default
+                // ref when branch is left empty.
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [repo]);
+
+    // Every folder navigation (or a branch switch) reloads the current
+    // directory's listing.
+    useEffect(() => {
+        if (!repo) return;
+        let cancelled = false;
+        setEntriesLoading(true);
+        (async () => {
+            try {
+                const params = new URLSearchParams({ repo, path: dirPath });
+                if (branch) params.set("ref", branch);
+                const res = await fetch(`${API}/connectors/${provider}/tree?${params}`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.detail || `Couldn't load folder (${res.status})`);
+                if (cancelled) return;
+                setEntries(data.entries || []);
+            } catch (e) {
+                if (!cancelled) { setEntries([]); setError(e.message); }
+            } finally {
+                if (!cancelled) setEntriesLoading(false);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [provider, repo, branch, dirPath]);
+
+    const crumbs = dirPath ? dirPath.split("/") : [];
+
     const submit = async () => {
         if (busy) return;
         if (!repo) { setError("Pick a repository first"); return; }
-        if (!path.trim()) { setError("Enter a file path"); return; }
+        if (!selected) { setError("Pick a file first"); return; }
         setBusy(true);
         setError(null);
         try {
             const res = await fetch(`${API}/connectors/${provider}/fetch`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ repo, path: path.trim(), ref: ref.trim() }),
+                body: JSON.stringify({ repo, path: selected, ref: branch }),
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) {
@@ -184,7 +265,7 @@ function RepoForm({ provider, token, onAttach, onNeedConnector, onClose }) {
                 }
                 throw new Error(data.detail || `Fetch failed (${res.status})`);
             }
-            onAttach({ name: `${repo}/${path}`, content: data.content, source: provider });
+            onAttach({ name: `${repo}/${selected}`, content: data.content, source: provider });
             onClose();
         } catch (e) {
             setError(e.message);
@@ -194,7 +275,7 @@ function RepoForm({ provider, token, onAttach, onNeedConnector, onClose }) {
     };
 
     return (
-        <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" }}>
+        <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px", width: "260px", maxWidth: "80vw" }}>
             {repos === null && !loadError && (
                 <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>Loading repos…</div>
             )}
@@ -203,14 +284,55 @@ function RepoForm({ provider, token, onAttach, onNeedConnector, onClose }) {
                 <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>No repos found on this account.</div>
             )}
             {repos?.length > 0 && (
-                <RepoPicker repos={repos} value={repo} onChange={setRepo} />
+                <>
+                    <RepoPicker repos={repos} value={repo} onChange={setRepo} />
+                    {branches.length > 0 && (
+                        <select value={branch} onChange={e => setBranch(e.target.value)} style={inputStyle}>
+                            {branches.map(b => <option key={b} value={b}>{b}</option>)}
+                        </select>
+                    )}
+                    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "2px", fontSize: "11px", color: "var(--text-muted)" }}>
+                        <button onClick={() => setDirPath("")} style={crumbStyle}>{repo.split("/")[1] || repo}</button>
+                        {crumbs.map((c, i) => (
+                            <span key={i} style={{ display: "flex", alignItems: "center", gap: "2px" }}>
+                                <span>/</span>
+                                <button onClick={() => setDirPath(crumbs.slice(0, i + 1).join("/"))} style={crumbStyle}>{c}</button>
+                            </span>
+                        ))}
+                    </div>
+                    <div style={{ border: "1px solid var(--border)", borderRadius: "8px", maxHeight: "170px", overflowY: "auto" }}>
+                        {entriesLoading && (
+                            <div style={{ padding: "8px 10px", fontSize: "12px", color: "var(--text-muted)" }}>Loading…</div>
+                        )}
+                        {!entriesLoading && entries.length === 0 && (
+                            <div style={{ padding: "8px 10px", fontSize: "12px", color: "var(--text-muted)" }}>Empty folder</div>
+                        )}
+                        {!entriesLoading && entries.map(entry => (
+                            <button
+                                key={entry.path}
+                                onClick={() => entry.type === "dir" ? setDirPath(entry.path) : setSelected(entry.path)}
+                                style={{
+                                    display: "flex", alignItems: "center", gap: "6px", width: "100%", textAlign: "left",
+                                    padding: "6px 10px", background: entry.path === selected ? "var(--bg)" : "none",
+                                    border: "none", color: "var(--text)", fontSize: "13px", cursor: "pointer",
+                                }}
+                            >
+                                <span style={{ display: "flex", color: "var(--text-muted)", flexShrink: 0 }}>
+                                    {entry.type === "dir" ? <FolderIcon /> : <FileIcon />}
+                                </span>
+                                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.name}</span>
+                            </button>
+                        ))}
+                    </div>
+                    {selected && (
+                        <div style={{ fontSize: "12px", color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            Selected: {selected}
+                        </div>
+                    )}
+                </>
             )}
-            <input value={path} onChange={e => setPath(e.target.value)} placeholder="path/to/file.py"
-                style={inputStyle} />
-            <input value={ref} onChange={e => setRef(e.target.value)} placeholder="branch (optional)"
-                style={inputStyle} />
             {error && <div style={{ color: "var(--danger)", fontSize: "12px" }}>{error}</div>}
-            <button onClick={submit} disabled={busy} style={smallButtonStyle}>
+            <button onClick={submit} disabled={busy || !selected} style={smallButtonStyle}>
                 {busy ? "Fetching…" : "Fetch file"}
             </button>
         </div>
@@ -294,6 +416,11 @@ function ConnectorTokenForm({ provider, token, onSaved }) {
 const inputStyle = {
     width: "100%", boxSizing: "border-box", background: "var(--bg)", border: "1px solid var(--border)",
     borderRadius: "8px", padding: "8px 10px", color: "var(--text)", fontSize: "13px", outline: "none",
+};
+
+const crumbStyle = {
+    background: "none", border: "none", color: "var(--text-muted)", fontSize: "11px",
+    cursor: "pointer", padding: 0, textDecoration: "underline",
 };
 
 const smallButtonStyle = {

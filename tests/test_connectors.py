@@ -99,8 +99,8 @@ def test_list_repos_returns_github_repos(client):
     with respx.mock:
         respx.get("https://api.github.com/user/repos").mock(
             return_value=Response(200, json=[
-                {"full_name": "octocat/hello", "private": False},
-                {"full_name": "octocat/secret", "private": True},
+                {"full_name": "octocat/hello", "private": False, "default_branch": "main"},
+                {"full_name": "octocat/secret", "private": True, "default_branch": "master"},
             ])
         )
         resp = c.get("/connectors/github/repos")
@@ -108,8 +108,8 @@ def test_list_repos_returns_github_repos(client):
     assert resp.json() == {
         "provider": "github",
         "repos": [
-            {"full_name": "octocat/hello", "private": False},
-            {"full_name": "octocat/secret", "private": True},
+            {"full_name": "octocat/hello", "private": False, "default_branch": "main"},
+            {"full_name": "octocat/secret", "private": True, "default_branch": "master"},
         ],
     }
 
@@ -120,12 +120,127 @@ def test_list_repos_returns_gitlab_repos(client):
     with respx.mock:
         respx.get("https://gitlab.com/api/v4/projects").mock(
             return_value=Response(200, json=[
-                {"path_with_namespace": "group/project", "visibility": "private"},
+                {"path_with_namespace": "group/project", "visibility": "private", "default_branch": "main"},
             ])
         )
         resp = c.get("/connectors/gitlab/repos")
     assert resp.status_code == 200
-    assert resp.json() == {"provider": "gitlab", "repos": [{"full_name": "group/project", "private": True}]}
+    assert resp.json() == {
+        "provider": "gitlab",
+        "repos": [{"full_name": "group/project", "private": True, "default_branch": "main"}],
+    }
+
+
+def test_list_branches_without_configured_connector_errors(client):
+    c, _ = client
+    resp = c.get("/connectors/github/branches", params={"repo": "octocat/hello"})
+    assert resp.status_code == 400
+    assert "no github connector" in resp.json()["detail"].lower()
+
+
+def test_list_branches_requires_repo(client):
+    c, store = client
+    store.connectors[("owner", "github")] = {"token": "ghp_test", "refresh_token": None, "expires_at": None}
+    resp = c.get("/connectors/github/branches", params={"repo": ""})
+    assert resp.status_code == 400
+
+
+def test_list_github_branches(client):
+    c, store = client
+    store.connectors[("owner", "github")] = {"token": "ghp_test", "refresh_token": None, "expires_at": None}
+    with respx.mock:
+        respx.get("https://api.github.com/repos/octocat/hello/branches").mock(
+            return_value=Response(200, json=[{"name": "main"}, {"name": "dev"}])
+        )
+        resp = c.get("/connectors/github/branches", params={"repo": "octocat/hello"})
+    assert resp.status_code == 200
+    assert resp.json() == {"provider": "github", "repo": "octocat/hello", "branches": ["main", "dev"]}
+
+
+def test_list_gitlab_branches(client):
+    c, store = client
+    store.connectors[("owner", "gitlab")] = {"token": "glpat_test", "refresh_token": None, "expires_at": None}
+    with respx.mock:
+        respx.get("https://gitlab.com/api/v4/projects/group%2Fproject/repository/branches").mock(
+            return_value=Response(200, json=[{"name": "main"}])
+        )
+        resp = c.get("/connectors/gitlab/branches", params={"repo": "group/project"})
+    assert resp.status_code == 200
+    assert resp.json() == {"provider": "gitlab", "repo": "group/project", "branches": ["main"]}
+
+
+def test_list_tree_without_configured_connector_errors(client):
+    c, _ = client
+    resp = c.get("/connectors/github/tree", params={"repo": "octocat/hello"})
+    assert resp.status_code == 400
+    assert "no github connector" in resp.json()["detail"].lower()
+
+
+def test_list_tree_requires_repo(client):
+    c, store = client
+    store.connectors[("owner", "github")] = {"token": "ghp_test", "refresh_token": None, "expires_at": None}
+    resp = c.get("/connectors/github/tree", params={"repo": ""})
+    assert resp.status_code == 400
+
+
+def test_list_github_tree_root_sorts_dirs_before_files(client):
+    c, store = client
+    store.connectors[("owner", "github")] = {"token": "ghp_test", "refresh_token": None, "expires_at": None}
+    with respx.mock:
+        respx.get("https://api.github.com/repos/octocat/hello/contents").mock(
+            return_value=Response(200, json=[
+                {"name": "README.md", "path": "README.md", "type": "file"},
+                {"name": "src", "path": "src", "type": "dir"},
+            ])
+        )
+        resp = c.get("/connectors/github/tree", params={"repo": "octocat/hello"})
+    assert resp.status_code == 200
+    assert resp.json()["entries"] == [
+        {"name": "src", "path": "src", "type": "dir"},
+        {"name": "README.md", "path": "README.md", "type": "file"},
+    ]
+
+
+def test_list_github_tree_subpath_hits_contents_with_path(client):
+    c, store = client
+    store.connectors[("owner", "github")] = {"token": "ghp_test", "refresh_token": None, "expires_at": None}
+    with respx.mock:
+        respx.get("https://api.github.com/repos/octocat/hello/contents/src").mock(
+            return_value=Response(200, json=[{"name": "main.py", "path": "src/main.py", "type": "file"}])
+        )
+        resp = c.get("/connectors/github/tree", params={"repo": "octocat/hello", "path": "src"})
+    assert resp.status_code == 200
+    assert resp.json()["entries"] == [{"name": "main.py", "path": "src/main.py", "type": "file"}]
+
+
+def test_list_github_tree_rejects_a_file_path(client):
+    c, store = client
+    store.connectors[("owner", "github")] = {"token": "ghp_test", "refresh_token": None, "expires_at": None}
+    with respx.mock:
+        respx.get("https://api.github.com/repos/octocat/hello/contents/README.md").mock(
+            return_value=Response(200, json={"name": "README.md", "path": "README.md", "type": "file"})
+        )
+        resp = c.get("/connectors/github/tree", params={"repo": "octocat/hello", "path": "README.md"})
+    assert resp.status_code == 400
+    assert "not a directory" in resp.json()["detail"].lower()
+
+
+def test_list_gitlab_tree(client):
+    c, store = client
+    store.connectors[("owner", "gitlab")] = {"token": "glpat_test", "refresh_token": None, "expires_at": None}
+    with respx.mock:
+        respx.get("https://gitlab.com/api/v4/projects/group%2Fproject/repository/tree").mock(
+            return_value=Response(200, json=[
+                {"name": "main.py", "path": "src/main.py", "type": "blob"},
+                {"name": "utils", "path": "src/utils", "type": "tree"},
+            ])
+        )
+        resp = c.get("/connectors/gitlab/tree", params={"repo": "group/project", "path": "src"})
+    assert resp.status_code == 200
+    assert resp.json()["entries"] == [
+        {"name": "utils", "path": "src/utils", "type": "dir"},
+        {"name": "main.py", "path": "src/main.py", "type": "file"},
+    ]
 
 
 def test_fetch_without_configured_connector_errors(client):
