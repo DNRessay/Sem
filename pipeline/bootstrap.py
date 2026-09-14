@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator
 
 from cache.cache_ctrl import CacheController
@@ -9,6 +10,8 @@ from pipeline.ctx_assembly import CTXAssembly
 from pipeline.ctx_pressure import CTXPressure
 from pipeline.query_engine import QueryEngine
 from storage.neon_store import get_store
+
+_SAST = timezone(timedelta(hours=2))  # South Africa Standard Time — no DST
 
 
 class Bootstrap:
@@ -35,6 +38,7 @@ class Bootstrap:
         # Step 2 - CTX assembly
         ctx = self.sys_cache.read("system_prompt") or self.ctx_assembly.load_hierarchy()
         ctx = self.ctx_assembly.inject_tau_context(ctx, self.tau_context)
+        ctx = self._inject_current_time(ctx)
 
         # Step 3 - memory load
         memories = await self.sem_retrieval.retrieve(query)
@@ -114,6 +118,13 @@ class Bootstrap:
             active_lines.append("</active_skills>")
 
         return "\n".join(catalog_lines + active_lines)
+
+    def _inject_current_time(self, ctx: str) -> str:
+        # Computed fresh every call, never baked into the cached system
+        # prompt (that's cached up to an hour) — a stale "current time"
+        # would be worse than no answer at all.
+        now = datetime.now(_SAST)
+        return f"{ctx}\n\nCurrent date and time: {now.strftime('%A, %d %B %Y, %H:%M')} SAST (South Africa)."
 
     def _format_memories(self, memories: list) -> str:
         if not memories:
