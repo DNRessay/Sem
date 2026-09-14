@@ -3,6 +3,7 @@ import ChatWindow from "./components/ChatWindow";
 import StatusBar from "./components/StatusBar";
 import Drawer from "./components/Drawer";
 import Login from "./components/Login";
+import { turnsToHistory } from "./utils/toolMarker";
 
 const API = import.meta.env.VITE_API_URL || "";
 const TOKEN_KEY = "semblance_token";
@@ -47,7 +48,7 @@ export default function App() {
             .then(r => (r.ok ? r.json() : { turns: [] }))
             .then(data => {
                 if (cancelled || sessionIdRef.current !== restoringId) return;
-                setInitialHistory((data.turns || []).map(t => ({ role: t.role, content: t.content })));
+                setInitialHistory(turnsToHistory(data.turns));
             })
             .catch(() => {})
             .finally(() => { if (!cancelled) setRestoring(false); });
@@ -74,7 +75,7 @@ export default function App() {
 
     const openSession = (id, turns) => {
         setSessionId(id);
-        setInitialHistory(turns.map(t => ({ role: t.role, content: t.content })));
+        setInitialHistory(turnsToHistory(turns));
         setMenuOpen(false);
         setRestoring(false);
     };

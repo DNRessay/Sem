@@ -137,3 +137,83 @@ async def test_run_writes_the_query_to_long_term_memory(monkeypatch):
     assert saved["session_id"] == "sess1"
     assert saved["content"] == "I love the Nimzo-Larsen opening"
     assert saved["embedding"] is not None
+
+
+@pytest.mark.asyncio
+async def test_run_persists_display_query_not_the_augmented_one(monkeypatch):
+    """A caller that folds attachments/search results into `query` for the
+    model must be able to keep the *clean* original text as what gets
+    persisted and embedded — otherwise a large search-result dump ends up
+    saved as "what the user said" and later rendered back to them as if
+    they'd typed it themselves."""
+    saved_turns = []
+    saved_memory = {}
+
+    class RecordingStore(FakeStore):
+        async def save_turn(self, session_id, role, content):
+            saved_turns.append((role, content))
+
+        async def save_memory(self, session_id, content, salience=0.5, embedding=None):
+            saved_memory["content"] = content
+
+    async def fake_get_store():
+        return RecordingStore()
+
+    monkeypatch.setattr("pipeline.bootstrap.get_store", fake_get_store)
+    bootstrap = Bootstrap()
+
+    async def fake_retrieve(query, top_k=5):
+        return []
+
+    bootstrap.sem_retrieval.retrieve = fake_retrieve
+
+    async def fake_stream_llm(messages, model=None, session_id="default", **kwargs):
+        yield "here's what I found"
+
+    bootstrap.query_engine.stream_llm = fake_stream_llm
+
+    augmented = "what's on the latest news\n\n<web_news>huge dump of results...</web_news>"
+    result = [
+        piece async for piece in bootstrap.run(
+            augmented, "sess1", [], display_query="what's on the latest news",
+        )
+    ]
+
+    assert "".join(result) == "here's what I found"
+    assert ("user", "what's on the latest news") in saved_turns
+    assert ("user", augmented) not in saved_turns
+    assert saved_memory["content"] == "what's on the latest news"
+
+
+@pytest.mark.asyncio
+async def test_run_prepends_assistant_prefix_only_to_persisted_content(monkeypatch):
+    saved_turns = []
+
+    class RecordingStore(FakeStore):
+        async def save_turn(self, session_id, role, content):
+            saved_turns.append((role, content))
+
+    async def fake_get_store():
+        return RecordingStore()
+
+    monkeypatch.setattr("pipeline.bootstrap.get_store", fake_get_store)
+    bootstrap = Bootstrap()
+
+    async def fake_retrieve(query, top_k=5):
+        return []
+
+    bootstrap.sem_retrieval.retrieve = fake_retrieve
+
+    async def fake_stream_llm(messages, model=None, session_id="default", **kwargs):
+        yield "the reply"
+
+    bootstrap.query_engine.stream_llm = fake_stream_llm
+
+    streamed = [
+        piece async for piece in bootstrap.run(
+            "hello", "sess1", [], assistant_prefix="[[SEMBLANCE_TOOL:{\"kind\":\"news\"}]]\n",
+        )
+    ]
+
+    assert "".join(streamed) == "the reply"  # marker never appears in what's actually streamed
+    assert ("assistant", "[[SEMBLANCE_TOOL:{\"kind\":\"news\"}]]\nthe reply") in saved_turns

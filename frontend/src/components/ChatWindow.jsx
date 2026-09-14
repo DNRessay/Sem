@@ -91,6 +91,37 @@ function WebStatusIndicator({ label }) {
     );
 }
 
+function ToolChip({ tool }) {
+    const [open, setOpen] = useState(false);
+    if (!tool) return null;
+    const hasDetail = !!tool.detail;
+    return (
+        <div style={{ marginBottom: "8px" }}>
+            <button
+                onClick={() => hasDetail && setOpen(v => !v)}
+                style={{
+                    display: "inline-flex", alignItems: "center", gap: "6px",
+                    background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "8px",
+                    padding: "5px 10px", fontSize: "12px", color: "var(--text-muted)",
+                    cursor: hasDetail ? "pointer" : "default",
+                }}
+            >
+                <GlobeIcon /> {tool.label}
+                {hasDetail && <span style={{ fontSize: "9px" }}>{open ? "▾" : "▸"}</span>}
+            </button>
+            {open && hasDetail && (
+                <pre style={{
+                    marginTop: "6px", padding: "10px", background: "var(--surface)", border: "1px solid var(--border)",
+                    borderRadius: "8px", fontSize: "11px", color: "var(--text-muted)", whiteSpace: "pre-wrap",
+                    maxHeight: "240px", overflowY: "auto", fontFamily: "monospace",
+                }}>
+                    {tool.detail}
+                </pre>
+            )}
+        </div>
+    );
+}
+
 function ThinkingIndicator() {
     const [i, setI] = useState(0);
     const [elapsed, setElapsed] = useState(0);
@@ -113,11 +144,12 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
     const [input, setInput] = useState("");
     const [history, setHistory] = useState(initialHistory);
     const [attachments, setAttachments] = useState([]);
-    const { chunks, streaming, error, status, send, abort } = useStream(API, token, onUnauthorized);
+    const { chunks, streaming, error, status, tool, send, abort } = useStream(API, token, onUnauthorized);
     const bottomRef = useRef(null);
 
     const fullResponse = chunks.join("");
-    const isThinking = streaming && fullResponse.length === 0 && !status;
+    const isSearching = streaming && status && !tool && fullResponse.length === 0;
+    const isThinking = streaming && fullResponse.length === 0 && !status && !tool;
 
     useEffect(() => {
         onStreamChange?.(streaming);
@@ -134,8 +166,8 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
         setInput("");
         setAttachments([]);
         setHistory(h => [...h, { role: "user", content: msg, files: files.map(f => ({ name: f.name, source: f.source, mime: f.mime })) }]);
-        const reply = await send(msg, sessionId, history, files);
-        if (reply) setHistory(h => [...h, { role: "assistant", content: reply }]);
+        const { reply, tool: toolResult } = await send(msg, sessionId, history, files);
+        if (reply) setHistory(h => [...h, { role: "assistant", content: reply, tool: toolResult }]);
     };
 
     const addAttachment = (file) => setAttachments(a => [...a, file]);
@@ -167,6 +199,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                         </div>
                     ) : (
                         <div key={i} style={{ alignSelf: "flex-start", maxWidth: "88%" }}>
+                            {m.tool && <ToolChip tool={m.tool} />}
                             <div
                                 className="md-content"
                                 style={{ padding: "0 2px", fontSize: "15px", lineHeight: "1.7" }}
@@ -176,7 +209,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                         </div>
                     )
                 ))}
-                {streaming && status && fullResponse.length === 0 && (
+                {isSearching && (
                     <div style={{ alignSelf: "flex-start", padding: "6px 2px" }}>
                         <WebStatusIndicator label={status} />
                     </div>
@@ -186,12 +219,21 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                         <ThinkingIndicator />
                     </div>
                 )}
-                {streaming && !isThinking && !status && (
-                    <div
-                        className="md-content"
-                        style={{ alignSelf: "flex-start", maxWidth: "88%", padding: "0 2px", fontSize: "15px", lineHeight: "1.7" }}
-                        dangerouslySetInnerHTML={renderMarkdown(fullResponse + " ▋")}
-                    />
+                {streaming && tool && fullResponse.length === 0 && (
+                    <div style={{ alignSelf: "flex-start", padding: "6px 2px" }}>
+                        <ToolChip tool={tool} />
+                        <ThinkingIndicator />
+                    </div>
+                )}
+                {streaming && fullResponse.length > 0 && (
+                    <div style={{ alignSelf: "flex-start", maxWidth: "88%", padding: "0 2px" }}>
+                        {tool && <ToolChip tool={tool} />}
+                        <div
+                            className="md-content"
+                            style={{ fontSize: "15px", lineHeight: "1.7" }}
+                            dangerouslySetInnerHTML={renderMarkdown(fullResponse + " ▋")}
+                        />
+                    </div>
                 )}
                 {error && (
                     <div style={{ alignSelf: "flex-start", maxWidth: "80%", background: "rgba(196,69,58,0.08)", border: "1px solid var(--danger)", padding: "10px 14px", borderRadius: "12px", fontSize: "13px", lineHeight: "1.6", color: "var(--danger)" }}>

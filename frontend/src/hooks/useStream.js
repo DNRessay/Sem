@@ -3,6 +3,7 @@ import { useState, useCallback, useRef } from "react";
 export function useStream(baseUrl = "", token = "", onUnauthorized) {
     const [chunks, setChunks] = useState([]);
     const [status, setStatus] = useState(null);
+    const [tool, setTool] = useState(null);
     const [streaming, setStreaming] = useState(false);
     const [error, setError] = useState(null);
     const abortRef = useRef(null);
@@ -10,15 +11,17 @@ export function useStream(baseUrl = "", token = "", onUnauthorized) {
     const send = useCallback(async (message, sessionId = "default", history = [], attachments = []) => {
         setChunks([]);
         setStatus(null);
+        setTool(null);
         setError(null);
         setStreaming(true);
         abortRef.current = new AbortController();
 
         // Built locally rather than read back from state: state updates are
-        // async, so a caller awaiting send() and then reading `chunks` would
-        // see a stale (often empty) value. Returning the accumulated string
+        // async, so a caller awaiting send() and then reading state would
+        // see stale (often empty) values. Returning the accumulated result
         // directly is the only way to get the *final* response reliably.
         let full = "";
+        let toolLocal = null;
 
         try {
             const res = await fetch(`${baseUrl}/chat`, {
@@ -52,12 +55,16 @@ export function useStream(baseUrl = "", token = "", onUnauthorized) {
                         if (data === "[DONE]") break;
                         try {
                             const parsed = JSON.parse(data);
-                            if (parsed.status) {
+                            if (parsed.tool) {
+                                toolLocal = parsed.tool;
+                                setTool(parsed.tool);
+                                setStatus(null); // the search/fetch is done — the chip replaces the breadcrumb
+                            } else if (parsed.status) {
                                 setStatus(parsed.status);
                             } else if (parsed.chunk) {
                                 full += parsed.chunk;
                                 setChunks(c => [...c, parsed.chunk]);
-                                setStatus(null); // clear the breadcrumb once real content starts
+                                setStatus(null);
                             }
                         } catch {}
                     }
@@ -69,10 +76,10 @@ export function useStream(baseUrl = "", token = "", onUnauthorized) {
             setStreaming(false);
         }
 
-        return full;
+        return { reply: full, tool: toolLocal };
     }, [baseUrl, token, onUnauthorized]);
 
     const abort = useCallback(() => abortRef.current?.abort(), []);
 
-    return { chunks, streaming, error, status, send, abort };
+    return { chunks, streaming, error, status, tool, send, abort };
 }

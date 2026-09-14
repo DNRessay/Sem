@@ -35,7 +35,21 @@ class Bootstrap:
         self.ctx_pressure = CTXPressure()
         self.query_engine = QueryEngine()
 
-    async def run(self, query: str, session_id: str, history: list, images: list | None = None) -> AsyncIterator[str]:
+    async def run(
+        self, query: str, session_id: str, history: list, images: list | None = None,
+        display_query: str | None = None, assistant_prefix: str = "",
+    ) -> AsyncIterator[str]:
+        """`query` is what actually reaches the model — it may have
+        attachments or fetched/searched web content folded into it.
+        `display_query` (defaults to `query` when omitted) is what gets
+        persisted as "what the user said" and embedded into long-term
+        memory: callers that augment `query` should pass the original, clean
+        text here so a search result dump doesn't get saved and later
+        displayed as if the user had typed it. `assistant_prefix` is
+        prepended only to the *persisted* assistant turn (not the streamed
+        output) — used to carry a compact marker of which tool ran, so a
+        reloaded session can still show it."""
+        save_query = display_query if display_query is not None else query
         # Step 2 - CTX assembly
         ctx = self.sys_cache.read("system_prompt") or self.ctx_assembly.load_hierarchy()
         ctx = self.ctx_assembly.inject_tau_context(ctx, self.tau_context)
@@ -77,16 +91,16 @@ class Bootstrap:
         reply = "".join(reply_parts)
 
         db = await get_store()
-        await db.save_turn(session_id, "user", query)
-        await db.save_turn(session_id, "assistant", reply)
+        await db.save_turn(session_id, "user", save_query)
+        await db.save_turn(session_id, "assistant", f"{assistant_prefix}{reply}")
 
         # Long-term memory: the system prompt has always claimed persistent
         # memory that "updates from every conversation", but nothing ever
         # actually wrote to the memories table SEMRetrieval reads from — this
         # closes that gap so later turns (and personalized news topics) have
         # real history to draw on instead of always retrieving nothing.
-        embedding = await embed_text(query)
-        await db.save_memory(session_id, query, embedding=embedding)
+        embedding = await embed_text(save_query)
+        await db.save_memory(session_id, save_query, embedding=embedding)
 
     async def _skills_context(self, query: str) -> str:
         """Two-tier skill disclosure, mirroring how Claude sees Skills: a

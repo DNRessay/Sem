@@ -101,32 +101,44 @@ def _fold_attachments(user_msg: str, attachments: list) -> str:
 @router.post("/chat")
 async def chat(request: Request, trust: str = Depends(_get_trust), _account: dict = Depends(require_account)):
     body = await request.json()
-    user_msg = body.get("message", "")
+    raw_msg = body.get("message", "")
     session_id = body.get("session_id", "default")
     history = body.get("history", [])
     attachments = body.get("attachments", [])
 
-    if not user_msg:
+    if not raw_msg:
         raise HTTPException(400, "message required")
 
     images = [a for a in attachments if _is_image(a)]
     text_attachments = [a for a in attachments if not _is_image(a)]
 
-    user_msg = _fold_attachments(user_msg, text_attachments)
-    tau_ctx = await _tau.observe_and_inject(session_id, user_msg, history)
+    # augmented is what the model sees (attachments + fetched/searched
+    # content folded in); raw_msg is what's persisted as "what the user
+    # said" and embedded into long-term memory — these used to be the same
+    # string, so a search result dump ended up saved and later displayed as
+    # if the user had typed it themselves.
+    augmented = _fold_attachments(raw_msg, text_attachments)
+    tau_ctx = await _tau.observe_and_inject(session_id, augmented, history)
     bootstrap = Bootstrap(trust_mode=trust, tau_context=tau_ctx)
-    web_intent = detect_web_intent(user_msg)
+    web_intent = detect_web_intent(augmented)
 
     async def stream_gen():
-        msg = user_msg
+        msg = augmented
+        tool_marker = ""
         if web_intent:
             kind, target = web_intent
             yield f"data: {json.dumps({'status': status_label(kind, target)})}\n\n"
             web_block = await run_web_intent(kind, target, session_id=session_id)
             if web_block:
                 msg = f"{msg}\n\n{web_block}"
+                tool = {"kind": kind, "label": status_label(kind, target).rstrip("…"), "detail": web_block}
+                yield f"data: {json.dumps({'tool': tool})}\n\n"
+                tool_marker = f"[[SEMBLANCE_TOOL:{json.dumps({'kind': kind, 'label': tool['label']})}]]\n"
 
-        async for chunk in bootstrap.run(msg, session_id, history, images=images):
+        async for chunk in bootstrap.run(
+            msg, session_id, history, images=images,
+            display_query=raw_msg, assistant_prefix=tool_marker,
+        ):
             yield f"data: {json.dumps({'chunk': chunk})}\n\n"
         yield "data: [DONE]\n\n"
 
