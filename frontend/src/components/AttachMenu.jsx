@@ -72,6 +72,63 @@ export function AttachFileIcon() {
     );
 }
 
+function RepoPicker({ repos, value, onChange }) {
+    const [open, setOpen] = useState(false);
+    const [query, setQuery] = useState("");
+    const filtered = query.trim()
+        ? repos.filter(r => r.full_name.toLowerCase().includes(query.trim().toLowerCase()))
+        : repos;
+
+    if (!open) {
+        return (
+            <button
+                onClick={() => setOpen(true)}
+                style={{
+                    ...inputStyle, display: "flex", alignItems: "center", justifyContent: "space-between",
+                    cursor: "pointer", textAlign: "left",
+                }}
+            >
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {value || "Select a repository"}
+                </span>
+                <span style={{ fontSize: "10px", color: "var(--text-muted)", flexShrink: 0, marginLeft: "6px" }}>▾</span>
+            </button>
+        );
+    }
+
+    return (
+        <div style={{ border: "1px solid var(--border)", borderRadius: "8px", overflow: "hidden" }}>
+            <input
+                autoFocus
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                onBlur={() => setTimeout(() => setOpen(false), 150)} // let the click below land first
+                placeholder="Search repositories…"
+                style={{ ...inputStyle, border: "none", borderRadius: 0, borderBottom: "1px solid var(--border)" }}
+            />
+            <div style={{ maxHeight: "160px", overflowY: "auto" }}>
+                {filtered.length === 0 && (
+                    <div style={{ padding: "8px 10px", fontSize: "12px", color: "var(--text-muted)" }}>No matches</div>
+                )}
+                {filtered.map(r => (
+                    <button
+                        key={r.full_name}
+                        onMouseDown={e => e.preventDefault()} // survive the input's onBlur firing first
+                        onClick={() => { onChange(r.full_name); setOpen(false); setQuery(""); }}
+                        style={{
+                            display: "block", width: "100%", textAlign: "left", padding: "8px 10px",
+                            background: r.full_name === value ? "var(--bg)" : "none", border: "none",
+                            color: "var(--text)", fontSize: "13px", cursor: "pointer",
+                        }}
+                    >
+                        {r.full_name}{r.private ? " (private)" : ""}
+                    </button>
+                ))}
+            </div>
+        </div>
+    );
+}
+
 function RepoForm({ provider, token, onAttach, onNeedConnector, onClose }) {
     const [repos, setRepos] = useState(null); // null = still loading
     const [loadError, setLoadError] = useState(null);
@@ -144,11 +201,7 @@ function RepoForm({ provider, token, onAttach, onNeedConnector, onClose }) {
                 <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>No repos found on this account.</div>
             )}
             {repos?.length > 0 && (
-                <select value={repo} onChange={e => setRepo(e.target.value)} style={inputStyle}>
-                    {repos.map(r => (
-                        <option key={r.full_name} value={r.full_name}>{r.full_name}{r.private ? " (private)" : ""}</option>
-                    ))}
-                </select>
+                <RepoPicker repos={repos} value={repo} onChange={setRepo} />
             )}
             <input value={path} onChange={e => setPath(e.target.value)} placeholder="path/to/file.py"
                 style={inputStyle} />
