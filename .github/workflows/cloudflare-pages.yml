@@ -63,12 +63,20 @@ jobs:
         run: npx wrangler@3 pages deploy dist --project-name=semblance --branch=main
 
       - name: Verify the stable production URL served this build
+        # Cloudflare's edge can take a few seconds to pick up a deploy after
+        # wrangler reports success, so a check run immediately after can see
+        # the previous build for a moment — retry for up to ~30s before
+        # failing for real.
         working-directory: frontend
         run: |
           expected=$(basename dist/assets/index-*.js)
-          status=$(curl -s -o /tmp/prod_body.html -w "%{http_code}" https://semblance-773.pages.dev/)
-          if [ "$status" != "200" ] || ! grep -q "$expected" /tmp/prod_body.html; then
-            echo "::error::https://semblance-773.pages.dev (status $status) is not serving this build's $expected"
-            exit 1
-          fi
-          echo "Confirmed: https://semblance-773.pages.dev is serving $expected"
+          for i in 1 2 3 4 5 6; do
+            status=$(curl -s -o /tmp/prod_body.html -w "%{http_code}" https://semblance-773.pages.dev/)
+            if [ "$status" = "200" ] && grep -q "$expected" /tmp/prod_body.html; then
+              echo "Confirmed: https://semblance-773.pages.dev is serving $expected"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::https://semblance-773.pages.dev (status $status) is not serving this build's $expected after retrying"
+          exit 1
