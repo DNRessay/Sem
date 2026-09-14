@@ -82,32 +82,6 @@ jobs:
         run: sam build
 
       - name: sam deploy
-        # Falls back to the raw create-change-set/execute-change-set API with
-        # --disable-validation, per explicit user decision (2026-09-14).
-        # CloudFormation's new pre-deployment "early validation" hook
-        # (AWS::EarlyValidation::PropertyValidation, GA'd Nov 2025) rejects
-        # this stack's ChatFunction changes — the Layers/Environment/
-        # FunctionUrlConfig needed for AWS Lambda Web Adapter response
-        # streaming, copied verbatim from AWS's own documented example
-        # (examples/fastapi-response-streaming-zip in
-        # awslabs/aws-lambda-web-adapter) — with no per-property detail
-        # obtainable: describe-change-set only repeats the generic message,
-        # and neither describe-stack-events nor describe-events (confirmed
-        # working, after granting the deploy IAM user
-        # cloudformation:DescribeEvents) show anything either, because a
-        # changeset that fails at creation time never becomes a stack
-        # operation in the first place. Early validation already has a
-        # documented false-positive class on other resource types for
-        # intrinsic-function-resolved properties (e.g. API Gateway Models
-        # flagged as JSONObject instead of the String a Ref resolves to) —
-        # this reads as the same shape of bug hitting a newer resource
-        # combination. Neither `sam deploy` nor `aws cloudformation deploy`
-        # expose the CreateChangeSet API's own DisableValidation field, so
-        # this step calls the raw API directly. --disable-validation
-        # restores CloudFormation's pre-Nov-2025 behavior for this one
-        # deploy: a genuinely broken template still fails, just at
-        # deploy/runtime (CloudWatch) instead of at this new pre-flight
-        # check.
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
@@ -119,12 +93,12 @@ jobs:
           # Secrets go through env vars (not string-interpolated straight into
           # the script) and get trimmed + individually quoted below. Directly
           # interpolating ${{ secrets.X }} unquoted into a multi-line shell
-          # command — an earlier version of this step — meant a secret with
+          # command — the previous version of this step — meant a secret with
           # so much as a trailing newline (a common copy-paste artifact, e.g.
           # from a database dashboard's "connection string" field) silently
           # truncated the whole command: everything after the newline became
           # a separate, harmless no-op shell statement instead of erroring,
-          # so the deploy "succeeded" while quietly deploying nothing.
+          # so sam deploy "succeeded" while quietly deploying nothing.
           groq_api_key=$(printf '%s' "$GROQ_API_KEY" | tr -d '\r\n')
           neon_database_url=$(printf '%s' "$NEON_DATABASE_URL" | tr -d '\r\n')
           modal_embeddings_url=$(printf '%s' "$MODAL_EMBEDDINGS_URL" | tr -d '\r\n')
@@ -132,80 +106,35 @@ jobs:
           serp_api_key=$(printf '%s' "$SERP_API_KEY" | tr -d '\r\n')
           openclaw_url=$(printf '%s' "$OPENCLAW_URL" | tr -d '\r\n')
 
-          region="${{ secrets.AWS_REGION || 'eu-west-1' }}"
-
+          # sam deploy's --parameter-overrides shorthand rejects "Key=" with a
+          # truly empty value ("not a valid format") — so optional params that
+          # are unset get left out entirely rather than passed as empty; the
+          # template's own Default: "" covers them the same way either way.
+          #
           # GroqModel/GroqPlanningModel are passed explicitly, always, even
           # though they're not secrets — CloudFormation reuses a parameter's
           # *previous deployed value* for any parameter omitted from
-          # --parameters on a stack update, not the template's current
-          # Default. Two model-ID fixes both silently no-op'd for exactly
-          # this reason before this was caught. Keep these two literal
-          # values in sync with the Default: in template.yaml. Unlike
-          # sam deploy's --parameter-overrides shorthand, the raw API
-          # accepts an empty ParameterValue fine, so optional params are
-          # always included explicitly (falling through to the template's
-          # Default: only happens on stack *creation*, never on update).
+          # --parameter-overrides on a stack update, not the template's
+          # current Default. Two model-ID fixes both silently no-op'd for
+          # exactly this reason before this was caught. Keep these two
+          # literal values in sync with the Default: in template.yaml.
           params=(
-            "ParameterKey=GroqApiKey,ParameterValue=${groq_api_key}"
-            "ParameterKey=NeonDatabaseUrl,ParameterValue=${neon_database_url}"
-            "ParameterKey=SecretKey,ParameterValue=${secret_key}"
-            "ParameterKey=GroqModel,ParameterValue=qwen/qwen3.8-27b"
-            "ParameterKey=GroqPlanningModel,ParameterValue=openai/gpt-oss-120b"
-            "ParameterKey=ModalEmbeddingsUrl,ParameterValue=${modal_embeddings_url}"
-            "ParameterKey=SerpApiKey,ParameterValue=${serp_api_key}"
-            "ParameterKey=OpenclawUrl,ParameterValue=${openclaw_url}"
+            "GroqApiKey=${groq_api_key}"
+            "NeonDatabaseUrl=${neon_database_url}"
+            "SecretKey=${secret_key}"
+            "GroqModel=qwen/qwen3.8-27b"
+            "GroqPlanningModel=openai/gpt-oss-120b"
           )
+          [ -n "$modal_embeddings_url" ] && params+=("ModalEmbeddingsUrl=${modal_embeddings_url}")
+          [ -n "$serp_api_key" ] && params+=("SerpApiKey=${serp_api_key}")
+          [ -n "$openclaw_url" ] && params+=("OpenclawUrl=${openclaw_url}")
 
-          BUCKET=$(aws cloudformation describe-stacks \
-            --stack-name aws-sam-cli-managed-default \
-            --region "$region" \
-            --query "Stacks[0].Outputs[?OutputKey=='SourceBucket'].OutputValue" \
-            --output text)
-
-          sam package \
-            --region "$region" \
-            --template-file .aws-sam/build/template.yaml \
-            --s3-bucket "$BUCKET" \
-            --output-template-file packaged.yaml
-
-          if aws cloudformation describe-stacks --stack-name semblance --region "$region" >/dev/null 2>&1; then
-            change_set_type=UPDATE
-          else
-            change_set_type=CREATE
-          fi
-          change_set_name="deploy-$(date +%s)"
-
-          aws cloudformation create-change-set \
-            --stack-name semblance \
-            --region "$region" \
-            --change-set-name "$change_set_name" \
-            --change-set-type "$change_set_type" \
-            --template-body file://packaged.yaml \
-            --capabilities CAPABILITY_IAM \
-            --disable-validation \
-            --parameters "${params[@]}"
-
-          if ! aws cloudformation wait change-set-create-complete \
-              --stack-name semblance --region "$region" --change-set-name "$change_set_name"; then
-            reason=$(aws cloudformation describe-change-set --stack-name semblance --region "$region" \
-              --change-set-name "$change_set_name" --query 'StatusReason' --output text)
-            echo "Changeset did not complete: $reason"
-            if [[ "$reason" == *"didn't contain changes"* || "$reason" == *"No updates are to be performed"* ]]; then
-              echo "No changes to deploy — treating as success."
-              aws cloudformation delete-change-set --stack-name semblance --region "$region" --change-set-name "$change_set_name"
-              exit 0
-            fi
-            exit 1
-          fi
-
-          aws cloudformation execute-change-set \
-            --stack-name semblance --region "$region" --change-set-name "$change_set_name"
-
-          if [ "$change_set_type" = "CREATE" ]; then
-            aws cloudformation wait stack-create-complete --stack-name semblance --region "$region"
-          else
-            aws cloudformation wait stack-update-complete --stack-name semblance --region "$region"
-          fi
+          sam deploy \
+            --debug \
+            --region "${{ secrets.AWS_REGION || 'eu-west-1' }}" \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides "${params[@]}"
 
       - name: Diagnose changeset failure
         if: failure()
@@ -221,8 +150,8 @@ jobs:
           fi
           echo "--- describe-stack-events (last 10) ---"
           aws cloudformation describe-stack-events --stack-name semblance --region "$region" --max-items 10 || true
-          echo "--- describe-events (early-validation detail API) ---"
-          aws cloudformation describe-events --stack-name semblance --region "$region" || true
+          echo "--- describe-events (last 20; covers real stack operations only, not failed changeset creation) ---"
+          aws cloudformation describe-events --stack-name semblance --region "$region" --max-items 20 || true
 
       - name: Expire old build artifacts in the SAM deployment bucket
         # `sam deploy --resolve-s3` keeps every historical build zip forever

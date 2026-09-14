@@ -65,17 +65,18 @@ Resources:
       FunctionName: semblance-chat
       CodeUri: ./
       Handler: run.sh
-      Description: >
-        Light tier — FastAPI app (chat, status, webhooks) run directly under
-        uvicorn via AWS Lambda Web Adapter, in RESPONSE_STREAM invoke mode.
-        A plain Lambda Function URL only supports InvokeMode: BUFFERED when
-        the handler is a Mangum-wrapped ASGI adapter — the whole response
-        gets collected before any of it reaches the client, so /chat's
-        StreamingResponse (see gateway/router.py) never actually streamed to
-        the browser no matter how it streamed internally. The Web Adapter
-        layer runs the app as a real long-lived HTTP server behind Lambda's
-        native response-streaming invoke API instead, so chunks flush as
-        Groq produces them.
+      # Runs directly under uvicorn via AWS Lambda Web Adapter, in
+      # RESPONSE_STREAM invoke mode. A plain Function URL only supports
+      # InvokeMode: BUFFERED behind a Mangum-wrapped ASGI handler — the
+      # whole response gets collected before any of it reaches the client,
+      # so /chat's StreamingResponse (gateway/router.py) never actually
+      # streamed to the browser. The Web Adapter runs the app as a real
+      # long-lived HTTP server behind Lambda's native streaming invoke API
+      # instead, so chunks flush as Groq produces them. (This used to be
+      # the Description field below, but AWS::Lambda::Function.Description
+      # has a hard 256-char limit — CFN's early-validation hook was
+      # correctly rejecting it at 622 chars, not a false positive.)
+      Description: Light tier — FastAPI (chat/status/webhooks) via uvicorn + AWS Lambda Web Adapter, RESPONSE_STREAM invoke mode
       Layers:
         - !Sub arn:aws:lambda:${AWS::Region}:753240598075:layer:LambdaAdapterLayerX86:28
       Environment:
