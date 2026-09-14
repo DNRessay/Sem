@@ -17,7 +17,13 @@ class TAUEngine:
 
         signals = self.pacific.infer_traits(history + [{"role": "user", "content": query}])
         db = await get_store()
-        user_model = await db.get_user_model(session_id) or {}
+        # SEMBLANCE has exactly one owner, not per-session users — the owner's profile
+        # (name, projects, preferences) is seeded once under the fixed key "owner" and
+        # should be known in every session, not just the one it happened to be saved in.
+        # A session can still override individual fields (none do today).
+        owner_profile = await db.get_user_model("owner") or {}
+        session_model = await db.get_user_model(session_id) or {}
+        user_model = {**owner_profile, **session_model}
         user_model["ocean"] = signals
 
         ctx = self._build_context(user_model, signals)
@@ -28,6 +34,14 @@ class TAUEngine:
 
     def _build_context(self, user_model: dict, ocean: dict) -> str:
         parts = ["You are SEMBLANCE. You know this user well."]
+        if name := user_model.get("name"):
+            parts.append(f"User's name: {name}")
+        if about := user_model.get("about"):
+            parts.append(f"About them: {about}")
+        if projects := user_model.get("projects"):
+            parts.append(f"Active projects: {', '.join(projects)}")
+        if interests := user_model.get("interests"):
+            parts.append(f"Interests: {', '.join(interests)}")
         if ocean:
             o = ocean
             parts.append(
