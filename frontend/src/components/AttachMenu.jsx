@@ -165,7 +165,9 @@ function RepoForm({ provider, token, onAttach, onNeedConnector, onClose }) {
     }, [provider, token]);
 
     const submit = async () => {
-        if (!repo || !path.trim() || busy) return;
+        if (busy) return;
+        if (!repo) { setError("Pick a repository first"); return; }
+        if (!path.trim()) { setError("Enter a file path"); return; }
         setBusy(true);
         setError(null);
         try {
@@ -208,7 +210,7 @@ function RepoForm({ provider, token, onAttach, onNeedConnector, onClose }) {
             <input value={ref} onChange={e => setRef(e.target.value)} placeholder="branch (optional)"
                 style={inputStyle} />
             {error && <div style={{ color: "var(--danger)", fontSize: "12px" }}>{error}</div>}
-            <button onClick={submit} disabled={busy || !repo} style={smallButtonStyle}>
+            <button onClick={submit} disabled={busy} style={smallButtonStyle}>
                 {busy ? "Fetching…" : "Fetch file"}
             </button>
         </div>
