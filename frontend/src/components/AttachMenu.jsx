@@ -175,19 +175,25 @@ const smallButtonStyle = {
 export default function AttachMenu({ token, onAttach }) {
     const [open, setOpen] = useState(false);
     const [view, setView] = useState("menu"); // menu | github | gitlab | github-connect | gitlab-connect
+    const [fileError, setFileError] = useState(null);
     const fileInputRef = useRef(null);
 
-    const close = () => { setOpen(false); setView("menu"); };
+    const close = () => { setOpen(false); setView("menu"); setFileError(null); };
 
     const handleFiles = async (e) => {
         const files = Array.from(e.target.files || []);
+        const skipped = [];
         for (const file of files) {
-            if (!TEXT_EXT.test(file.name)) continue; // skip binaries — these models read text, not images
+            if (!TEXT_EXT.test(file.name)) { skipped.push(file.name); continue; } // these models read text, not images/binaries
             const content = await file.text();
             onAttach({ name: file.name, content, source: "file" });
         }
         e.target.value = "";
-        close();
+        if (skipped.length > 0) {
+            setFileError(`Can't attach ${skipped.join(", ")} — only text-based files are supported (.txt, .md, .py, .js, .json, .csv, etc.)`);
+        } else {
+            close();
+        }
     };
 
     return (
@@ -215,9 +221,14 @@ export default function AttachMenu({ token, onAttach }) {
                         {view === "menu" && (
                             <div style={{ display: "flex", flexDirection: "column" }}>
                                 <input ref={fileInputRef} type="file" multiple hidden onChange={handleFiles} />
-                                <MenuRow icon={<UploadIcon />} label="Upload file" onClick={() => fileInputRef.current?.click()} />
+                                <MenuRow icon={<UploadIcon />} label="Upload file" onClick={() => { setFileError(null); fileInputRef.current?.click(); }} />
                                 <MenuRow icon={<GitHubIcon />} label="Add from GitHub" onClick={() => setView("github")} />
                                 <MenuRow icon={<GitLabIcon />} label="Add from GitLab" onClick={() => setView("gitlab")} />
+                                {fileError && (
+                                    <div style={{ padding: "0 14px 10px", fontSize: "11px", color: "var(--danger)", lineHeight: "1.4" }}>
+                                        {fileError}
+                                    </div>
+                                )}
                             </div>
                         )}
                         {(view === "github" || view === "gitlab") && (
