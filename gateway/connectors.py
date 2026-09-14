@@ -456,6 +456,30 @@ def _should_skip_in_repo(path: str) -> bool:
     return ext in _SKIP_EXT
 
 
+_ENTRY_POINT_NAMES = {
+    "readme.md", "readme", "readme.rst", "readme.txt",
+    "package.json", "pyproject.toml", "requirements.txt", "setup.py", "setup.cfg",
+    "main.py", "app.py", "index.js", "index.ts", "server.py", "manage.py",
+    "cargo.toml", "go.mod", "dockerfile", "makefile",
+}
+
+
+def _repo_file_priority(path: str) -> tuple[int, str]:
+    """Lower sorts first. With the attach budget only fitting a handful of
+    files, raw tree order (effectively alphabetical) grabs whatever happens
+    to sort first rather than what's actually useful — this instead mirrors
+    how someone would actually orient themselves in an unfamiliar repo:
+    README and entry points/manifests first, then other root files, then
+    everything else by how deep it's nested."""
+    name = path.rsplit("/", 1)[-1].lower()
+    depth = path.count("/")
+    if depth == 0 and name in _ENTRY_POINT_NAMES:
+        return (0, path)
+    if depth == 0:
+        return (1, path)
+    return (2 + depth, path)
+
+
 @router.post("/connectors/{provider}/fetch-repo")
 async def fetch_repo(provider: str, request: Request, account: dict = Depends(require_account)):
     """Attaches a whole repo at once (tree overview + as many text files as
@@ -521,6 +545,7 @@ async def _fetch_github_repo(repo: str, ref: str, token: str) -> tuple[str, bool
         tree = r.json()
         all_entries = tree.get("tree", [])
         candidates = [t for t in all_entries if t["type"] == "blob" and not _should_skip_in_repo(t["path"])]
+        candidates.sort(key=lambda t: _repo_file_priority(t["path"]))
 
         blobs = []
         total_so_far = 0
@@ -566,6 +591,7 @@ async def _fetch_gitlab_repo(repo: str, ref: str, token: str) -> tuple[str, bool
                 page_truncated = True
 
         candidates = [e for e in all_entries if e["type"] == "blob" and not _should_skip_in_repo(e["path"])]
+        candidates.sort(key=lambda e: _repo_file_priority(e["path"]))
 
         blobs = []
         total_so_far = 0

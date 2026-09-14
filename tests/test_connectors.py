@@ -334,6 +334,43 @@ def test_fetch_github_repo_truncates_when_file_cap_exceeded(client, monkeypatch)
     assert data["truncated"] is True
 
 
+def test_fetch_github_repo_prioritizes_readme_and_entry_points(client, monkeypatch):
+    """With the attach budget only fitting a handful of files, raw tree
+    order (effectively alphabetical) would grab whatever sorts first rather
+    than what's actually useful — README.md and main.py (an entry point)
+    must be fetched over a deeply nested file and an unremarkable root file,
+    even though the tree lists them in the opposite order."""
+    import base64 as b64mod
+
+    monkeypatch.setattr("gateway.connectors._MAX_REPO_FILES", 2)
+    c, store = client
+    store.connectors[("owner", "github")] = {"token": "ghp_test", "refresh_token": None, "expires_at": None}
+    with respx.mock:
+        respx.get("https://api.github.com/repos/octocat/hello/git/trees/HEAD").mock(
+            return_value=Response(200, json={
+                "tree": [
+                    {"path": "src/deep/nested/module.py", "type": "blob", "sha": "sha_deep"},
+                    {"path": "zzz_random.py", "type": "blob", "sha": "sha_zzz"},
+                    {"path": "README.md", "type": "blob", "sha": "sha_readme"},
+                    {"path": "main.py", "type": "blob", "sha": "sha_main"},
+                ],
+                "truncated": False,
+            })
+        )
+        respx.get("https://api.github.com/repos/octocat/hello/git/blobs/sha_readme").mock(
+            return_value=Response(200, json={"content": b64mod.b64encode(b"# Hello project").decode(), "encoding": "base64"})
+        )
+        respx.get("https://api.github.com/repos/octocat/hello/git/blobs/sha_main").mock(
+            return_value=Response(200, json={"content": b64mod.b64encode(b"print('entry')").decode(), "encoding": "base64"})
+        )
+        resp = c.post("/connectors/github/fetch-repo", json={"repo": "octocat/hello"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "# Hello project" in data["content"]
+    assert "print('entry')" in data["content"]
+    assert data["file_count"] == 2  # zzz_random.py and the deeply nested file lost out on budget
+
+
 def test_fetch_gitlab_repo_bundles_tree_and_file_contents(client):
     c, store = client
     store.connectors[("owner", "gitlab")] = {"token": "glpat_test", "refresh_token": None, "expires_at": None}
