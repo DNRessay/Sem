@@ -86,11 +86,15 @@ async def test_call_llm_raises_clear_error_when_groq_returns_no_choices(moto_cac
             await engine.call_llm([{"role": "user", "content": "hi"}], session_id="s1")
 
 
-def _groq_sse_response(pieces: list[str]):
+def _groq_sse_response(pieces: list[str], finish_reason: str = "stop"):
     body = "".join(
         f'data: {json.dumps({"choices": [{"delta": {"content": p}}]})}\n\n'
         for p in pieces
-    ) + "data: [DONE]\n\n"
+    )
+    # Real Groq/OpenAI-shaped streams send finish_reason on its own trailing
+    # chunk with no content, after the last piece of text.
+    body += f'data: {json.dumps({"choices": [{"delta": {}, "finish_reason": finish_reason}]})}\n\n'
+    body += "data: [DONE]\n\n"
     return Response(200, headers={"content-type": "text/event-stream"}, content=body)
 
 
@@ -139,6 +143,34 @@ async def test_stream_llm_does_not_reuse_cache_for_a_different_followup_query(mo
     assert "".join(first) == "hi there"
     assert "".join(second) == "the sky is blue"
     assert route.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_stream_llm_appends_a_visible_note_when_cut_off_by_max_tokens(moto_cache_table):
+    """finish_reason "length" means Groq stopped because the reply hit
+    max_tokens, not because the model was done — a silent cutoff mid-
+    sentence reads as broken, so this must say so instead."""
+    engine = QueryEngine()
+    with respx.mock:
+        respx.post(GROQ_URL).mock(
+            return_value=_groq_sse_response(["this got cut", " off mid-sen"], finish_reason="length")
+        )
+        pieces = [p async for p in engine.stream_llm([{"role": "user", "content": "hi"}], session_id="s1")]
+
+    full = "".join(pieces)
+    assert full.startswith("this got cut off mid-sen")
+    assert "cut off" in full.lower()
+    assert "reply length limit" in full
+
+
+@pytest.mark.asyncio
+async def test_stream_llm_adds_no_note_when_finish_reason_is_stop(moto_cache_table):
+    engine = QueryEngine()
+    with respx.mock:
+        respx.post(GROQ_URL).mock(return_value=_groq_sse_response(["a complete reply"], finish_reason="stop"))
+        pieces = [p async for p in engine.stream_llm([{"role": "user", "content": "hi"}], session_id="s1")]
+
+    assert "".join(pieces) == "a complete reply"
 
 
 @pytest.mark.asyncio

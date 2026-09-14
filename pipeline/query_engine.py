@@ -125,6 +125,7 @@ class QueryEngine:
                     raise RuntimeError(
                         f"Groq API error (status {r.status_code}) for model '{model}': {body.decode(errors='replace')}"
                     )
+                finish_reason = None
                 async for line in r.aiter_lines():
                     if not line.startswith("data: "):
                         continue
@@ -132,10 +133,23 @@ class QueryEngine:
                     if data_str == "[DONE]":
                         break
                     chunk = json.loads(data_str)
-                    delta = chunk["choices"][0]["delta"].get("content")
+                    choice = chunk["choices"][0]
+                    delta = choice["delta"].get("content")
                     if delta:
                         full_parts.append(delta)
                         yield delta
+                    if choice.get("finish_reason"):
+                        finish_reason = choice["finish_reason"]
+
+        if finish_reason == "length":
+            # _DEFAULT_MAX_TOKENS is set low enough to stay under this
+            # account's Groq rate limit (see its own comment) — real
+            # replies do sometimes need more than that budget, and a
+            # silent cutoff mid-sentence reads as broken, not as "the
+            # answer was long." Say so instead of leaving it unexplained.
+            note = "\n\n*(cut off — hit the reply length limit; ask me to continue for the rest)*"
+            full_parts.append(note)
+            yield note
 
         content = "".join(full_parts)
         self.cache_ctrl.write(prefix_hash, content)
