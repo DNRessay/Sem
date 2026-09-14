@@ -32,7 +32,13 @@ class PlanAgent(BaseAgent):
             return {"error": "No goal provided to PlanAgent"}
 
         plan = await self._generate_plan(goal, context, depth)
+        # "status": "complete" matters beyond this return value — CablesMan.
+        # route reads it to decide what to write to the agent_events audit
+        # trail (and whether to clear working_mem for this session). Without
+        # it, a fully successful plan was logged as "error" in AgentFeed —
+        # this key's absence, not any actual failure, was the bug.
         return {
+            "status": "complete",
             "goal": goal,
             "depth": depth,
             "plan": plan,

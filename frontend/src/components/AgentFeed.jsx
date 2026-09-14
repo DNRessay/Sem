@@ -17,7 +17,19 @@ export default function AgentFeed({ sessionId = "default", token }) {
                     headers: token ? { Authorization: `Bearer ${token}` } : {},
                 });
                 const data = await r.json();
-                if (data.event) setEvents(e => [data.event, ...e].slice(0, 50));
+                // /status returns only the single most recent event, not a
+                // list of new-since-last-poll — polling every 3s means most
+                // polls see the same event as last time. Without this check
+                // it got appended again on every single poll, flooding the
+                // feed with duplicates of one real event.
+                if (data.event) {
+                    setEvents(e => {
+                        const latest = e[0];
+                        const isSame = latest && latest.ts === data.event.ts
+                            && latest.agent === data.event.agent && latest.action === data.event.action;
+                        return isSame ? e : [data.event, ...e].slice(0, 50);
+                    });
+                }
             } catch {}
         }, 3000);
         return () => clearInterval(interval);

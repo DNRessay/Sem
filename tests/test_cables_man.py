@@ -140,3 +140,47 @@ async def test_broadcast_fans_out_to_every_agent_type_and_keeps_going_on_one_fai
 
     assert results["explore"] == {"status": "complete", "agent": "explore"}
     assert "error" in results["plan"]
+
+
+@pytest.mark.asyncio
+async def test_route_to_the_real_plan_agent_persists_a_complete_event(moto_cache_table, recording_store):
+    """Regression test: every other test in this file uses a FakeAgentTool
+    that hands back an explicit {"status": "complete"}, which would hide a
+    bug where a real agent's own return dict has no "status" key at all —
+    exactly what happened here. PlanAgent's return dict used to omit
+    "status" entirely, so route()'s `result.get("status")` was always None
+    and every successful plan got logged to agent_events (and shown in
+    AgentFeed.jsx) as "error", even though the plan itself came back fine.
+    This routes through the real AgentTool -> PlanAgent, not a fake."""
+    import json as jsonlib
+
+    import respx
+    from httpx import Response
+
+    plan_obj = {"steps": [{"n": 1, "action": "do it"}], "risks": [], "success_criteria": "done"}
+    with respx.mock:
+        respx.post("https://api.groq.com/openai/v1/chat/completions").mock(
+            return_value=Response(200, json={
+                "choices": [{"message": {"content": jsonlib.dumps(plan_obj)}, "finish_reason": "stop"}]
+            })
+        )
+        cables = CablesMan()
+        result = await cables.route({"query": "ship it", "agent": "plan", "goal": "ship it", "session_id": "s1"})
+
+    assert result["plan"] == plan_obj
+    actions = [action for _, agent, action in recording_store.events if agent == "plan"]
+    assert actions[-1] == "complete"
+    assert "error" not in actions
+
+
+@pytest.mark.asyncio
+async def test_route_to_the_real_explore_agent_persists_a_complete_event(recording_store):
+    """Same regression as above, for ExploreAgent — no LLM involved, so no
+    mocking needed beyond the DB."""
+    cables = CablesMan()
+    result = await cables.route({"query": "nonsense_symbol_xyz", "agent": "explore", "scope": "code", "session_id": "s1"})
+
+    assert result["status"] == "complete"
+    actions = [action for _, agent, action in recording_store.events if agent == "explore"]
+    assert actions[-1] == "complete"
+    assert "error" not in actions
