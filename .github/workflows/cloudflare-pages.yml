@@ -33,6 +33,21 @@ jobs:
           VITE_API_URL: ${{ secrets.SEMBLANCE_API_URL }}
         run: npm run build
 
+      - name: Verify baked API URL
+        # Vite inlines VITE_API_URL as a literal string at build time — this
+        # confirms what's actually in the shipped bundle rather than trusting
+        # the secret is set/correct. Not sensitive: the Lambda Function URL
+        # is already a public, unauthenticated-by-network endpoint.
+        working-directory: frontend
+        run: |
+          found=$(grep -o 'https://[a-zA-Z0-9.-]*\.on\.aws' dist/assets/*.js || true)
+          if [ -z "$found" ]; then
+            echo "::error::No lambda-url.*.on.aws string found in the built bundle — VITE_API_URL secret is likely empty or unset, so API calls will hit a relative/wrong URL"
+            grep -o 'fetch(\`\${[a-zA-Z0-9_$]*}/auth/login\`)' dist/assets/*.js || true
+            exit 1
+          fi
+          echo "Baked API URL: $found"
+
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/pages-action@v1
         with:
