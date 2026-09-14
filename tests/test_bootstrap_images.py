@@ -108,13 +108,11 @@ async def test_run_injects_current_date_into_system_prompt(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_run_writes_the_query_to_long_term_memory(monkeypatch):
-    saved = {}
+    saved = []
 
     class RecordingStore(FakeStore):
         async def save_memory(self, session_id, content, salience=0.5, embedding=None):
-            saved["session_id"] = session_id
-            saved["content"] = content
-            saved["embedding"] = embedding
+            saved.append({"session_id": session_id, "content": content, "embedding": embedding})
 
     async def fake_get_store():
         return RecordingStore()
@@ -134,9 +132,44 @@ async def test_run_writes_the_query_to_long_term_memory(monkeypatch):
 
     [piece async for piece in bootstrap.run("I love the Nimzo-Larsen opening", "sess1", [])]
 
-    assert saved["session_id"] == "sess1"
-    assert saved["content"] == "I love the Nimzo-Larsen opening"
-    assert saved["embedding"] is not None
+    assert all(s["session_id"] == "sess1" for s in saved)
+    assert any(s["content"] == "I love the Nimzo-Larsen opening" for s in saved)
+    assert all(s["embedding"] is not None for s in saved)
+
+
+@pytest.mark.asyncio
+async def test_run_embeds_the_reply_too_not_just_the_query(monkeypatch):
+    """Only the user's own message used to get embedded into the searchable
+    memories table — the assistant's reply never did, even though it's
+    often the actually valuable content (a detailed answer, say). Once a
+    turn ages out of the live conversation window (_trim_history), nothing
+    could find that content again unless it was independently embedded."""
+    saved_contents = []
+
+    class RecordingStore(FakeStore):
+        async def save_memory(self, session_id, content, salience=0.5, embedding=None):
+            saved_contents.append(content)
+
+    async def fake_get_store():
+        return RecordingStore()
+
+    monkeypatch.setattr("pipeline.bootstrap.get_store", fake_get_store)
+    bootstrap = Bootstrap()
+
+    async def fake_retrieve(query, top_k=5):
+        return []
+
+    bootstrap.sem_retrieval.retrieve = fake_retrieve
+
+    async def fake_stream_llm(messages, model=None, session_id="default", **kwargs):
+        yield "the repo has a Gateway, Frontend, and Tests directory"
+
+    bootstrap.query_engine.stream_llm = fake_stream_llm
+
+    [piece async for piece in bootstrap.run("what's in the repo", "sess1", [])]
+
+    assert "what's in the repo" in saved_contents
+    assert "the repo has a Gateway, Frontend, and Tests directory" in saved_contents
 
 
 @pytest.mark.asyncio
@@ -147,14 +180,14 @@ async def test_run_persists_display_query_not_the_augmented_one(monkeypatch):
     saved as "what the user said" and later rendered back to them as if
     they'd typed it themselves."""
     saved_turns = []
-    saved_memory = {}
+    saved_memory_contents = []
 
     class RecordingStore(FakeStore):
         async def save_turn(self, session_id, role, content):
             saved_turns.append((role, content))
 
         async def save_memory(self, session_id, content, salience=0.5, embedding=None):
-            saved_memory["content"] = content
+            saved_memory_contents.append(content)
 
     async def fake_get_store():
         return RecordingStore()
@@ -182,7 +215,8 @@ async def test_run_persists_display_query_not_the_augmented_one(monkeypatch):
     assert "".join(result) == "here's what I found"
     assert ("user", "what's on the latest news") in saved_turns
     assert ("user", augmented) not in saved_turns
-    assert saved_memory["content"] == "what's on the latest news"
+    assert "what's on the latest news" in saved_memory_contents
+    assert augmented not in saved_memory_contents  # the augmented dump itself is never embedded either
 
 
 @pytest.mark.asyncio

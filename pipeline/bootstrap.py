@@ -118,12 +118,22 @@ class Bootstrap:
         await db.save_turn(session_id, "assistant", f"{assistant_prefix}{reply}")
 
         # Long-term memory: the system prompt has always claimed persistent
-        # memory that "updates from every conversation", but nothing ever
-        # actually wrote to the memories table SEMRetrieval reads from — this
-        # closes that gap so later turns (and personalized news topics) have
-        # real history to draw on instead of always retrieving nothing.
-        embedding = await embed_text(save_query)
-        await db.save_memory(session_id, save_query, embedding=embedding)
+        # memory that "updates from every conversation" — but until now only
+        # the user's own message ever got embedded here, never the
+        # assistant's reply. That's backwards for a case like a detailed
+        # repo-structure answer: the reply IS the valuable content, and once
+        # its turn ages out of the live conversation window (_trim_history
+        # above — a hard limit on what fits in one Groq request, not a
+        # deletion; the full turn stays in `conversations` forever either
+        # way), nothing could find that content again unless it was also
+        # independently embedded and searchable. Both sides of the exchange
+        # are embedded now, so a later relevant question can still surface
+        # it via SEMRetrieval even after it's no longer in the live window.
+        query_embedding = await embed_text(save_query)
+        await db.save_memory(session_id, save_query, embedding=query_embedding)
+        if reply:
+            reply_embedding = await embed_text(reply)
+            await db.save_memory(session_id, reply, embedding=reply_embedding)
 
     async def _skills_context(self, query: str) -> str:
         """Two-tier skill disclosure, mirroring how Claude sees Skills: a
