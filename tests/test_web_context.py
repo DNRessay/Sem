@@ -63,23 +63,55 @@ async def test_run_web_intent_fetch_wraps_content(monkeypatch):
 async def test_run_web_intent_search_wraps_results(monkeypatch):
     class FakeRegistry:
         async def execute(self, tool_name, args):
-            return [{"title": "A", "snippet": "B", "link": "https://a.example"}]
+            assert tool_name == "web_search_full"
+            return {"results": [{"title": "A", "snippet": "B", "link": "https://a.example"}], "ai_overview": None}
 
     monkeypatch.setattr("pipeline.web_context.get_registry", lambda: FakeRegistry())
     result = await run_web_intent("search", "some query")
     assert "<web_search>" in result
     assert "A: B (https://a.example)" in result
+    assert "<google_ai_overview" not in result
 
 
 @pytest.mark.asyncio
 async def test_run_web_intent_search_empty_on_missing_key(monkeypatch):
     class FakeRegistry:
         async def execute(self, tool_name, args):
-            return [{"error": "SERP_API_KEY not set"}]
+            return {"error": "SERP_API_KEY not set"}
 
     monkeypatch.setattr("pipeline.web_context.get_registry", lambda: FakeRegistry())
     result = await run_web_intent("search", "some query")
     assert result == ""
+
+
+@pytest.mark.asyncio
+async def test_run_web_intent_search_includes_ai_overview_when_present(monkeypatch):
+    class FakeRegistry:
+        async def execute(self, tool_name, args):
+            return {
+                "results": [{"title": "A", "snippet": "B", "link": "https://a.example"}],
+                "ai_overview": "Google says X is true.",
+            }
+
+    monkeypatch.setattr("pipeline.web_context.get_registry", lambda: FakeRegistry())
+    result = await run_web_intent("search", "is X true")
+    assert '<google_ai_overview query="is X true">' in result
+    assert "Google says X is true." in result
+    assert "<web_search>" in result  # organic results still included alongside it
+
+
+@pytest.mark.asyncio
+async def test_run_web_intent_search_costs_one_registry_call(monkeypatch):
+    calls = []
+
+    class FakeRegistry:
+        async def execute(self, tool_name, args):
+            calls.append(tool_name)
+            return {"results": [], "ai_overview": "an answer"}
+
+    monkeypatch.setattr("pipeline.web_context.get_registry", lambda: FakeRegistry())
+    await run_web_intent("search", "some query")
+    assert calls == ["web_search_full"]
 
 
 def test_news_topic_strips_generic_filler_to_a_fallback():

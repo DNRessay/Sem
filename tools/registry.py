@@ -162,6 +162,7 @@ def _bootstrap_registry(reg: ToolsRegistry):
     whatsapp = WhatsAppTool()
 
     reg.register("web_search",   serp.search,    {"query": "string", "num": "int"},       "AUTO",        "Google search via SerpAPI")
+    reg.register("web_search_full", serp.search_full, {"query": "string", "num": "int"}, "AUTO",         "Google search + AI Overview (one call) via SerpAPI")
     reg.register("web_news",     serp.news,      {"query": "string"},                      "AUTO",        "News search via SerpAPI")
     reg.register("web_fetch",    fetch.fetch,    {"url": "string"},                        "AUTO",        "Fetch full page content from URL")
     reg.register("news_tool",    news.latest,    {"topic": "string", "count": "int"},      "AUTO",        "Real-time news headlines")

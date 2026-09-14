@@ -85,6 +85,25 @@ async def _fetch_news(registry, topic: str) -> str:
     return f'<web_news topic="{topic}">\n' + "\n".join(lines) + "\n</web_news>"
 
 
+async def _fetch_search(registry, query: str) -> str:
+    """One call (web_search_full) returns both Google's own AI Overview
+    (when it shows one — roughly half of queries don't get one) and the
+    regular organic results, so the model sees what Google's AI already
+    said about this *and* the raw sources to check it against, instead of
+    just raw snippets alone."""
+    result = await registry.execute("web_search_full", {"query": query, "num": 5})
+    if not result or result.get("error"):
+        return ""
+    blocks = []
+    if result.get("ai_overview"):
+        blocks.append(f'<google_ai_overview query="{query}">\n{result["ai_overview"]}\n</google_ai_overview>')
+    results = result.get("results") or []
+    if results:
+        lines = [f"- {r.get('title')}: {r.get('snippet')} ({r.get('link')})" for r in results]
+        blocks.append("<web_search>\n" + "\n".join(lines) + "\n</web_search>")
+    return "\n".join(blocks)
+
+
 async def run_web_intent(kind: str, target: str, session_id: str | None = None) -> str:
     """Executes the intent via the existing tool registry and returns a
     context block to fold into the user's message — empty string on any
@@ -114,8 +133,4 @@ async def run_web_intent(kind: str, target: str, session_id: str | None = None) 
         blocks = [b for b in [await _fetch_news(registry, t) for t in topics] if b]
         return "\n".join(blocks)
 
-    result = await registry.execute("web_search", {"query": target, "num": 5})
-    if not result or result[0].get("error"):
-        return ""
-    lines = [f"- {r.get('title')}: {r.get('snippet')} ({r.get('link')})" for r in result]
-    return "<web_search>\n" + "\n".join(lines) + "\n</web_search>"
+    return await _fetch_search(registry, target)
