@@ -25,7 +25,7 @@ embeddings side by side, so semantic search is a query against the same table.
 CACHE: SysCache (0.10× read, 1.25× write), ConvCache (rolling 20-block), CacheCtrl (14 vectors)
 — all DynamoDB-backed with an in-memory L1 layer for warm Lambda invocations.
 
-INFRASTRUCTURE: AWS Lambda + Function URL (FastAPI via Mangum), Groq (Qwen3.8-27B +
+INFRASTRUCTURE: AWS Lambda + Function URL, streaming (FastAPI via Lambda Web Adapter), Groq (Qwen3.8-27B +
 GPT-OSS-120B open-weight models), Neon Postgres (free tier), DynamoDB cache (pay-per-request),
 Modal (sentence-transformer embeddings, scales to zero) — a few rand a month for one user.
 """

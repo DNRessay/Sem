@@ -64,11 +64,28 @@ Resources:
     Properties:
       FunctionName: semblance-chat
       CodeUri: ./
-      Handler: lambda_handler.handler
-      Description: Light tier — FastAPI app (chat, status, webhooks) via Mangum
+      Handler: run.sh
+      Description: >
+        Light tier — FastAPI app (chat, status, webhooks) run directly under
+        uvicorn via AWS Lambda Web Adapter, in RESPONSE_STREAM invoke mode.
+        A plain Lambda Function URL only supports InvokeMode: BUFFERED when
+        the handler is a Mangum-wrapped ASGI adapter — the whole response
+        gets collected before any of it reaches the client, so /chat's
+        StreamingResponse (see gateway/router.py) never actually streamed to
+        the browser no matter how it streamed internally. The Web Adapter
+        layer runs the app as a real long-lived HTTP server behind Lambda's
+        native response-streaming invoke API instead, so chunks flush as
+        Groq produces them.
+      Layers:
+        - !Sub arn:aws:lambda:${AWS::Region}:753240598075:layer:LambdaAdapterLayerX86:28
+      Environment:
+        Variables:
+          AWS_LAMBDA_EXEC_WRAPPER: /opt/bootstrap
+          AWS_LWA_INVOKE_MODE: response_stream
+          PORT: 8000
       FunctionUrlConfig:
         AuthType: NONE      # app-level auth via x-api-key (see gateway/router.py)
-        InvokeMode: BUFFERED
+        InvokeMode: RESPONSE_STREAM
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref CacheTable
