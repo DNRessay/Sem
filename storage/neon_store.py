@@ -7,6 +7,88 @@ from config import settings
 
 _EMBED_DIM = 384  # matches the Modal sentence-transformers model (all-MiniLM-L6-v2)
 
+# Starter skills seeded once into an empty skills table (see
+# NeonStore._seed_default_skills) so a fresh deploy isn't a blank Skills
+# panel — a rough parallel to the built-in skills this assistant itself has,
+# adapted into the prompt-injected shape Bootstrap._skills_context uses
+# (GROQ_MODEL has no real tool-calling to hang an actual PDF/code tool off
+# of). Only inserted when the table is completely empty, so deleting or
+# editing one of these later is never silently undone by a redeploy.
+_DEFAULT_SKILLS = [
+    {
+        "id": "seed-code-help",
+        "name": "Code Help",
+        "description": "Write, debug, and review code — Python-first, minimal comments, no bloat.",
+        "triggers": ["code", "bug", "debug", "function", "script", "error", "stack trace", "refactor", "write a script"],
+        "content": (
+            "When writing or fixing code: default to Python unless the user names another "
+            "language. Match project size to framework — a quick script or simple app gets "
+            "Flask, an API-focused app gets FastAPI, a multi-app project gets Django. Write "
+            "minimal comments (only for non-obvious WHY, never WHAT), no docstrings unless "
+            "asked, no speculative abstractions or error handling for cases that can't "
+            "happen. Show the code in a fenced block with a language tag. If the ask is "
+            "ambiguous (which file, which stack, what's already there), ask before guessing."
+        ),
+    },
+    {
+        "id": "seed-pdf-docs",
+        "name": "Document & PDF Reading",
+        "description": "Read attached PDFs, Word docs, and other files — their text is already extracted for you.",
+        "triggers": ["pdf", "document", "docx", "extract", "attached file", "attachment", "attachments"],
+        "content": (
+            "Attached PDF and Word files have already had their text extracted server-side "
+            "and folded into this message inside <attachments><file name=\"...\">...</file> "
+            "blocks — never say you can't open or read PDFs/Word docs, the content is "
+            "already right here in context. Read it directly and answer from it. If the "
+            "extracted text looks empty, garbled, or truncated (common for a scanned/image-"
+            "only PDF with no real text layer), say so plainly rather than guessing at "
+            "content that isn't there."
+        ),
+    },
+    {
+        "id": "seed-writing",
+        "name": "Writing & Editing",
+        "description": "Draft or tighten text — direct, no filler, no fluff.",
+        "triggers": ["write", "draft", "essay", "email", "summarize", "rewrite", "proofread", "edit this"],
+        "content": (
+            "Write directly — no throat-clearing intro, no "
+            "\"I'd be happy to help\" preamble, no restating the request back. Say the "
+            "thing. Keep it as short as the task allows; a two-sentence answer beats a "
+            "five-paragraph one when two sentences cover it. When editing existing text, "
+            "preserve the author's voice and only change what's actually wrong or unclear."
+        ),
+    },
+    {
+        "id": "seed-web-research",
+        "name": "Web Research",
+        "description": "Answer using live search/news results — cite what was actually found, never invent facts.",
+        "triggers": ["research", "compare", "look up", "find out", "latest", "current"],
+        "content": (
+            "When web search or news results are already present in context (retrieved "
+            "before you saw this message — see the system note next to them), answer only "
+            "from what's actually there. Never invent or assume a specific fact (a date, a "
+            "name, a number, a URL) that isn't literally present in the retrieved data, even "
+            "if it seems like a safe guess. If the results don't answer the question, say "
+            "that plainly instead of filling the gap from general knowledge."
+        ),
+    },
+    {
+        "id": "seed-data-finance",
+        "name": "Financial & Data Analysis",
+        "description": "Bank statements, forex/economic data, spreadsheets — check the actual structure before concluding.",
+        "triggers": ["bank statement", "transaction", "forex", "csv", "spreadsheet", "financial data", "economic calendar"],
+        "content": (
+            "For bank statements, transaction data, or economic/forex datasets: check the "
+            "actual column names, date formats, and currency before drawing conclusions — "
+            "South African bank exports (Capitec, TymeBank) vary in layout and don't share a "
+            "fixed schema. State assumptions about categorization explicitly rather than "
+            "silently guessing a category. For time-series/indicator data (RSI, MACD, "
+            "Bollinger Bands, economic calendar events), be precise about the timeframe and "
+            "period used — an unlabeled indicator value is not useful."
+        ),
+    },
+]
+
 
 class NeonStore:
     """
@@ -27,6 +109,7 @@ class NeonStore:
             return
         self._pool = await asyncpg.create_pool(url, min_size=0, max_size=5, command_timeout=10)
         await self._init_schema()
+        await self._seed_default_skills()
 
     async def close(self):
         if self._pool:
@@ -354,6 +437,23 @@ class NeonStore:
                    VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
                    ON CONFLICT (id) DO UPDATE SET name=$2, description=$3, triggers=$4, content=$5, enabled=$6, updated_at=$7""",
                 skill_id, name, description, triggers, content, enabled, now,
+            )
+
+    async def _seed_default_skills(self):
+        """Populates a genuinely empty skills table with _DEFAULT_SKILLS, once.
+        Checked with a plain COUNT rather than per-id ON CONFLICT DO NOTHING —
+        the latter would silently re-add a seed skill the user deliberately
+        deleted, every time this Lambda environment cold-starts. An empty
+        table only ever happens once (a fresh deploy, or the user having
+        never added a skill), so this never overwrites their own edits."""
+        async with self._pool.acquire() as conn:
+            count = await conn.fetchval("SELECT COUNT(*) FROM skills")
+            if count:
+                return
+        for skill in _DEFAULT_SKILLS:
+            await self.upsert_skill(
+                skill["id"], skill["name"], skill["triggers"], skill["content"],
+                description=skill["description"],
             )
 
     async def delete_skill(self, skill_id: str):
