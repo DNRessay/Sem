@@ -4,11 +4,6 @@ const API = import.meta.env.VITE_API_URL || "";
 
 export default function SkillsPanel({ token }) {
     const [skills, setSkills] = useState([]);
-    const [name, setName] = useState("");
-    const [description, setDescription] = useState("");
-    const [triggers, setTriggers] = useState("");
-    const [content, setContent] = useState("");
-    const [busy, setBusy] = useState(false);
 
     const authHeaders = { Authorization: `Bearer ${token}` };
 
@@ -20,22 +15,6 @@ export default function SkillsPanel({ token }) {
     };
 
     useEffect(load, []);
-
-    const addSkill = async () => {
-        if (!name.trim() || !content.trim() || busy) return;
-        setBusy(true);
-        try {
-            await fetch(`${API}/skills`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json", ...authHeaders },
-                body: JSON.stringify({ name: name.trim(), description: description.trim(), triggers, content: content.trim() }),
-            });
-            setName(""); setDescription(""); setTriggers(""); setContent("");
-            load();
-        } finally {
-            setBusy(false);
-        }
-    };
 
     const removeSkill = async (id) => {
         await fetch(`${API}/skills/${id}`, { method: "DELETE", headers: authHeaders });
@@ -76,23 +55,9 @@ export default function SkillsPanel({ token }) {
                 </div>
             ))}
 
-            <input value={name} onChange={e => setName(e.target.value)} placeholder="Skill name"
-                style={fieldStyle} />
-            <input value={description} onChange={e => setDescription(e.target.value)}
-                placeholder="Description — shown to SEMBLANCE every turn so it knows this skill exists"
-                style={fieldStyle} />
-            <input value={triggers} onChange={e => setTriggers(e.target.value)} placeholder="trigger words, comma separated"
-                style={fieldStyle} />
-            <textarea value={content} onChange={e => setContent(e.target.value)} placeholder="Full instructions, loaded when a trigger word matches"
-                rows={3} style={{ ...fieldStyle, resize: "vertical", fontFamily: "inherit" }} />
-            <button onClick={addSkill} disabled={busy} style={{ padding: "8px", borderRadius: "8px", border: "none", background: "var(--accent)", color: "var(--accent-contrast)", fontSize: "13px", fontWeight: "600", cursor: "pointer" }}>
-                {busy ? "Saving…" : "Add skill"}
-            </button>
+            <div style={{ fontSize: "11px", color: "var(--text-muted)", lineHeight: "1.4" }}>
+                New skills are added via <code>skills/*.md</code> in the repo — see <code>skills/README.md</code> for the format.
+            </div>
         </div>
     );
 }
-
-const fieldStyle = {
-    width: "100%", boxSizing: "border-box", background: "var(--bg)", border: "1px solid var(--border)",
-    borderRadius: "8px", padding: "8px 10px", color: "var(--text)", fontSize: "13px", outline: "none",
-};
