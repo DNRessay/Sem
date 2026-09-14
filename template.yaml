@@ -24,6 +24,15 @@ Parameters:
     Type: String
     Default: ""
     Description: URL of the deployed Modal embeddings endpoint (modal_app/embeddings.py)
+  ModalRepoUrl:
+    Type: String
+    Default: ""
+    Description: URL of the deployed Modal persistent repo clone/read/grep endpoint (modal_app/repo_tool.py)
+  ModalRepoSecret:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Shared secret sent as Bearer auth to ModalRepoUrl — must match the Modal secret's REPO_TOOL_SECRET value
   SecretKey:
     Type: String
     NoEcho: true
@@ -77,6 +86,8 @@ Globals:
         GROQ_PLANNING_MODEL: !Ref GroqPlanningModel
         NEON_DATABASE_URL: !Ref NeonDatabaseUrl
         MODAL_EMBEDDINGS_URL: !Ref ModalEmbeddingsUrl
+        MODAL_REPO_URL: !Ref ModalRepoUrl
+        MODAL_REPO_SECRET: !Ref ModalRepoSecret
         CACHE_TABLE_NAME: !Ref CacheTable
         SECRET_KEY: !Ref SecretKey
         SERP_API_KEY: !Ref SerpApiKey

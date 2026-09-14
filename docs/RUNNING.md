@@ -14,6 +14,8 @@ GROQ_MODEL=qwen/qwen3.8-27b
 GROQ_PLANNING_MODEL=openai/gpt-oss-120b
 NEON_DATABASE_URL=postgresql://user:pass@host/semblance?sslmode=require
 MODAL_EMBEDDINGS_URL=
+MODAL_REPO_URL=
+MODAL_REPO_SECRET=
 SECRET_KEY=change-me
 TRUST_MODE=AUTO
 ```
@@ -21,6 +23,10 @@ TRUST_MODE=AUTO
 `MODAL_EMBEDDINGS_URL` can be left blank for local dev — `storage/embeddings.py`
 falls back to a deterministic (non-semantic) vector so the pipeline still runs
 without deploying the Modal function first.
+
+`MODAL_REPO_URL`/`MODAL_REPO_SECRET` can also be left blank — "Add repo" still
+works as a one-shot text dump without them, it just won't keep a persistent
+clone around for follow-up questions like "what's in the readme."
 
 `NEON_DATABASE_URL` needs a real Postgres with the `vector` extension
 available — Neon's free tier has it preinstalled; a local Postgres works too

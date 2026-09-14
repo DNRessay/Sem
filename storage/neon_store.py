@@ -129,6 +129,15 @@ class NeonStore:
             # its full body, so the model can consider a skill exists even
             # when the deterministic trigger keywords below don't fire.
             await conn.execute("ALTER TABLE skills ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT ''")
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS session_repos (
+                    session_id TEXT PRIMARY KEY,
+                    provider TEXT NOT NULL,
+                    repo TEXT NOT NULL,
+                    ref TEXT NOT NULL DEFAULT '',
+                    updated_at BIGINT NOT NULL
+                )
+            """)
 
     async def save_memory(self, session_id: str, content: str, salience: float = 0.5,
                            embedding: list[float] | None = None) -> int:
@@ -246,6 +255,25 @@ class NeonStore:
     async def delete_connector(self, account_id: str, provider: str):
         async with self._pool.acquire() as conn:
             await conn.execute("DELETE FROM connectors WHERE account_id=$1 AND provider=$2", account_id, provider)
+
+    async def get_active_repo(self, session_id: str) -> dict | None:
+        """The repo this session last cloned via "Add repo" — lets a
+        follow-up question like "what's in the readme" resolve against a
+        specific repo without the user repeating owner/repo every time."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT provider, repo, ref FROM session_repos WHERE session_id=$1", session_id,
+            )
+            return dict(row) if row else None
+
+    async def set_active_repo(self, session_id: str, provider: str, repo: str, ref: str = ""):
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO session_repos (session_id, provider, repo, ref, updated_at)
+                   VALUES ($1, $2, $3, $4, $5)
+                   ON CONFLICT (session_id) DO UPDATE SET provider=$2, repo=$3, ref=$4, updated_at=$5""",
+                session_id, provider, repo, ref, int(time.time()),
+            )
 
     async def list_skills(self, enabled_only: bool = False) -> list[dict]:
         async with self._pool.acquire() as conn:

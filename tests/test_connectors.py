@@ -12,6 +12,7 @@ from main import app
 class FakeStore:
     def __init__(self):
         self.connectors = {}  # (account_id, provider) -> dict
+        self.active_repos = {}  # session_id -> dict
 
     async def list_connectors(self, account_id):
         return sorted(p for (a, p) in self.connectors if a == account_id)
@@ -27,6 +28,12 @@ class FakeStore:
     async def get_connector(self, account_id, provider):
         c = self.connectors.get((account_id, provider))
         return {"provider": provider, **c} if c else None
+
+    async def set_active_repo(self, session_id, provider, repo, ref=""):
+        self.active_repos[session_id] = {"provider": provider, "repo": repo, "ref": ref}
+
+    async def get_active_repo(self, session_id):
+        return self.active_repos.get(session_id)
 
 
 @pytest.fixture
@@ -395,6 +402,76 @@ def test_fetch_gitlab_repo_bundles_tree_and_file_contents(client):
     assert "print('hi')" in data["content"]
     assert data["file_count"] == 2
     assert data["truncated"] is False
+
+
+def test_fetch_repo_skips_modal_clone_without_session_id(client, monkeypatch):
+    """No session_id in the request — "Add repo" from a caller that doesn't
+    pass one — must not touch Modal or record an active repo at all."""
+    monkeypatch.setattr(settings, "MODAL_REPO_URL", "https://modal.example/repo")
+    c, store = client
+    store.connectors[("owner", "github")] = {"token": "ghp_test", "refresh_token": None, "expires_at": None}
+    with respx.mock:
+        respx.get("https://api.github.com/repos/octocat/hello/git/trees/HEAD").mock(
+            return_value=Response(200, json={"tree": [], "truncated": False})
+        )
+        resp = c.post("/connectors/github/fetch-repo", json={"repo": "octocat/hello"})
+    assert resp.status_code == 200
+    assert resp.json()["cloned"] is False
+    assert store.active_repos == {}
+
+
+def test_fetch_repo_skips_modal_clone_without_modal_repo_url(client, monkeypatch):
+    """session_id given, but MODAL_REPO_URL isn't configured — the whole
+    Modal-clone step is optional and must no-op cleanly, not error."""
+    monkeypatch.setattr(settings, "MODAL_REPO_URL", "")
+    c, store = client
+    store.connectors[("owner", "github")] = {"token": "ghp_test", "refresh_token": None, "expires_at": None}
+    with respx.mock:
+        respx.get("https://api.github.com/repos/octocat/hello/git/trees/HEAD").mock(
+            return_value=Response(200, json={"tree": [], "truncated": False})
+        )
+        resp = c.post("/connectors/github/fetch-repo", json={"repo": "octocat/hello", "session_id": "sess1"})
+    assert resp.status_code == 200
+    assert resp.json()["cloned"] is False
+    assert store.active_repos == {}
+
+
+def test_fetch_repo_clones_via_modal_and_sets_active_repo(client, monkeypatch):
+    monkeypatch.setattr(settings, "MODAL_REPO_URL", "https://modal.example/repo")
+    monkeypatch.setattr(settings, "MODAL_REPO_SECRET", "s3cr3t")
+    c, store = client
+    store.connectors[("owner", "github")] = {"token": "ghp_test", "refresh_token": None, "expires_at": None}
+    with respx.mock:
+        respx.get("https://api.github.com/repos/octocat/hello/git/trees/main").mock(
+            return_value=Response(200, json={"tree": [], "truncated": False})
+        )
+        respx.post("https://modal.example/repo").mock(
+            return_value=Response(200, json={"ok": True, "action": "cloned", "repo": "octocat/hello"})
+        )
+        resp = c.post("/connectors/github/fetch-repo", json={
+            "repo": "octocat/hello", "ref": "main", "session_id": "sess1",
+        })
+    assert resp.status_code == 200
+    assert resp.json()["cloned"] is True
+    assert store.active_repos["sess1"] == {"provider": "github", "repo": "octocat/hello", "ref": "main"}
+
+
+def test_fetch_repo_does_not_set_active_repo_when_modal_clone_fails(client, monkeypatch):
+    monkeypatch.setattr(settings, "MODAL_REPO_URL", "https://modal.example/repo")
+    monkeypatch.setattr(settings, "MODAL_REPO_SECRET", "s3cr3t")
+    c, store = client
+    store.connectors[("owner", "github")] = {"token": "ghp_test", "refresh_token": None, "expires_at": None}
+    with respx.mock:
+        respx.get("https://api.github.com/repos/octocat/hello/git/trees/HEAD").mock(
+            return_value=Response(200, json={"tree": [], "truncated": False})
+        )
+        respx.post("https://modal.example/repo").mock(
+            return_value=Response(200, json={"ok": False, "error": "clone failed: repository not found"})
+        )
+        resp = c.post("/connectors/github/fetch-repo", json={"repo": "octocat/hello", "session_id": "sess1"})
+    assert resp.status_code == 200
+    assert resp.json()["cloned"] is False
+    assert store.active_repos == {}
 
 
 def test_authorize_errors_when_oauth_not_configured(client, monkeypatch):

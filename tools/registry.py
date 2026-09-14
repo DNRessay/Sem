@@ -148,6 +148,7 @@ def _bootstrap_registry(reg: ToolsRegistry):
     from tools.mcp_tool import MCPTool
     from tools.misc.calendar_tool import CalendarTool
     from tools.misc.whatsapp_tool import WhatsAppTool
+    from tools.repo_tool import RepoTool
     from tools.web.fetch_tool import FetchTool
     from tools.web.news_tool import NewsTool
     from tools.web.serp_tool import SerpTool
@@ -160,6 +161,7 @@ def _bootstrap_registry(reg: ToolsRegistry):
     artifact = ArtifactTool()
     calendar = CalendarTool()
     whatsapp = WhatsAppTool()
+    repo    = RepoTool()
 
     reg.register("web_search",   serp.search,    {"query": "string", "num": "int"},       "AUTO",        "Google search via SerpAPI")
     reg.register("web_search_full", serp.search_full, {"query": "string", "num": "int"}, "AUTO",         "Google search + AI Overview (one call) via SerpAPI")
@@ -171,3 +173,6 @@ def _bootstrap_registry(reg: ToolsRegistry):
     reg.register("artifact",     artifact.render,{"type": "string", "content": "string"}, "AUTO",        "Render JSX/HTML/SVG/MD artifact")
     reg.register("calendar",     calendar.query, {"action": "string"},                    "ALLOW_EDITS", "Google Calendar read/write")
     reg.register("whatsapp",     whatsapp.send,  {"phone": "string", "message": "string"},"ALLOW_EDITS", "WhatsApp Business API outbound")
+    reg.register("repo_clone",   repo.clone_or_pull, {"provider": "string", "repo": "string", "ref": "string"}, "AUTO", "Clone or pull a repo onto a persistent Modal-hosted clone")
+    reg.register("repo_read",    repo.read_file, {"provider": "string", "repo": "string", "path": "string"}, "AUTO", "Read one file from a persistently cloned repo")
+    reg.register("repo_grep",    repo.grep,      {"provider": "string", "repo": "string", "term": "string"}, "AUTO", "Search a persistently cloned repo for a term")

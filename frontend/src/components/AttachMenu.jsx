@@ -146,7 +146,7 @@ function RepoPicker({ repos, value, onChange }) {
     );
 }
 
-function RepoForm({ provider, token, onAttach, onNeedConnector, onClose }) {
+function RepoForm({ provider, token, sessionId, onAttach, onNeedConnector, onClose }) {
     const [repos, setRepos] = useState(null); // null = still loading
     const [loadError, setLoadError] = useState(null);
     const [repo, setRepo] = useState("");
@@ -255,7 +255,7 @@ function RepoForm({ provider, token, onAttach, onNeedConnector, onClose }) {
             const res = await fetch(`${API}/connectors/${provider}/fetch-repo`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ repo, ref: branch }),
+                body: JSON.stringify({ repo, ref: branch, session_id: sessionId }),
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) {
@@ -461,7 +461,7 @@ const smallButtonStyle = {
     color: "var(--accent-contrast)", fontSize: "13px", fontWeight: "600", cursor: "pointer",
 };
 
-export default function AttachMenu({ token, onAttach }) {
+export default function AttachMenu({ token, sessionId, onAttach }) {
     const [open, setOpen] = useState(false);
     const [view, setView] = useState("menu"); // menu | github | gitlab | github-connect | gitlab-connect
     const [fileError, setFileError] = useState(null);
@@ -537,6 +537,7 @@ export default function AttachMenu({ token, onAttach }) {
                             <RepoForm
                                 provider={view}
                                 token={token}
+                                sessionId={sessionId}
                                 onAttach={onAttach}
                                 onNeedConnector={() => setView(`${view}-connect`)}
                                 onClose={close}

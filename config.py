@@ -30,6 +30,14 @@ class Settings(BaseSettings):
     # Keeps the Lambda package small and avoids loading an ML model on every cold start.
     MODAL_EMBEDDINGS_URL: str = ""
 
+    # Persistent repo clone/read/grep — a separate Modal function
+    # (modal_app/repo_tool.py) that keeps a git clone on a Modal Volume
+    # between calls, so re-asking about the same repo doesn't re-fetch it
+    # from scratch. Unlike MODAL_EMBEDDINGS_URL, this endpoint can clone
+    # private repos and read arbitrary files, so it's also secret-gated.
+    MODAL_REPO_URL: str = ""
+    MODAL_REPO_SECRET: str = ""
+
     # Cache — DynamoDB-backed, in-memory L1 on top for warm Lambda invocations.
     CACHE_TABLE_NAME: str = "semblance-cache"
     AWS_REGION: str = "us-east-1"

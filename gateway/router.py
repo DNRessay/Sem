@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from config import settings
 from gateway.auth import issue_token, require_account, verify_passphrase
 from pipeline.bootstrap import Bootstrap
+from pipeline.repo_context import detect_repo_intent, repo_status_label, run_repo_intent
 from pipeline.web_context import detect_web_intent, run_web_intent, status_label
 from storage.neon_store import get_store
 from tau.tau_engine import TAUEngine
@@ -127,11 +128,33 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
     # "fetch this," hijacking the user's real question and hanging on a
     # garbage host until the fetch tool's own timeout.
     web_intent = detect_web_intent(raw_msg)
+    # Checked first/preferred over web_intent when both could match ("search
+    # the repo for X" contains "search", which alone would trigger a web
+    # search) — repo phrasing is the more specific signal, and only ever
+    # does anything when this session actually has an active cloned repo.
+    repo_intent = detect_repo_intent(raw_msg)
 
     async def stream_gen():
         msg = augmented
         tool_marker = ""
-        if web_intent:
+        if repo_intent:
+            kind, target = repo_intent
+            yield f"data: {json.dumps({'status': repo_status_label(kind, target)})}\n\n"
+            repo_block = await run_repo_intent(kind, target, session_id)
+            if repo_block:
+                msg = (
+                    f"{msg}\n\n"
+                    "<system_note>The repo data below was already retrieved for "
+                    "this message before you saw it. Do not say you are reading, "
+                    "searching, or pulling it — just answer directly using it "
+                    "now. If it doesn't actually answer the question, say so "
+                    "instead of guessing.</system_note>\n"
+                    f"{repo_block}"
+                )
+                tool = {"kind": kind, "label": repo_status_label(kind, target).rstrip("…"), "detail": repo_block}
+                yield f"data: {json.dumps({'tool': tool})}\n\n"
+                tool_marker = f"[[SEMBLANCE_TOOL:{json.dumps({'kind': kind, 'label': tool['label']})}]]\n"
+        elif web_intent:
             kind, target = web_intent
             yield f"data: {json.dumps({'status': status_label(kind, target)})}\n\n"
             web_block = await run_web_intent(kind, target, session_id=session_id)

@@ -272,7 +272,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                         style={{ width: "100%", boxSizing: "border-box", background: "transparent", border: "none", padding: "2px 2px 8px", color: "var(--text)", fontSize: "15px", outline: "none" }}
                     />
                     <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        <AttachMenu token={token} onAttach={addAttachment} />
+                        <AttachMenu token={token} sessionId={sessionId} onAttach={addAttachment} />
                         <span style={{ display: "flex", alignItems: "center", gap: "3px", border: "1px solid var(--border)", borderRadius: "999px", padding: "5px 10px", fontSize: "12px", color: "var(--text-muted)" }}>
                             {MODEL_LABEL} <span style={{ fontSize: "9px" }}>▾</span>
                         </span>

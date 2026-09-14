@@ -88,6 +88,22 @@ modal deploy modal_app/embeddings.py
 
 Copy the printed URL into `MODAL_EMBEDDINGS_URL`.
 
+### 2b. Deploy the persistent repo-clone tool to Modal (optional)
+
+Powers "Add repo" keeping a real clone around between questions, instead of
+just a one-shot text dump. Skip this step entirely and everything else still
+works — "Add repo" degrades to the one-shot dump.
+
+```bash
+modal secret create semblance-repo-secret REPO_TOOL_SECRET=<invent-any-random-string>
+modal deploy modal_app/repo_tool.py
+```
+
+Copy the printed URL into `MODAL_REPO_URL`, and the same random string you
+invented above into `MODAL_REPO_SECRET` — they must match, since (unlike the
+embeddings endpoint) this one can clone private repos and read arbitrary
+files out of them, so it needs real auth, not just an unguessable URL.
+
 ### 3. First deploy (local, guided)
 
 ```bash
@@ -162,9 +178,9 @@ all — ask if you want to switch later, it's a small workflow change.)
    - `NEON_DATABASE_URL`
    - `MODAL_EMBEDDINGS_URL`
    - `SEMBLANCE_SECRET_KEY`
-   - `SERP_API_KEY`, `OPENCLAW_URL` (optional — leave the secret unset and
-     the workflow passes an empty string, which disables those features
-     cleanly)
+   - `SERP_API_KEY`, `OPENCLAW_URL`, `MODAL_REPO_URL`, `MODAL_REPO_SECRET`
+     (all optional — leave a secret unset and the workflow passes an empty
+     string, which disables that feature cleanly)
 4. Push to `claude/bold-hawking-8o28g3` (this repo's trunk branch —
    there's no separate `main`). `.github/workflows/semblance.yml` lints, tests, then
    deploys — in that order, so a broken build never reaches AWS.

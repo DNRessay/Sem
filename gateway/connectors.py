@@ -492,6 +492,7 @@ async def fetch_repo(provider: str, request: Request, account: dict = Depends(re
     body = await request.json()
     repo = (body.get("repo") or "").strip()
     ref = (body.get("ref") or "").strip()
+    session_id = (body.get("session_id") or "").strip()
     if not repo:
         raise HTTPException(400, "repo required")
 
@@ -500,16 +501,35 @@ async def fetch_repo(provider: str, request: Request, account: dict = Depends(re
     if not connector:
         raise HTTPException(400, f"No {provider} connector configured — add a token first")
 
+    resolved_token = connector["token"]
     try:
         if provider == "github":
-            content, truncated, file_count = await _fetch_github_repo(repo, ref, connector["token"])
+            content, truncated, file_count = await _fetch_github_repo(repo, ref, resolved_token)
         else:
-            token = await _ensure_fresh_gitlab_token(account["account_id"], connector, db)
-            content, truncated, file_count = await _fetch_gitlab_repo(repo, ref, token)
+            resolved_token = await _ensure_fresh_gitlab_token(account["account_id"], connector, db)
+            content, truncated, file_count = await _fetch_gitlab_repo(repo, ref, resolved_token)
     except httpx.HTTPStatusError as e:
         raise HTTPException(e.response.status_code, f"{provider} error: {e.response.text[:300]}")
 
-    return {"provider": provider, "repo": repo, "content": content, "truncated": truncated, "file_count": file_count}
+    # Also clones (or pulls, if already cloned) this repo onto a persistent
+    # Modal-hosted volume, and remembers it as this session's active repo —
+    # follow-up questions like "what's in the readme" then read/grep the
+    # live clone instead of needing the whole repo re-bundled and re-sent.
+    # Optional: skipped entirely when MODAL_REPO_URL isn't configured, or
+    # when the caller didn't pass a session_id.
+    cloned = False
+    if session_id and settings.MODAL_REPO_URL:
+        from tools.repo_tool import RepoTool
+
+        clone_result = await RepoTool().clone_or_pull(provider, repo, ref, token=resolved_token)
+        if isinstance(clone_result, dict) and clone_result.get("ok"):
+            await db.set_active_repo(session_id, provider, repo, ref)
+            cloned = True
+
+    return {
+        "provider": provider, "repo": repo, "content": content,
+        "truncated": truncated, "file_count": file_count, "cloned": cloned,
+    }
 
 
 def _bundle_repo_files(repo: str, all_paths: list[str], blobs: list[dict]) -> tuple[list[str], int]:

@@ -86,6 +86,8 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
           MODAL_EMBEDDINGS_URL: ${{ secrets.MODAL_EMBEDDINGS_URL }}
+          MODAL_REPO_URL: ${{ secrets.MODAL_REPO_URL }}
+          MODAL_REPO_SECRET: ${{ secrets.MODAL_REPO_SECRET }}
           SEMBLANCE_SECRET_KEY: ${{ secrets.SEMBLANCE_SECRET_KEY }}
           SERP_API_KEY: ${{ secrets.SERP_API_KEY }}
           OPENCLAW_URL: ${{ secrets.OPENCLAW_URL }}
@@ -108,6 +110,8 @@ jobs:
           groq_api_key=$(printf '%s' "$GROQ_API_KEY" | tr -d '\r\n')
           neon_database_url=$(printf '%s' "$NEON_DATABASE_URL" | tr -d '\r\n')
           modal_embeddings_url=$(printf '%s' "$MODAL_EMBEDDINGS_URL" | tr -d '\r\n')
+          modal_repo_url=$(printf '%s' "$MODAL_REPO_URL" | tr -d '\r\n')
+          modal_repo_secret=$(printf '%s' "$MODAL_REPO_SECRET" | tr -d '\r\n')
           secret_key=$(printf '%s' "$SEMBLANCE_SECRET_KEY" | tr -d '\r\n')
           serp_api_key=$(printf '%s' "$SERP_API_KEY" | tr -d '\r\n')
           openclaw_url=$(printf '%s' "$OPENCLAW_URL" | tr -d '\r\n')
@@ -141,6 +145,8 @@ jobs:
             "PublicApiUrl=https://sv2uw47le4udr57ojay37ey3ry0nssoa.lambda-url.eu-west-1.on.aws"
           )
           [ -n "$modal_embeddings_url" ] && params+=("ModalEmbeddingsUrl=${modal_embeddings_url}")
+          [ -n "$modal_repo_url" ] && params+=("ModalRepoUrl=${modal_repo_url}")
+          [ -n "$modal_repo_secret" ] && params+=("ModalRepoSecret=${modal_repo_secret}")
           [ -n "$serp_api_key" ] && params+=("SerpApiKey=${serp_api_key}")
           [ -n "$openclaw_url" ] && params+=("OpenclawUrl=${openclaw_url}")
           [ -n "$github_oauth_client_id" ] && params+=("GithubClientId=${github_oauth_client_id}")
