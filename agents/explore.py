@@ -33,12 +33,12 @@ class ExploreAgent(BaseAgent):
             "results": results,
         }
 
-    async def _web_search(self, query: str) -> list[dict]:
-        try:
-            from tools.web.serp_tool import SerpTool
-            return await SerpTool().search(query)
-        except Exception as e:
-            return [{"error": str(e)}]
+    async def _web_search(self, query: str) -> list:
+        # Routed through call_tool (Step 5) rather than instantiating
+        # SerpTool directly, so this sub-agent's web search is
+        # permission-gated and audited like every other tool call.
+        result = await self.call_tool("web_search", {"query": query, "num": 5})
+        return result if isinstance(result, list) else [result]
 
     async def _memory_search(self, query: str, top_k: int) -> list[dict]:
         try:

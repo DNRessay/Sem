@@ -145,6 +145,22 @@ class NeonStore:
                     updated_at BIGINT NOT NULL
                 )
             """)
+            # CABLES MAN audit trail (Step 5 — tool execution, Step 7 —
+            # sub-agent delegation): every routed task and every tool call it
+            # makes gets one row here, keyed by session so /status/{id} can
+            # show the real backing activity for AgentFeed.jsx instead of the
+            # stub it was before. Append-only — matches the rest of this
+            # app's "nothing dropped" storage policy.
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS agent_events (
+                    id BIGSERIAL PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    agent TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    created_at BIGINT NOT NULL
+                )
+            """)
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_events_session ON agent_events (session_id, created_at DESC)")
 
     async def save_memory(self, session_id: str, content: str, salience: float = 0.5,
                            embedding: list[float] | None = None) -> int:
@@ -282,6 +298,24 @@ class NeonStore:
                    ON CONFLICT (session_id) DO UPDATE SET title=$2, updated_at=$3""",
                 session_id, title, int(time.time()),
             )
+
+    async def save_agent_event(self, session_id: str, agent: str, action: str):
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO agent_events (session_id, agent, action, created_at) VALUES ($1,$2,$3,$4)",
+                session_id, agent, action, int(time.time()),
+            )
+
+    async def get_latest_agent_event(self, session_id: str) -> dict | None:
+        """Most recent CABLES MAN activity for this session — what
+        AgentFeed.jsx polls every few seconds via /status/{session_id}."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT agent, action, created_at AS ts FROM agent_events "
+                "WHERE session_id=$1 ORDER BY created_at DESC LIMIT 1",
+                session_id,
+            )
+            return dict(row) if row else None
 
     async def get_active_repo(self, session_id: str) -> dict | None:
         """The repo this session last cloned via "Add repo" — lets a

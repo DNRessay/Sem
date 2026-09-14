@@ -1,20 +1,30 @@
-import httpx
+import json
 
 from agents.base_agent import BaseAgent
-from config import settings
+from pipeline.query_engine import QueryEngine
 
 
 class PlanAgent(BaseAgent):
     """
     Designs strategy before any action.
-    Prevents sloppy execution — always plan first, then execute.
-    Spawned via AgentTool.
+    Spawned via AgentTool, or directly by a "make a plan for X"-shaped
+    chat message (see pipeline/agent_intent.py).
     """
 
+    # Capped at QueryEngine's own safe ceiling (_DEFAULT_MAX_TOKENS, 800) —
+    # the previous 512/1024/2048 spread let "deep" alone request more output
+    # tokens than this Groq tier allows in an entire minute (1000 OTPM),
+    # which is the exact failure QueryEngine exists to avoid.
+    _DEPTH_TOKENS = {"quick": 400, "medium": 800, "deep": 800}
+
+    def __init__(self, tools_registry=None, cables_man_ref=None, **kwargs):
+        super().__init__(tools_registry, cables_man_ref, **kwargs)
+        self._query_engine = QueryEngine()
+
     async def run(self, task: dict) -> dict:
-        goal     = task.get("goal", "")
-        context  = task.get("context", "")
-        depth    = task.get("depth", "medium")   # quick | medium | deep
+        goal = task.get("goal", "")
+        context = task.get("context", "")
+        depth = task.get("depth", "medium")   # quick | medium | deep
 
         self.log_audit(f"plan:start:{depth}:{goal[:60]}")
 
@@ -29,7 +39,7 @@ class PlanAgent(BaseAgent):
         }
 
     async def _generate_plan(self, goal: str, context: str, depth: str) -> dict:
-        max_tokens = {"quick": 512, "medium": 1024, "deep": 2048}.get(depth, 1024)
+        max_tokens = self._DEPTH_TOKENS.get(depth, 800)
 
         system = (
             "You are a precise execution planner. "
@@ -37,31 +47,17 @@ class PlanAgent(BaseAgent):
             "Each step must be concrete and actionable — no vague instructions. "
             "Output JSON: {steps: [{n, action, tool, expected_output}], risks: [], success_criteria: ''}"
         )
-
-        messages = [{"role": "user", "content": f"Goal: {goal}\n\nContext: {context}"}]
-
-        headers = {
-            "Authorization": f"Bearer {settings.GROQ_API_KEY}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": settings.GROQ_MODEL,
-            "messages": [{"role": "system", "content": system}] + messages,
-            "max_tokens": max_tokens,
-            "temperature": 0.2,
-            "response_format": {"type": "json_object"},
-        }
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": f"Goal: {goal}\n\nContext: {context}"},
+        ]
 
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                r = await client.post(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    json=payload, headers=headers
-                )
-                data = r.json()
-                content = data["choices"][0]["message"]["content"]
-                import json
-                return json.loads(content)
+            result = await self._query_engine.call_llm(
+                messages, session_id=self._session_id, max_tokens=max_tokens,
+                temperature=0.2, response_format={"type": "json_object"},
+            )
+            return json.loads(result.get("content", "{}"))
         except Exception as e:
             return {
                 "steps": [{"n": 1, "action": goal, "tool": "general", "expected_output": "completion"}],

@@ -14,8 +14,8 @@ class UDSInbox(BaseAgent):
     Enables direct inter-agent communication without going through CABLES MAN.
     """
 
-    def __init__(self, tools_registry=None, cables_man_ref=None):
-        super().__init__(tools_registry, cables_man_ref)
+    def __init__(self, tools_registry=None, cables_man_ref=None, **kwargs):
+        super().__init__(tools_registry, cables_man_ref, **kwargs)
         self._inbox: list[dict] = []
         self._server: asyncio.AbstractServer | None = None
         self._running = False

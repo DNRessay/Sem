@@ -26,7 +26,10 @@ class AgentTool:
         self._cables_man = cables_man_ref
 
     async def spawn(self, agent_type: str, task: dict) -> Any:
-        """Instantiate and run a named agent type."""
+        """Instantiate and run a named agent type. `session_id`/`trust_mode`
+        on `task` (set by CablesMan.route from the incoming request) thread
+        through to the agent so its tool calls (Step 5) are audited under
+        the right session and permission mode."""
         module_path = AGENT_MAP.get(agent_type)
         if not module_path:
             return {"error": f"Unknown agent type: {agent_type}. Valid: {list(AGENT_MAP.keys())}"}
@@ -38,6 +41,8 @@ class AgentTool:
         agent = agent_cls(
             tools_registry=self._tools,
             cables_man_ref=self._cables_man,
+            session_id=task.get("session_id", "default"),
+            trust_mode=task.get("trust_mode", "AUTO"),
         )
         return await agent.run(task)
 

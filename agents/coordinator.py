@@ -11,8 +11,8 @@ class CoordinatorAgent(BaseAgent):
     Hardcoded ban on lazy delegation — every task must be meaningfully assigned.
     """
 
-    def __init__(self, tools_registry=None, cables_man_ref=None):
-        super().__init__(tools_registry, cables_man_ref)
+    def __init__(self, tools_registry=None, cables_man_ref=None, **kwargs):
+        super().__init__(tools_registry, cables_man_ref, **kwargs)
         self._scratchpad: dict[str, list[str]] = {}   # task_id -> notes
         self._results: dict[str, dict] = {}
 

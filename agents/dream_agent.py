@@ -18,8 +18,8 @@ class DreamAgent(BaseAgent):
     GATE_HOURS = 24
     GATE_SESSIONS = 5
 
-    def __init__(self, tools_registry=None, cables_man_ref=None):
-        super().__init__(tools_registry, cables_man_ref)
+    def __init__(self, tools_registry=None, cables_man_ref=None, **kwargs):
+        super().__init__(tools_registry, cables_man_ref, **kwargs)
         self.salience = SalienceEngine()
         self._lock = asyncio.Lock()
         self._last_run = 0.0

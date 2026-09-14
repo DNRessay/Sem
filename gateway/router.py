@@ -7,6 +7,16 @@ from fastapi.responses import StreamingResponse
 
 from config import settings
 from gateway.auth import issue_token, require_account, verify_passphrase
+from pipeline.agent_intent import (
+    detect_explore_intent,
+    detect_plan_intent,
+    explore_status_label,
+    format_matches,
+    format_plan,
+    plan_status_label,
+    run_explore_intent,
+    run_plan_intent,
+)
 from pipeline.bootstrap import Bootstrap
 from pipeline.repo_context import (
     detect_repo_intent,
@@ -140,6 +150,43 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
     # search) — repo phrasing is the more specific signal, and only ever
     # does anything when this session actually has an active cloned repo.
     repo_intent = detect_repo_intent(raw_msg)
+    # Step 7 (sub-agent delegation) wired to a real chat message: "make a
+    # plan for X" routes through CablesMan -> PlanAgent, "search the code
+    # for X" through CablesMan -> ExploreAgent. Checked after repo_intent
+    # (more specific, and only fires with an active attached repo) and
+    # before web_intent, on raw_msg only for the same reason web/repo intent
+    # detection is — see the comment above web_intent.
+    plan_intent = detect_plan_intent(raw_msg)
+    explore_intent = detect_explore_intent(raw_msg)
+
+    async def _bypass_with_reply(kind: str, label: str, detail: str, reply: str):
+        """Shared tail for an intent that answers the message completely on
+        its own, with no LLM call needed to phrase around it (a generated
+        plan, a code search's results) — same shape as the repo "read"
+        bypass above, just factored out since two more intents now need it.
+        Streams the tool chip + reply, persists both turns, embeds only the
+        query (the reply's source of truth — the plan, the source file —
+        lives outside chat history and would go stale/duplicate here), and
+        generates a session title on the first turn."""
+        tool = {"kind": kind, "label": label, "detail": detail}
+        yield f"data: {json.dumps({'tool': tool})}\n\n"
+        for i in range(0, len(reply), 400):
+            yield f"data: {json.dumps({'chunk': reply[i:i + 400]})}\n\n"
+
+        db = await get_store()
+        marker = f"[[SEMBLANCE_TOOL:{json.dumps({'kind': kind, 'label': label})}]]\n"
+        await db.save_turn(session_id, "user", raw_msg)
+        await db.save_turn(session_id, "assistant", f"{marker}{reply}")
+        query_embedding = await embed_text(raw_msg)
+        await db.save_memory(session_id, raw_msg, embedding=query_embedding)
+
+        if not history:
+            title = await generate_title(raw_msg, reply)
+            if title:
+                await db.set_session_title(session_id, title)
+                yield f"data: {json.dumps({'title': title})}\n\n"
+
+        yield "data: [DONE]\n\n"
 
     async def stream_gen():
         msg = augmented
@@ -205,6 +252,26 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
                 tool = {"kind": kind, "label": repo_status_label(kind, target).rstrip("…"), "detail": repo_block}
                 yield f"data: {json.dumps({'tool': tool})}\n\n"
                 tool_marker = f"[[SEMBLANCE_TOOL:{json.dumps({'kind': kind, 'label': tool['label']})}]]\n"
+        elif plan_intent:
+            yield f"data: {json.dumps({'status': plan_status_label()})}\n\n"
+            plan = await run_plan_intent(plan_intent, session_id)
+            reply = format_plan(plan)
+            if reply:
+                async for line in _bypass_with_reply("plan", "Planning", json.dumps(plan), reply):
+                    yield line
+                return
+            # No plan came back (PlanAgent/QueryEngine failure) — fall
+            # through to the normal Bootstrap flow below rather than
+            # leaving the request hanging with no reply at all.
+        elif explore_intent:
+            yield f"data: {json.dumps({'status': explore_status_label(explore_intent)})}\n\n"
+            matches = await run_explore_intent(explore_intent, session_id)
+            reply = format_matches(explore_intent, matches)
+            if reply:
+                label = f'Searching code for "{explore_intent}"'
+                async for line in _bypass_with_reply("explore", label, reply, reply):
+                    yield line
+                return
         elif web_intent:
             kind, target = web_intent
             yield f"data: {json.dumps({'status': status_label(kind, target)})}\n\n"
@@ -261,7 +328,14 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
 
 @router.get("/status/{session_id}")
 async def status(session_id: str, _account: dict = Depends(require_account)):
-    return {"session_id": session_id, "status": "active"}
+    """Backs AgentFeed.jsx's 3s poll — the most recent CABLES MAN activity
+    for this session (a route decision from core.cables_man.CablesMan.route,
+    or a tool call from pipeline.tool_execution.ToolExecution), read back
+    from the agent_events table since a chat POST and this GET are almost
+    always different Lambda invocations with no shared memory."""
+    db = await get_store()
+    event = await db.get_latest_agent_event(session_id)
+    return {"session_id": session_id, "status": "active", "event": event}
 
 
 @router.get("/sessions")

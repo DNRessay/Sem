@@ -212,3 +212,144 @@ def test_later_turns_do_not_regenerate_the_title(client, monkeypatch):
     })
     assert resp.status_code == 200
     assert calls == []
+
+
+def test_plan_intent_bypasses_the_llm_and_streams_the_formatted_plan(client, monkeypatch):
+    """Step 7 (sub-agent delegation) reachable from a real chat message: a
+    "make a plan for X" message routes through run_plan_intent (CablesMan
+    -> PlanAgent) instead of Bootstrap/the main LLM call, same bypass shape
+    as the repo "read" intent."""
+    calls = []
+
+    async def fake_run_plan_intent(goal, session_id):
+        calls.append((goal, session_id))
+        return {"steps": [{"n": 1, "action": "set up the bot", "tool": "bash"}],
+                "risks": [], "success_criteria": "bot is live"}
+
+    class RecordingStore:
+        def __init__(self):
+            self.turns = []
+            self.memories = []
+
+        async def save_turn(self, session_id, role, content):
+            self.turns.append((session_id, role, content))
+
+        async def save_memory(self, session_id, content, salience=0.5, embedding=None):
+            self.memories.append((session_id, content))
+
+    store = RecordingStore()
+
+    async def fake_get_store():
+        return store
+
+    monkeypatch.setattr("gateway.router.run_plan_intent", fake_run_plan_intent)
+    monkeypatch.setattr("gateway.router.get_store", fake_get_store)
+
+    resp = client.post("/chat", json={"message": "make a plan for launching the bot", "session_id": "sess1"})
+    assert resp.status_code == 200
+    assert calls == [("make a plan for launching the bot", "sess1")]
+    assert "set up the bot" in resp.text
+    assert "bot is live" in resp.text
+    assert ("sess1", "user", "make a plan for launching the bot") in store.turns
+    assert store.memories == [("sess1", "make a plan for launching the bot")]
+
+
+def test_plan_intent_falls_back_to_normal_flow_when_no_plan_comes_back(client, monkeypatch):
+    async def fake_run_plan_intent(goal, session_id):
+        return {}
+
+    monkeypatch.setattr("gateway.router.run_plan_intent", fake_run_plan_intent)
+
+    resp = client.post("/chat", json={"message": "make a plan for launching the bot", "session_id": "sess1"})
+    assert resp.status_code == 200
+    assert "ok" in resp.text  # FakeBootstrap's fixed reply — the normal flow ran
+
+
+def test_explore_code_intent_bypasses_the_llm_and_streams_the_matches(client, monkeypatch):
+    """"search the code for X" routes through run_explore_intent (CablesMan
+    -> ExploreAgent, scope=code) — no LLM call involved at all."""
+    calls = []
+
+    async def fake_run_explore_intent(term, session_id):
+        calls.append((term, session_id))
+        return [{"file": "pipeline/query_engine.py", "line": 25, "content": "_DEFAULT_MAX_TOKENS = 800"}]
+
+    class RecordingStore:
+        def __init__(self):
+            self.turns = []
+
+        async def save_turn(self, session_id, role, content):
+            self.turns.append((session_id, role, content))
+
+        async def save_memory(self, session_id, content, salience=0.5, embedding=None):
+            pass
+
+    store = RecordingStore()
+
+    async def fake_get_store():
+        return store
+
+    monkeypatch.setattr("gateway.router.run_explore_intent", fake_run_explore_intent)
+    monkeypatch.setattr("gateway.router.get_store", fake_get_store)
+
+    resp = client.post("/chat", json={"message": "search the code for _DEFAULT_MAX_TOKENS", "session_id": "sess1"})
+    assert resp.status_code == 200
+    assert calls == [("_DEFAULT_MAX_TOKENS", "sess1")]
+    assert "query_engine.py" in resp.text
+    assert ("sess1", "user", "search the code for _DEFAULT_MAX_TOKENS") in store.turns
+
+
+def test_explore_code_intent_does_not_fire_on_repo_grep_phrasing(client, monkeypatch):
+    """"search the codebase for X" belongs to repo_intent (an externally
+    attached repo), checked first — explore_intent must not also match."""
+    explore_calls = []
+    repo_calls = []
+
+    async def fake_run_explore_intent(term, session_id):
+        explore_calls.append(term)
+        return []
+
+    async def fake_run_repo_intent(target, session_id):
+        repo_calls.append(target)
+        return ""
+
+    monkeypatch.setattr("gateway.router.run_explore_intent", fake_run_explore_intent)
+    monkeypatch.setattr("gateway.router.run_repo_intent", fake_run_repo_intent)
+
+    resp = client.post("/chat", json={"message": "search the codebase for TODO", "session_id": "sess1"})
+    assert resp.status_code == 200
+    assert explore_calls == []
+    assert repo_calls == ["TODO"]
+
+
+def test_status_endpoint_returns_the_latest_agent_event(client, monkeypatch):
+    class RecordingStore:
+        async def get_latest_agent_event(self, session_id):
+            assert session_id == "sess1"
+            return {"agent": "plan", "action": "complete", "ts": 12345}
+
+    async def fake_get_store():
+        return RecordingStore()
+
+    monkeypatch.setattr("gateway.router.get_store", fake_get_store)
+
+    resp = client.get("/status/sess1")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["session_id"] == "sess1"
+    assert body["event"] == {"agent": "plan", "action": "complete", "ts": 12345}
+
+
+def test_status_endpoint_returns_no_event_for_a_quiet_session(client, monkeypatch):
+    class RecordingStore:
+        async def get_latest_agent_event(self, session_id):
+            return None
+
+    async def fake_get_store():
+        return RecordingStore()
+
+    monkeypatch.setattr("gateway.router.get_store", fake_get_store)
+
+    resp = client.get("/status/sess1")
+    assert resp.status_code == 200
+    assert resp.json()["event"] is None

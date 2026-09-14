@@ -40,8 +40,8 @@ class SwarmAgent(BaseAgent):
 
     SWARM_MEMBERS = ["tengu", "amber", "flint"]
 
-    def __init__(self, tools_registry=None, cables_man_ref=None):
-        super().__init__(tools_registry, cables_man_ref)
+    def __init__(self, tools_registry=None, cables_man_ref=None, **kwargs):
+        super().__init__(tools_registry, cables_man_ref, **kwargs)
         self._workers: dict[str, SwarmWorker] = {
             name: SwarmWorker(name, tools_registry)
             for name in self.SWARM_MEMBERS

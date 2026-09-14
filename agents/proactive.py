@@ -10,8 +10,8 @@ class ProactiveAgent(BaseAgent):
     All outbound messages routed through OpenClaw bridge.
     """
 
-    def __init__(self, tools_registry=None, cables_man_ref=None):
-        super().__init__(tools_registry, cables_man_ref)
+    def __init__(self, tools_registry=None, cables_man_ref=None, **kwargs):
+        super().__init__(tools_registry, cables_man_ref, **kwargs)
         self._sent: list[dict] = []
 
     async def run(self, task: dict) -> dict:

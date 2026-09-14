@@ -11,8 +11,8 @@ class BridgeAgent(BaseAgent):
     Allows triggering CABLES MAN agents remotely.
     """
 
-    def __init__(self, tools_registry=None, cables_man_ref=None):
-        super().__init__(tools_registry, cables_man_ref)
+    def __init__(self, tools_registry=None, cables_man_ref=None, **kwargs):
+        super().__init__(tools_registry, cables_man_ref, **kwargs)
         self._command_queue: asyncio.Queue = asyncio.Queue()
         self._result_store: dict[str, dict] = {}
 

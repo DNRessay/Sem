@@ -39,6 +39,7 @@ class QueryEngine:
         session_id: str = "default",
         max_tokens: int = _DEFAULT_MAX_TOKENS,
         temperature: float = 0.5,
+        response_format: dict | None = None,
     ) -> dict:
         # Hash the whole conversation, not just the first two messages —
         # messages[:2] is system + the *first* history entry, which never
@@ -60,6 +61,8 @@ class QueryEngine:
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
+        if response_format:
+            payload["response_format"] = response_format
         async with httpx.AsyncClient(timeout=60) as client:
             r = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",

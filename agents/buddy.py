@@ -88,8 +88,8 @@ class BuddyAgent(BaseAgent):
     One buddy per session — persists across turns.
     """
 
-    def __init__(self, tools_registry=None, cables_man_ref=None):
-        super().__init__(tools_registry, cables_man_ref)
+    def __init__(self, tools_registry=None, cables_man_ref=None, **kwargs):
+        super().__init__(tools_registry, cables_man_ref, **kwargs)
         self._buddies: dict[str, Buddy] = {}
 
     async def run(self, task: dict) -> dict:

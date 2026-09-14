@@ -16,15 +16,28 @@ class CablesMan:
         agent_type = task.get("agent", self._classify(query))
 
         self.working_mem.append(session, f"routing:{agent_type}:{query[:60]}")
+        await self._persist_event(session, agent_type, f"routing:{query[:60]}")
 
         from tools.agent_tool import AgentTool
         spawner = AgentTool(tools_registry=self.registry, cables_man_ref=self)
         result = await spawner.spawn(agent_type, task)
 
-        if result.get("status") == "complete":
+        status = result.get("status") if isinstance(result, dict) else None
+        await self._persist_event(session, agent_type, f"{status or 'error'}")
+        if status == "complete":
             self.working_mem.clear(session)
 
         return result
+
+    async def _persist_event(self, session_id: str, agent: str, action: str) -> None:
+        """Best-effort — see pipeline.tool_execution.ToolExecution._persist
+        for why a DB hiccup here must never break routing itself."""
+        try:
+            from storage.neon_store import get_store
+            db = await get_store()
+            await db.save_agent_event(session_id, agent, action)
+        except Exception:
+            pass
 
     def _classify(self, query: str) -> str:
         q = query.lower()

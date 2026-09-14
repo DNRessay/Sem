@@ -17,8 +17,8 @@ class UltraPlanAgent(BaseAgent):
     Browser approval gate before any execution.
     """
 
-    def __init__(self, tools_registry=None, cables_man_ref=None):
-        super().__init__(tools_registry, cables_man_ref)
+    def __init__(self, tools_registry=None, cables_man_ref=None, **kwargs):
+        super().__init__(tools_registry, cables_man_ref, **kwargs)
         self._pending_approval: dict[str, dict] = {}
 
     async def run(self, task: dict) -> dict:
