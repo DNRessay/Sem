@@ -33,11 +33,26 @@ class TAUEngine:
         return ctx
 
     def _build_context(self, user_model: dict, ocean: dict) -> str:
-        parts = ["You are SEMBLANCE. You know this user well."]
+        parts = ["You are SEMBLANCE. You know this user well. Use everything below "
+                 "without asking the user to repeat it."]
         if name := user_model.get("name"):
             parts.append(f"User's name: {name}")
+        if location := user_model.get("location"):
+            parts.append(f"Location: {location}")
         if about := user_model.get("about"):
             parts.append(f"About them: {about}")
+        if goals := user_model.get("goals"):
+            joined = ", ".join(goals) if isinstance(goals, list) else goals
+            parts.append(f"Goals: {joined}")
+        if comm := user_model.get("communication_style"):
+            parts.append(f"Communication style to match: {comm}")
+        if coding := user_model.get("coding_preferences"):
+            parts.append(f"Coding preferences: {coding}")
+        if envs := user_model.get("environments"):
+            joined = ", ".join(envs) if isinstance(envs, list) else envs
+            parts.append(f"Dev environments: {joined}")
+        if skills := user_model.get("skills"):
+            parts.append(f"Skills/stack: {', '.join(skills)}")
         if projects := user_model.get("projects"):
             parts.append(f"Active projects: {', '.join(projects)}")
         if interests := user_model.get("interests"):
