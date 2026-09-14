@@ -136,6 +136,19 @@ jobs:
             --no-fail-on-empty-changeset \
             --parameter-overrides "${params[@]}"
 
+      - name: Diagnose changeset failure
+        if: failure()
+        run: |
+          region="${{ secrets.AWS_REGION || 'eu-west-1' }}"
+          echo "--- list-change-sets ---"
+          aws cloudformation list-change-sets --stack-name semblance --region "$region" || true
+          latest=$(aws cloudformation list-change-sets --stack-name semblance --region "$region" \
+            --query 'reverse(sort_by(Summaries, &CreationTime))[0].ChangeSetId' --output text 2>/dev/null || true)
+          if [ -n "$latest" ] && [ "$latest" != "None" ]; then
+            echo "--- describe-change-set: $latest ---"
+            aws cloudformation describe-change-set --stack-name semblance --region "$region" --change-set-name "$latest" || true
+          fi
+
       - name: Expire old build artifacts in the SAM deployment bucket
         # `sam deploy --resolve-s3` keeps every historical build zip forever
         # by default. Idempotent — re-applies the same 14-day expiry rule on
