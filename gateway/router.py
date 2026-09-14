@@ -122,7 +122,7 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
         if web_intent:
             kind, target = web_intent
             yield f"data: {json.dumps({'status': status_label(kind, target)})}\n\n"
-            web_block = await run_web_intent(kind, target)
+            web_block = await run_web_intent(kind, target, session_id=session_id)
             if web_block:
                 msg = f"{msg}\n\n{web_block}"
 

@@ -11,6 +11,9 @@ class FakeStore:
     async def save_turn(self, session_id, role, content):
         pass
 
+    async def save_memory(self, session_id, content, salience=0.5, embedding=None):
+        pass
+
 
 @pytest.mark.asyncio
 async def test_run_uses_plain_text_content_and_default_model_without_images(monkeypatch):
@@ -101,3 +104,36 @@ async def test_run_injects_current_date_into_system_prompt(monkeypatch):
     assert system_msg["role"] == "system"
     assert "Current date and time:" in system_msg["content"]
     assert "SAST" in system_msg["content"]
+
+
+@pytest.mark.asyncio
+async def test_run_writes_the_query_to_long_term_memory(monkeypatch):
+    saved = {}
+
+    class RecordingStore(FakeStore):
+        async def save_memory(self, session_id, content, salience=0.5, embedding=None):
+            saved["session_id"] = session_id
+            saved["content"] = content
+            saved["embedding"] = embedding
+
+    async def fake_get_store():
+        return RecordingStore()
+
+    monkeypatch.setattr("pipeline.bootstrap.get_store", fake_get_store)
+    bootstrap = Bootstrap()
+
+    async def fake_retrieve(query, top_k=5):
+        return []
+
+    bootstrap.sem_retrieval.retrieve = fake_retrieve
+
+    async def fake_stream_llm(messages, model=None, session_id="default", **kwargs):
+        yield "ok"
+
+    bootstrap.query_engine.stream_llm = fake_stream_llm
+
+    [piece async for piece in bootstrap.run("I love the Nimzo-Larsen opening", "sess1", [])]
+
+    assert saved["session_id"] == "sess1"
+    assert saved["content"] == "I love the Nimzo-Larsen opening"
+    assert saved["embedding"] is not None

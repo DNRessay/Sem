@@ -1,6 +1,6 @@
 import pytest
 
-from pipeline.web_context import _news_topic, detect_web_intent, run_web_intent, status_label
+from pipeline.web_context import _news_topic, _personalized_topic, detect_web_intent, run_web_intent, status_label
 
 
 def test_detect_web_intent_finds_url():
@@ -101,7 +101,7 @@ async def test_run_web_intent_news_wraps_results(monkeypatch):
 
     monkeypatch.setattr("pipeline.web_context.get_registry", lambda: FakeRegistry())
     result = await run_web_intent("news", "what's on the latest news")
-    assert "<web_news>" in result
+    assert '<web_news topic="top stories">' in result
     assert "A (News24, 1 hour ago): https://a.example" in result
 
 
@@ -128,3 +128,83 @@ async def test_run_web_intent_news_empty_on_missing_key(monkeypatch):
     monkeypatch.setattr("pipeline.web_context.get_registry", lambda: FakeRegistry())
     result = await run_web_intent("news", "what's on the latest news")
     assert result == ""
+
+
+@pytest.mark.asyncio
+async def test_personalized_topic_returns_none_with_no_memories(monkeypatch):
+    class FakeStore:
+        async def semantic_search(self, embedding, top_k=5):
+            return []
+
+    async def fake_get_store():
+        return FakeStore()
+
+    monkeypatch.setattr("pipeline.web_context.get_store", fake_get_store)
+    assert await _personalized_topic("sess1") is None
+
+
+@pytest.mark.asyncio
+async def test_personalized_topic_uses_top_memory(monkeypatch):
+    class FakeStore:
+        async def semantic_search(self, embedding, top_k=5):
+            return [{"content": "how do I set up Modal for embeddings"}]
+
+    async def fake_get_store():
+        return FakeStore()
+
+    monkeypatch.setattr("pipeline.web_context.get_store", fake_get_store)
+    topic = await _personalized_topic("sess1")
+    assert topic == "how do I set up Modal for embeddings"
+
+
+@pytest.mark.asyncio
+async def test_run_web_intent_news_blends_personal_topic_for_generic_ask(monkeypatch):
+    calls = []
+
+    class FakeRegistry:
+        async def execute(self, tool_name, args):
+            calls.append(args["topic"])
+            return [{"title": "A", "source": "S", "date": "d", "link": "l"}]
+
+    async def fake_personalized_topic(session_id):
+        return "chess openings"
+
+    monkeypatch.setattr("pipeline.web_context.get_registry", lambda: FakeRegistry())
+    monkeypatch.setattr("pipeline.web_context._personalized_topic", fake_personalized_topic)
+
+    result = await run_web_intent("news", "what's on the latest news", session_id="sess1")
+    assert calls == ["top stories", "chess openings"]
+    assert result.count("<web_news") == 2
+
+
+@pytest.mark.asyncio
+async def test_run_web_intent_news_does_not_blend_for_specific_topic(monkeypatch):
+    calls = []
+
+    class FakeRegistry:
+        async def execute(self, tool_name, args):
+            calls.append(args["topic"])
+            return [{"title": "A", "source": "S", "date": "d", "link": "l"}]
+
+    async def fake_personalized_topic(session_id):
+        raise AssertionError("should not be called for a specific topic")
+
+    monkeypatch.setattr("pipeline.web_context.get_registry", lambda: FakeRegistry())
+    monkeypatch.setattr("pipeline.web_context._personalized_topic", fake_personalized_topic)
+
+    await run_web_intent("news", "news about load shedding", session_id="sess1")
+    assert calls == ["load shedding"]
+
+
+@pytest.mark.asyncio
+async def test_run_web_intent_news_without_session_id_skips_personalization(monkeypatch):
+    calls = []
+
+    class FakeRegistry:
+        async def execute(self, tool_name, args):
+            calls.append(args["topic"])
+            return [{"title": "A", "source": "S", "date": "d", "link": "l"}]
+
+    monkeypatch.setattr("pipeline.web_context.get_registry", lambda: FakeRegistry())
+    await run_web_intent("news", "what's on the latest news")
+    assert calls == ["top stories"]

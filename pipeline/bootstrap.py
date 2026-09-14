@@ -9,6 +9,7 @@ from memory.sem_retrieval import SEMRetrieval
 from pipeline.ctx_assembly import CTXAssembly
 from pipeline.ctx_pressure import CTXPressure
 from pipeline.query_engine import QueryEngine
+from storage.embeddings import embed_text
 from storage.neon_store import get_store
 
 _SAST = timezone(timedelta(hours=2))  # South Africa Standard Time — no DST
@@ -78,6 +79,14 @@ class Bootstrap:
         db = await get_store()
         await db.save_turn(session_id, "user", query)
         await db.save_turn(session_id, "assistant", reply)
+
+        # Long-term memory: the system prompt has always claimed persistent
+        # memory that "updates from every conversation", but nothing ever
+        # actually wrote to the memories table SEMRetrieval reads from — this
+        # closes that gap so later turns (and personalized news topics) have
+        # real history to draw on instead of always retrieving nothing.
+        embedding = await embed_text(query)
+        await db.save_memory(session_id, query, embedding=embedding)
 
     async def _skills_context(self, query: str) -> str:
         """Two-tier skill disclosure, mirroring how Claude sees Skills: a

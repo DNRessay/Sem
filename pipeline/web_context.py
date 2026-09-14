@@ -1,5 +1,7 @@
 import re
 
+from storage.embeddings import embed_text
+from storage.neon_store import get_store
 from tools.registry import get_registry
 
 _URL_RE = re.compile(r"https?://[^\s<>\"']+")
@@ -55,7 +57,35 @@ def status_label(kind: str, target: str) -> str:
     return "Searching the web…"
 
 
-async def run_web_intent(kind: str, target: str) -> str:
+async def _personalized_topic(session_id: str) -> str | None:
+    """Pulls one topic out of the user's own accumulated long-term memory
+    (see Bootstrap.run, which now actually writes to it), so a generic news
+    ask blends a personal angle in alongside top stories — the same idea as
+    a personalized news feed mixing trending stories with things you've
+    shown interest in. Returns None until enough memory exists to say
+    anything — that's expected for a new/quiet session, not a bug; it grows
+    as the user keeps chatting."""
+    try:
+        db = await get_store()
+        embedding = await embed_text("topics and interests the user cares about")
+        memories = await db.semantic_search(embedding, top_k=3)
+    except Exception:
+        return None
+    if not memories:
+        return None
+    text = (memories[0].get("content") or "").strip()
+    return text[:60] or None
+
+
+async def _fetch_news(registry, topic: str) -> str:
+    result = await registry.execute("web_news", {"topic": topic})
+    if not result or result[0].get("error"):
+        return ""
+    lines = [f"- {r.get('title')} ({r.get('source')}, {r.get('date')}): {r.get('link')}" for r in result[:5]]
+    return f'<web_news topic="{topic}">\n' + "\n".join(lines) + "\n</web_news>"
+
+
+async def run_web_intent(kind: str, target: str, session_id: str | None = None) -> str:
     """Executes the intent via the existing tool registry and returns a
     context block to fold into the user's message — empty string on any
     failure (missing SERP_API_KEY, network error, etc), so a broken/unset
@@ -72,11 +102,17 @@ async def run_web_intent(kind: str, target: str) -> str:
         return f'<web_fetch url="{target}">\n{content}\n</web_fetch>'
 
     if kind == "news":
-        result = await registry.execute("web_news", {"topic": _news_topic(target)})
-        if not result or result[0].get("error"):
-            return ""
-        lines = [f"- {r.get('title')} ({r.get('source')}, {r.get('date')}): {r.get('link')}" for r in result]
-        return "<web_news>\n" + "\n".join(lines) + "\n</web_news>"
+        topic = _news_topic(target)
+        topics = [topic]
+        # Only blend in a personal angle for a fully generic ask — a query
+        # that already names a topic ("news about load shedding") stays
+        # exactly what was asked for, not padded with unrelated interests.
+        if topic == "top stories" and session_id:
+            personal = await _personalized_topic(session_id)
+            if personal and personal.lower() != topic:
+                topics.append(personal)
+        blocks = [b for b in [await _fetch_news(registry, t) for t in topics] if b]
+        return "\n".join(blocks)
 
     result = await registry.execute("web_search", {"query": target, "num": 5})
     if not result or result[0].get("error"):
