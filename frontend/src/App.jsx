@@ -24,6 +24,7 @@ export default function App() {
         }
     });
     const [initialHistory, setInitialHistory] = useState([]);
+    const [sessionTitle, setSessionTitle] = useState("");
     const [menuOpen, setMenuOpen] = useState(false);
     const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || "");
     const [restoring, setRestoring] = useState(true);
@@ -50,6 +51,7 @@ export default function App() {
             .then(data => {
                 if (cancelled || sessionIdRef.current !== restoringId) return;
                 setInitialHistory(turnsToHistory(data.turns));
+                setSessionTitle(data.title || "");
             })
             .catch(() => {})
             .finally(() => { if (!cancelled) setRestoring(false); });
@@ -70,15 +72,24 @@ export default function App() {
     const startNewChat = () => {
         setSessionId(newSessionId());
         setInitialHistory([]);
+        setSessionTitle("");
         setMenuOpen(false);
         setRestoring(false);
     };
 
-    const openSession = (id, turns) => {
+    const openSession = (id, turns, title) => {
         setSessionId(id);
         setInitialHistory(turnsToHistory(turns));
+        setSessionTitle(title || "");
         setMenuOpen(false);
         setRestoring(false);
+    };
+
+    // Only applied if the title's session is still the one showing — a
+    // slow title-generation response landing after the user already
+    // switched sessions shouldn't overwrite what's on screen.
+    const handleTitle = (id, title) => {
+        if (id === sessionIdRef.current) setSessionTitle(title);
     };
 
     if (!token) {
@@ -91,7 +102,7 @@ export default function App() {
 
     return (
         <div className="app-shell" style={{ display: "flex", flexDirection: "column", background: "var(--bg)" }}>
-            <StatusBar sessionId={sessionId} streaming={streaming} onMenu={() => setMenuOpen(true)} />
+            <StatusBar sessionId={sessionId} title={sessionTitle} streaming={streaming} onMenu={() => setMenuOpen(true)} onTitleClick={startNewChat} />
             <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
                 {!restoring && (
                     <ErrorBoundary key={sessionId}>
@@ -100,6 +111,7 @@ export default function App() {
                             initialHistory={initialHistory}
                             onStreamChange={setStreaming}
                             onNewChat={startNewChat}
+                            onTitle={handleTitle}
                             token={token}
                             onUnauthorized={logout}
                         />

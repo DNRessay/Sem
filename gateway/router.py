@@ -14,6 +14,7 @@ from pipeline.repo_context import (
     repo_status_label,
     run_repo_intent,
 )
+from pipeline.session_title import generate_title
 from pipeline.web_context import detect_web_intent, run_web_intent, status_label
 from storage.embeddings import embed_text
 from storage.neon_store import get_store
@@ -178,6 +179,12 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
                 query_embedding = await embed_text(raw_msg)
                 await db.save_memory(session_id, raw_msg, embedding=query_embedding)
 
+                if not history:
+                    title = await generate_title(raw_msg, reply)
+                    if title:
+                        await db.set_session_title(session_id, title)
+                        yield f"data: {json.dumps({'title': title})}\n\n"
+
                 yield "data: [DONE]\n\n"
                 return
 
@@ -227,11 +234,26 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
                 yield f"data: {json.dumps({'tool': tool})}\n\n"
                 tool_marker = f"[[SEMBLANCE_TOOL:{json.dumps({'kind': kind, 'label': tool['label']})}]]\n"
 
+        reply_parts = []
         async for chunk in bootstrap.run(
             msg, session_id, history, images=images,
             display_query=raw_msg, assistant_prefix=tool_marker,
         ):
+            reply_parts.append(chunk)
             yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+
+        if not history:
+            # First turn of a new session — generate a real short title
+            # instead of leaving the sidebar/header showing the raw first
+            # message or a bare session ID. Once per session, not every
+            # turn: this account's Groq rate limit is tight enough that an
+            # extra call on every message would add up fast.
+            title = await generate_title(raw_msg, "".join(reply_parts))
+            if title:
+                db = await get_store()
+                await db.set_session_title(session_id, title)
+                yield f"data: {json.dumps({'title': title})}\n\n"
+
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(stream_gen(), media_type="text/event-stream")
@@ -251,7 +273,11 @@ async def sessions(_account: dict = Depends(require_account)):
 @router.get("/history/{session_id}")
 async def history(session_id: str, _account: dict = Depends(require_account)):
     db = await get_store()
-    return {"session_id": session_id, "turns": await db.get_conversation(session_id)}
+    return {
+        "session_id": session_id,
+        "title": await db.get_session_title(session_id),
+        "turns": await db.get_conversation(session_id),
+    }
 
 
 @router.get("/health")

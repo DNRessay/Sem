@@ -138,6 +138,13 @@ class NeonStore:
                     updated_at BIGINT NOT NULL
                 )
             """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS session_titles (
+                    session_id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    updated_at BIGINT NOT NULL
+                )
+            """)
 
     async def save_memory(self, session_id: str, content: str, salience: float = 0.5,
                            embedding: list[float] | None = None) -> int:
@@ -188,13 +195,18 @@ class NeonStore:
             )
 
     async def list_sessions(self, limit: int = 50) -> list[dict]:
-        """Distinct session_ids that have at least one turn, newest first, with a preview."""
+        """Distinct session_ids that have at least one turn, newest first,
+        with a preview (the raw first message — kept as a fallback) and,
+        once generated, a real short title (see pipeline/session_title.py)
+        that the frontend prefers to show instead."""
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
-                """SELECT session_id, MAX(created_at) AS last_at,
-                          (ARRAY_AGG(content ORDER BY created_at ASC))[1] AS preview
-                   FROM conversations
-                   GROUP BY session_id
+                """SELECT c.session_id, MAX(c.created_at) AS last_at,
+                          (ARRAY_AGG(c.content ORDER BY c.created_at ASC))[1] AS preview,
+                          MAX(st.title) AS title
+                   FROM conversations c
+                   LEFT JOIN session_titles st ON st.session_id = c.session_id
+                   GROUP BY c.session_id
                    ORDER BY last_at DESC
                    LIMIT $1""",
                 limit,
@@ -255,6 +267,21 @@ class NeonStore:
     async def delete_connector(self, account_id: str, provider: str):
         async with self._pool.acquire() as conn:
             await conn.execute("DELETE FROM connectors WHERE account_id=$1 AND provider=$2", account_id, provider)
+
+    async def get_session_title(self, session_id: str) -> str | None:
+        async with self._pool.acquire() as conn:
+            return await conn.fetchval(
+                "SELECT title FROM session_titles WHERE session_id=$1", session_id,
+            )
+
+    async def set_session_title(self, session_id: str, title: str):
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO session_titles (session_id, title, updated_at)
+                   VALUES ($1, $2, $3)
+                   ON CONFLICT (session_id) DO UPDATE SET title=$2, updated_at=$3""",
+                session_id, title, int(time.time()),
+            )
 
     async def get_active_repo(self, session_id: str) -> dict | None:
         """The repo this session last cloned via "Add repo" — lets a

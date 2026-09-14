@@ -20,8 +20,15 @@ def client(monkeypatch):
     async def fake_observe_and_inject(session_id, query, history):
         return ""
 
+    async def fake_generate_title(user_msg, reply):
+        # Default no-op — a real (unmocked) Groq call here would be slow/
+        # blocked in tests; individual tests override this to check title
+        # generation specifically.
+        return ""
+
     monkeypatch.setattr("gateway.router._tau.observe_and_inject", fake_observe_and_inject)
     monkeypatch.setattr("gateway.router.Bootstrap", FakeBootstrap)
+    monkeypatch.setattr("gateway.router.generate_title", fake_generate_title)
     yield TestClient(app)
     app.dependency_overrides.pop(require_account, None)
 
@@ -152,3 +159,56 @@ def test_repo_read_falls_back_to_normal_flow_when_fetch_fails(client, monkeypatc
     resp = client.post("/chat", json={"message": "what's in the readme", "session_id": "sess1"})
     assert resp.status_code == 200
     assert "ok" in resp.text  # FakeBootstrap's fixed reply — the normal flow ran
+
+
+def test_first_turn_generates_and_persists_a_session_title(client, monkeypatch):
+    """The header used to just show the raw session ID and the sidebar the
+    literal first message — this generates a real short title instead, but
+    only once, on a session's first turn (no history yet)."""
+    calls = []
+
+    async def fake_generate_title(user_msg, reply):
+        calls.append((user_msg, reply))
+        return "Chess opening strategy"
+
+    class RecordingStore:
+        def __init__(self):
+            self.titles = {}
+
+        async def set_session_title(self, session_id, title):
+            self.titles[session_id] = title
+
+    store = RecordingStore()
+
+    async def fake_get_store():
+        return store
+
+    monkeypatch.setattr("gateway.router.generate_title", fake_generate_title)
+    monkeypatch.setattr("gateway.router.get_store", fake_get_store)
+
+    resp = client.post("/chat", json={"message": "tell me about the Nimzo-Larsen", "session_id": "sess1"})
+    assert resp.status_code == 200
+    assert calls == [("tell me about the Nimzo-Larsen", "ok")]  # "ok" is FakeBootstrap's fixed reply
+    assert store.titles == {"sess1": "Chess opening strategy"}
+    assert '"title": "Chess opening strategy"' in resp.text
+
+
+def test_later_turns_do_not_regenerate_the_title(client, monkeypatch):
+    calls = []
+
+    async def fake_generate_title(user_msg, reply):
+        calls.append((user_msg, reply))
+        return "Should not be called"
+
+    monkeypatch.setattr("gateway.router.generate_title", fake_generate_title)
+
+    resp = client.post("/chat", json={
+        "message": "and what about the Reti?",
+        "session_id": "sess1",
+        "history": [
+            {"role": "user", "content": "tell me about the Nimzo-Larsen"},
+            {"role": "assistant", "content": "It's a hypermodern opening..."},
+        ],
+    })
+    assert resp.status_code == 200
+    assert calls == []

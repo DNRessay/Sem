@@ -22,6 +22,7 @@ export function useStream(baseUrl = "", token = "", onUnauthorized) {
         // directly is the only way to get the *final* response reliably.
         let full = "";
         let toolLocal = null;
+        let titleLocal = null;
 
         try {
             const res = await fetch(`${baseUrl}/chat`, {
@@ -63,6 +64,8 @@ export function useStream(baseUrl = "", token = "", onUnauthorized) {
                         toolLocal = parsed.tool;
                         setTool(parsed.tool);
                         setStatus(null); // the search/fetch is done — the chip replaces the breadcrumb
+                    } else if (parsed.title) {
+                        titleLocal = parsed.title;
                     } else if (parsed.status) {
                         setStatus(parsed.status);
                     } else if (parsed.chunk) {
@@ -92,7 +95,7 @@ export function useStream(baseUrl = "", token = "", onUnauthorized) {
             setStreaming(false);
         }
 
-        return { reply: full, tool: toolLocal };
+        return { reply: full, tool: toolLocal, title: titleLocal };
     }, [baseUrl, token, onUnauthorized]);
 
     const abort = useCallback(() => abortRef.current?.abort(), []);

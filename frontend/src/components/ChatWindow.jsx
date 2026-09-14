@@ -151,7 +151,7 @@ function ToolChip({ tool }) {
     );
 }
 
-export default function ChatWindow({ sessionId = "default", initialHistory = [], onStreamChange, token, onUnauthorized }) {
+export default function ChatWindow({ sessionId = "default", initialHistory = [], onStreamChange, onTitle, token, onUnauthorized }) {
     const [input, setInput] = useState("");
     const [history, setHistory] = useState(initialHistory);
     const [attachments, setAttachments] = useState([]);
@@ -177,8 +177,9 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
         setInput("");
         setAttachments([]);
         setHistory(h => [...h, { role: "user", content: msg, files: files.map(f => ({ name: f.name, source: f.source, mime: f.mime })) }]);
-        const { reply, tool: toolResult } = await send(msg, sessionId, history, files);
+        const { reply, tool: toolResult, title } = await send(msg, sessionId, history, files);
         if (reply) setHistory(h => [...h, { role: "assistant", content: reply, tool: toolResult }]);
+        if (title) onTitle?.(sessionId, title);
     };
 
     const addAttachment = (file) => setAttachments(a => [...a, file]);

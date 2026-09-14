@@ -40,9 +40,9 @@ export default function Drawer({ open, onClose, currentSessionId, onNewChat, onO
             const r = await fetch(`${API}/history/${id}`, { headers: authHeaders });
             if (r.status === 401) { onLogout(); return; }
             const data = await r.json();
-            onOpenSession(id, data.turns || []);
+            onOpenSession(id, data.turns || [], data.title);
         } catch {
-            onOpenSession(id, []);
+            onOpenSession(id, [], "");
         }
     };
 
@@ -95,7 +95,7 @@ export default function Drawer({ open, onClose, currentSessionId, onNewChat, onO
                             }}
                         >
                             <div style={{ color: "var(--text)", fontSize: "13px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                {s.preview || s.session_id}
+                                {s.title || s.preview || s.session_id}
                             </div>
                             <div style={{ color: "var(--text-muted)", fontSize: "11px" }}>{timeAgo(s.last_at)}</div>
                         </button>
