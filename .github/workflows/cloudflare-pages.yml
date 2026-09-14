@@ -75,4 +75,7 @@ jobs:
           echo "--- local dist/assets ---"
           ls dist/assets/
           echo "--- what semblance-773.pages.dev serves ---"
-          curl -s https://semblance-773.pages.dev/ | grep -o 'assets/index-[a-zA-Z0-9]*\.js' || true
+          status=$(curl -s -o /tmp/prod_body.html -w "%{http_code}" https://semblance-773.pages.dev/)
+          echo "status=$status"
+          head -c 500 /tmp/prod_body.html
+          echo
