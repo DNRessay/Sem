@@ -32,6 +32,27 @@ def _extract_answer_box(raw: dict | None) -> str | None:
     return None
 
 
+async def _serp_get(client: httpx.AsyncClient, params: dict) -> dict:
+    """Single point of failure handling for every SerpAPI call below. A
+    rate-limited/transient upstream failure often comes back as HTTP 200
+    with an `error` field in the body, not an exception — left unchecked,
+    that used to look identical to a real "no results for this query"
+    (empty organic_results, no answer_box), so callers had no way to tell
+    "the call failed, try again" from "genuinely nothing found" and just
+    reported no results. Both a request-level exception and a body-level
+    error now come back the same way — {"error": ...} — so callers can
+    retry instead of quietly giving up."""
+    try:
+        r = await client.get(SerpTool.BASE, params=params)
+        r.raise_for_status()
+        data = r.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        return {"error": str(exc)}
+    if data.get("error"):
+        return {"error": data["error"]}
+    return data
+
+
 class SerpTool:
     BASE = "https://serpapi.com/search"
 
@@ -39,15 +60,16 @@ class SerpTool:
         if not settings.SERP_API_KEY:
             return [{"error": "SERP_API_KEY not set"}]
         async with httpx.AsyncClient(timeout=15) as client:
-            r = await client.get(self.BASE, params={
+            data = await _serp_get(client, {
                 "q": query, "api_key": settings.SERP_API_KEY,
                 "num": num, "output": "json",
             })
-            data = r.json()
-            return [
-                {"title": r.get("title"), "link": r.get("link"), "snippet": r.get("snippet")}
-                for r in data.get("organic_results", [])
-            ]
+        if data.get("error"):
+            return [{"error": data["error"]}]
+        return [
+            {"title": r.get("title"), "link": r.get("link"), "snippet": r.get("snippet")}
+            for r in data.get("organic_results", [])
+        ]
 
     async def search_full(self, query: str, num: int = 5) -> dict:
         """Like search(), but also returns Google's own AI Overview when
@@ -60,11 +82,12 @@ class SerpTool:
         if not settings.SERP_API_KEY:
             return {"error": "SERP_API_KEY not set"}
         async with httpx.AsyncClient(timeout=15) as client:
-            r = await client.get(self.BASE, params={
+            data = await _serp_get(client, {
                 "q": query, "api_key": settings.SERP_API_KEY,
                 "num": num, "output": "json",
             })
-            data = r.json()
+        if data.get("error"):
+            return {"error": data["error"]}
 
         results = [
             {"title": o.get("title"), "link": o.get("link"), "snippet": o.get("snippet")}
@@ -82,12 +105,13 @@ class SerpTool:
         if not settings.SERP_API_KEY:
             return []
         async with httpx.AsyncClient(timeout=15) as client:
-            r = await client.get(self.BASE, params={
+            data = await _serp_get(client, {
                 "q": query, "api_key": settings.SERP_API_KEY,
                 "tbm": "nws", "output": "json",
             })
-            data = r.json()
-            return [
-                {"title": r.get("title"), "link": r.get("link"), "date": r.get("date")}
-                for r in data.get("news_results", [])
-            ]
+        if data.get("error"):
+            return []
+        return [
+            {"title": r.get("title"), "link": r.get("link"), "date": r.get("date")}
+            for r in data.get("news_results", [])
+        ]

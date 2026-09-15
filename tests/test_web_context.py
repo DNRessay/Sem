@@ -88,6 +88,42 @@ async def test_run_web_intent_search_wraps_results(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_web_intent_search_retries_once_and_recovers(monkeypatch):
+    """A SerpAPI rate-limit/network hiccup on the first attempt shouldn't
+    end the search — the identical call succeeding a moment later is the
+    common case (this exact pattern happened live: a weather search failed
+    once, then worked immediately on the next identical request)."""
+    calls = []
+
+    class FakeRegistry:
+        async def execute(self, tool_name, args):
+            calls.append(tool_name)
+            if len(calls) == 1:
+                return {"error": "rate limited"}
+            return {"results": [{"title": "A", "snippet": "B", "link": "https://a.example"}], "ai_overview": None}
+
+    monkeypatch.setattr("pipeline.web_context.get_registry", lambda: FakeRegistry())
+    result = await run_web_intent("search", "some query")
+    assert len(calls) == 2
+    assert "<web_search>" in result
+
+
+@pytest.mark.asyncio
+async def test_run_web_intent_search_gives_up_after_two_failures(monkeypatch):
+    calls = []
+
+    class FakeRegistry:
+        async def execute(self, tool_name, args):
+            calls.append(tool_name)
+            return {"error": "rate limited"}
+
+    monkeypatch.setattr("pipeline.web_context.get_registry", lambda: FakeRegistry())
+    result = await run_web_intent("search", "some query")
+    assert len(calls) == 2
+    assert result == ""
+
+
+@pytest.mark.asyncio
 async def test_run_web_intent_search_empty_on_missing_key(monkeypatch):
     class FakeRegistry:
         async def execute(self, tool_name, args):
@@ -158,7 +194,7 @@ def test_news_topic_keeps_the_actual_subject():
 async def test_run_web_intent_news_wraps_results(monkeypatch):
     class FakeRegistry:
         async def execute(self, tool_name, args):
-            assert tool_name == "web_news"
+            assert tool_name == "news_tool"
             return [{"title": "A", "source": "News24", "date": "1 hour ago", "link": "https://a.example"}]
 
     monkeypatch.setattr("pipeline.web_context.get_registry", lambda: FakeRegistry())
@@ -179,6 +215,23 @@ async def test_run_web_intent_news_passes_extracted_topic_not_raw_sentence(monke
     monkeypatch.setattr("pipeline.web_context.get_registry", lambda: FakeRegistry())
     await run_web_intent("news", "news about load shedding")
     assert captured["args"] == {"topic": "load shedding"}
+
+
+@pytest.mark.asyncio
+async def test_run_web_intent_news_retries_once_and_recovers(monkeypatch):
+    calls = []
+
+    class FakeRegistry:
+        async def execute(self, tool_name, args):
+            calls.append(tool_name)
+            if len(calls) == 1:
+                return [{"error": "rate limited"}]
+            return [{"title": "A", "source": "News24", "date": "1 hour ago", "link": "https://a.example"}]
+
+    monkeypatch.setattr("pipeline.web_context.get_registry", lambda: FakeRegistry())
+    result = await run_web_intent("news", "what's on the latest news")
+    assert calls == ["news_tool", "news_tool"]
+    assert "News24" in result
 
 
 @pytest.mark.asyncio

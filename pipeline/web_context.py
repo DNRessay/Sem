@@ -84,7 +84,15 @@ async def _personalized_topic(session_id: str) -> str | None:
 
 
 async def _fetch_news(registry, topic: str) -> str:
-    result = await registry.execute("web_news", {"topic": topic})
+    # Was calling the "web_news" tool (SerpTool.news, which takes a `query`
+    # kwarg) with a {"topic": ...} dict — ToolsRegistry.execute's TypeError
+    # fallback then called the handler with that whole dict as a single
+    # positional arg, sending SerpAPI a garbled q={"topic": "..."} instead
+    # of the actual topic string. That's why news answers came back
+    # off-topic (a skating magazine, a stale timeline) rather than erroring
+    # outright — the call "succeeded", just on garbage input. "news_tool"
+    # (NewsTool.latest) is the tool actually registered to take `topic`.
+    result = await registry.execute("news_tool", {"topic": topic})
     # ToolsRegistry.execute catches any exception the tool itself raises
     # (a SerpAPI quota/network failure, not just "no key configured") and
     # returns a plain {"error": ...} dict — NewsTool's own success/no-key
@@ -93,7 +101,14 @@ async def _fetch_news(registry, topic: str) -> str:
     # client. Anything that isn't the expected list shape is just "no news
     # this time", same as any other failure here.
     if not isinstance(result, list) or not result or result[0].get("error"):
-        return ""
+        # One retry — a SerpAPI rate-limit/network hiccup is common enough
+        # that the identical call succeeding a moment later is the normal
+        # case, not "genuinely no news" (this exact pattern showed up live:
+        # "what's the weather" failed once, then worked immediately on the
+        # very next identical request).
+        result = await registry.execute("news_tool", {"topic": topic})
+        if not isinstance(result, list) or not result or result[0].get("error"):
+            return ""
     lines = [f"- {r.get('title')} ({r.get('source')}, {r.get('date')}): {r.get('link')}" for r in result[:5]]
     return f'<web_news topic="{topic}">\n' + "\n".join(lines) + "\n</web_news>"
 
@@ -108,7 +123,12 @@ async def _fetch_search(registry, query: str) -> str:
     without any AI involved."""
     result = await registry.execute("web_search_full", {"query": query, "num": 5})
     if not result or result.get("error"):
-        return ""
+        # One retry, same reasoning as _fetch_news above — a transient
+        # upstream failure recovering on the very next identical call is
+        # the common case here, not a real "no results."
+        result = await registry.execute("web_search_full", {"query": query, "num": 5})
+        if not result or result.get("error"):
+            return ""
     blocks = []
     if result.get("answer_box"):
         blocks.append(f'<google_answer query="{query}">\n{result["answer_box"]}\n</google_answer>')

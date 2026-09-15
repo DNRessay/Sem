@@ -131,3 +131,34 @@ async def test_search_full_answer_box_is_none_when_absent(monkeypatch):
         result = await SerpTool().search_full("test query")
 
     assert result["answer_box"] is None
+
+
+@pytest.mark.asyncio
+async def test_search_full_surfaces_a_body_level_error_instead_of_looking_empty(monkeypatch):
+    """SerpAPI returns rate-limit/quota failures as HTTP 200 with an
+    `error` field in the body, not as a non-200 status — left unchecked,
+    that looked exactly like a real "no results," so a caller had no way
+    to distinguish "the call failed, retry" from "nothing found" and just
+    silently reported no results."""
+    from config import settings
+    monkeypatch.setattr(settings, "SERP_API_KEY", "fake_key")
+
+    with respx.mock:
+        respx.get("https://serpapi.com/search").mock(
+            return_value=httpx.Response(200, json={"error": "Your account has run out of searches."})
+        )
+        result = await SerpTool().search_full("test query")
+
+    assert result == {"error": "Your account has run out of searches."}
+
+
+@pytest.mark.asyncio
+async def test_search_full_surfaces_a_network_failure_instead_of_raising(monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "SERP_API_KEY", "fake_key")
+
+    with respx.mock:
+        respx.get("https://serpapi.com/search").mock(side_effect=httpx.ConnectError("connection reset"))
+        result = await SerpTool().search_full("test query")
+
+    assert "error" in result
