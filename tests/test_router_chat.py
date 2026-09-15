@@ -33,6 +33,24 @@ def client(monkeypatch):
     app.dependency_overrides.pop(require_account, None)
 
 
+def test_chat_with_no_message_and_no_attachments_returns_400(client):
+    resp = client.post("/chat", json={"message": "", "session_id": "sess1"})
+    assert resp.status_code == 400
+
+
+def test_chat_with_an_attachment_and_no_typed_message_still_succeeds(client):
+    """Attaching a file with no typed comment ("here's a PDF, look at it")
+    used to 400 with "message required" even though the attachment alone
+    gives the model plenty to respond to — a real user hit this exact
+    case."""
+    resp = client.post("/chat", json={
+        "message": "",
+        "session_id": "sess1",
+        "attachments": [{"name": "notes.txt", "content": "some file content"}],
+    })
+    assert resp.status_code == 200
+
+
 def test_url_shaped_text_inside_an_attachment_does_not_trigger_a_fetch(client, monkeypatch):
     """A regex literal like https://[a-zA-Z0-9.-]*\\.on\\.aws sitting inside an
     attached file (a workflow script, a README example, anything) used to get

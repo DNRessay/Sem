@@ -149,8 +149,16 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
     attachments = body.get("attachments", [])
     web_search_enabled = body.get("web_search_enabled", True)
 
-    if not raw_msg:
+    if not raw_msg and not attachments:
         raise HTTPException(400, "message required")
+    # Attaching a file with no typed comment ("here's a PDF, look at it") is
+    # reasonable and common — only reject a genuinely empty request. A
+    # placeholder here (rather than leaving raw_msg "") keeps every
+    # downstream consumer (intent detection, chat history display, title
+    # generation) working the same as any other message, with no
+    # empty-string special-casing needed elsewhere.
+    if not raw_msg:
+        raw_msg = "Please review the attached file(s)."
 
     images = [a for a in attachments if _is_image(a)]
     text_attachments = [a for a in attachments if not _is_image(a)]
