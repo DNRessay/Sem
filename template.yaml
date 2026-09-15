@@ -41,6 +41,20 @@ Parameters:
     Type: String
     NoEcho: true
     Default: ""
+  WhatsappToken:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Meta Graph API access token for the WhatsApp Business Cloud API (outbound sends)
+  WhatsappPhoneId:
+    Type: String
+    Default: ""
+    Description: WhatsApp Business phone number ID, from the Meta App Dashboard
+  WhatsappVerifyToken:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Arbitrary string also entered in the Meta App Dashboard's webhook Verify Token field
   OpenclawUrl:
     Type: String
     Default: ""
@@ -91,6 +105,9 @@ Globals:
         CACHE_TABLE_NAME: !Ref CacheTable
         SECRET_KEY: !Ref SecretKey
         SERP_API_KEY: !Ref SerpApiKey
+        WHATSAPP_TOKEN: !Ref WhatsappToken
+        WHATSAPP_PHONE_ID: !Ref WhatsappPhoneId
+        WHATSAPP_VERIFY_TOKEN: !Ref WhatsappVerifyToken
         OPENCLAW_URL: !Ref OpenclawUrl
         GITHUB_CLIENT_ID: !Ref GithubClientId
         GITHUB_CLIENT_SECRET: !Ref GithubClientSecret

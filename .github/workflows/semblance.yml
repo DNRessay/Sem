@@ -90,6 +90,9 @@ jobs:
           MODAL_REPO_SECRET: ${{ secrets.MODAL_REPO_SECRET }}
           SEMBLANCE_SECRET_KEY: ${{ secrets.SEMBLANCE_SECRET_KEY }}
           SERP_API_KEY: ${{ secrets.SERP_API_KEY }}
+          WHATSAPP_TOKEN: ${{ secrets.WHATSAPP_TOKEN }}
+          WHATSAPP_PHONE_ID: ${{ secrets.WHATSAPP_PHONE_ID }}
+          WHATSAPP_VERIFY_TOKEN: ${{ secrets.WHATSAPP_VERIFY_TOKEN }}
           OPENCLAW_URL: ${{ secrets.OPENCLAW_URL }}
           # Secret name can't start with GITHUB_ — GitHub Actions reserves
           # that prefix for its own built-in secrets and refuses to save one.
@@ -114,6 +117,9 @@ jobs:
           modal_repo_secret=$(printf '%s' "$MODAL_REPO_SECRET" | tr -d '\r\n')
           secret_key=$(printf '%s' "$SEMBLANCE_SECRET_KEY" | tr -d '\r\n')
           serp_api_key=$(printf '%s' "$SERP_API_KEY" | tr -d '\r\n')
+          whatsapp_token=$(printf '%s' "$WHATSAPP_TOKEN" | tr -d '\r\n')
+          whatsapp_phone_id=$(printf '%s' "$WHATSAPP_PHONE_ID" | tr -d '\r\n')
+          whatsapp_verify_token=$(printf '%s' "$WHATSAPP_VERIFY_TOKEN" | tr -d '\r\n')
           openclaw_url=$(printf '%s' "$OPENCLAW_URL" | tr -d '\r\n')
           github_oauth_client_id=$(printf '%s' "$GH_OAUTH_CLIENT_ID" | tr -d '\r\n')
           github_oauth_client_secret=$(printf '%s' "$GH_OAUTH_CLIENT_SECRET" | tr -d '\r\n')
@@ -148,6 +154,9 @@ jobs:
           [ -n "$modal_repo_url" ] && params+=("ModalRepoUrl=${modal_repo_url}")
           [ -n "$modal_repo_secret" ] && params+=("ModalRepoSecret=${modal_repo_secret}")
           [ -n "$serp_api_key" ] && params+=("SerpApiKey=${serp_api_key}")
+          [ -n "$whatsapp_token" ] && params+=("WhatsappToken=${whatsapp_token}")
+          [ -n "$whatsapp_phone_id" ] && params+=("WhatsappPhoneId=${whatsapp_phone_id}")
+          [ -n "$whatsapp_verify_token" ] && params+=("WhatsappVerifyToken=${whatsapp_verify_token}")
           [ -n "$openclaw_url" ] && params+=("OpenclawUrl=${openclaw_url}")
           [ -n "$github_oauth_client_id" ] && params+=("GithubClientId=${github_oauth_client_id}")
           [ -n "$github_oauth_client_secret" ] && params+=("GithubClientSecret=${github_oauth_client_secret}")
