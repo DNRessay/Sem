@@ -176,6 +176,7 @@ def _bootstrap_registry(reg: ToolsRegistry):
     from tools.misc.calendar_tool import CalendarTool
     from tools.misc.whatsapp_tool import WhatsAppTool
     from tools.repo_tool import RepoTool
+    from tools.repo_write_tool import RepoWriteTool
     from tools.web.fetch_tool import FetchTool
     from tools.web.news_tool import NewsTool
     from tools.web.serp_tool import SerpTool
@@ -190,6 +191,7 @@ def _bootstrap_registry(reg: ToolsRegistry):
     calendar = CalendarTool()
     whatsapp = WhatsAppTool()
     repo    = RepoTool()
+    repo_write = RepoWriteTool()
 
     reg.register("web_search",   serp.search,    {"query": "string", "num": "int"},       "AUTO",        "Google search via SerpAPI")
     reg.register("web_search_full", serp.search_full, {"query": "string", "num": "int"}, "AUTO",         "Google search + AI Overview (one call) via SerpAPI")
@@ -204,3 +206,13 @@ def _bootstrap_registry(reg: ToolsRegistry):
     reg.register("repo_clone",   repo.clone_or_pull, {"provider": "string", "repo": "string", "ref": "string"}, "AUTO", "Clone or pull a repo onto a persistent Modal-hosted clone")
     reg.register("repo_read",    repo.read_file, {"provider": "string", "repo": "string", "path": "string"}, "AUTO", "Read one file from a persistently cloned repo")
     reg.register("repo_grep",    repo.grep,      {"provider": "string", "repo": "string", "term": "string"}, "AUTO", "Search a persistently cloned repo for a term")
+    reg.register(
+        "propose_fix", repo_write.propose_fix,
+        {
+            "provider": "string", "repo": "string", "token": "string", "level": "string",
+            "slug": "string", "files": "dict", "commit_message": "string",
+            "pr_title": "string", "pr_body": "string", "base_branch": "string",
+        },
+        "AUTO",
+        "Branch + commit (with a SemVer VERSION bump) + open a PR for a validated fix — never touches the default branch, a human reviews via the PR",
+    )

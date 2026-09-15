@@ -10,6 +10,7 @@ def test_get_registry_bootstraps_without_crashing():
     assert "bash" in names
     assert "calendar" in names
     assert "whatsapp" in names
+    assert "propose_fix" in names
 
 
 def test_execute_unknown_tool_returns_error_not_exception():
