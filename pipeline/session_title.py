@@ -11,9 +11,15 @@ async def generate_title(user_msg: str, reply: str) -> str:
     even a title generation call needs to stay cheap. Returns "" on any
     failure so a title-generation hiccup never breaks the actual reply."""
     prompt = (
-        "Summarize this exchange as a short chat title: 3-6 words, no "
-        "quotes, no trailing punctuation, no preamble — reply with just "
-        "the title itself.\n\n"
+        "Write a short chat title for this exchange: 3-6 words, no quotes, "
+        "no trailing punctuation, no preamble — reply with just the title "
+        "itself. Name the actual specific thing being discussed (a real "
+        "feature, file, bug, tool, or decision mentioned below) — never a "
+        "generic category like 'coding help', 'general chat', or "
+        "'question about app'. If the assistant's reply reports a concrete "
+        "outcome (fixed/failed/broken/working/deployed), reflect that "
+        "outcome in the title so it's distinguishable from a chat that's "
+        "still in progress on the same topic.\n\n"
         f"User: {user_msg[:300]}\nAssistant: {reply[:300]}"
     )
     try:

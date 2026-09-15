@@ -574,3 +574,62 @@ def test_status_endpoint_returns_no_event_for_a_quiet_session(client, monkeypatc
     resp = client.get("/status/sess1")
     assert resp.status_code == 200
     assert resp.json()["event"] is None
+
+
+def test_delete_session_endpoint_calls_db_delete(client, monkeypatch):
+    calls = []
+
+    class RecordingStore:
+        async def delete_session(self, session_id):
+            calls.append(session_id)
+
+    async def fake_get_store():
+        return RecordingStore()
+
+    monkeypatch.setattr("gateway.router.get_store", fake_get_store)
+
+    resp = client.delete("/sessions/sess1")
+    assert resp.status_code == 200
+    assert resp.json() == {"session_id": "sess1", "deleted": True}
+    assert calls == ["sess1"]
+
+
+def test_rename_session_endpoint_sets_title(client, monkeypatch):
+    calls = []
+
+    class RecordingStore:
+        async def set_session_title(self, session_id, title):
+            calls.append((session_id, title))
+
+    async def fake_get_store():
+        return RecordingStore()
+
+    monkeypatch.setattr("gateway.router.get_store", fake_get_store)
+
+    resp = client.patch("/sessions/sess1", json={"title": "Fixed the buddy XP bug"})
+    assert resp.status_code == 200
+    assert resp.json() == {"session_id": "sess1", "title": "Fixed the buddy XP bug"}
+    assert calls == [("sess1", "Fixed the buddy XP bug")]
+
+
+def test_rename_session_endpoint_requires_a_nonempty_title(client, monkeypatch):
+    resp = client.patch("/sessions/sess1", json={"title": "   "})
+    assert resp.status_code == 400
+
+
+def test_rename_session_endpoint_truncates_long_titles(client, monkeypatch):
+    calls = []
+
+    class RecordingStore:
+        async def set_session_title(self, session_id, title):
+            calls.append(title)
+
+    async def fake_get_store():
+        return RecordingStore()
+
+    monkeypatch.setattr("gateway.router.get_store", fake_get_store)
+
+    resp = client.patch("/sessions/sess1", json={"title": "x" * 200})
+    assert resp.status_code == 200
+    assert len(resp.json()["title"]) == 80
+    assert len(calls[0]) == 80

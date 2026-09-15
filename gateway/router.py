@@ -432,6 +432,24 @@ async def history(session_id: str, _account: dict = Depends(require_account)):
     }
 
 
+@router.delete("/sessions/{session_id}")
+async def delete_session(session_id: str, _account: dict = Depends(require_account)):
+    db = await get_store()
+    await db.delete_session(session_id)
+    return {"session_id": session_id, "deleted": True}
+
+
+@router.patch("/sessions/{session_id}")
+async def rename_session(session_id: str, request: Request, _account: dict = Depends(require_account)):
+    body = await request.json()
+    title = (body.get("title") or "").strip()
+    if not title:
+        raise HTTPException(400, "title required")
+    db = await get_store()
+    await db.set_session_title(session_id, title[:80])
+    return {"session_id": session_id, "title": title[:80]}
+
+
 @router.get("/health")
 async def health():
     return {"status": "ok", "version": "semblance-v9"}

@@ -103,3 +103,29 @@ async def test_sync_repo_skills_does_nothing_when_no_skill_files_exist(monkeypat
     await store._sync_repo_skills()
 
     assert calls == []
+
+
+class _RecordingTxnConn:
+    def __init__(self):
+        self.executed: list[tuple] = []
+
+    async def execute(self, query, *args):
+        self.executed.append((query, args))
+
+    def transaction(self):
+        return _FakeAcquire(self)  # a no-op async context manager is enough here
+
+
+@pytest.mark.asyncio
+async def test_delete_session_removes_conversations_title_and_memories():
+    conn = _RecordingTxnConn()
+    store = NeonStore()
+    store._pool = _FakePool.__new__(_FakePool)
+    store._pool._conn = conn
+    store._pool.acquire = lambda: _FakeAcquire(conn)
+
+    await store.delete_session("sess1")
+
+    tables_touched = [q.split("FROM")[1].split()[0] for q, _ in conn.executed]
+    assert tables_touched == ["conversations", "session_titles", "memories"]
+    assert all(args == ("sess1",) for _, args in conn.executed)

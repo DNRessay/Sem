@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
-import AgentFeed from "./AgentFeed";
+import SessionMenu from "./SessionMenu";
 
 const API = import.meta.env.VITE_API_URL || "";
+const RECENT_LIMIT = 5;
 
 function timeAgo(unixSeconds) {
     const diff = Date.now() / 1000 - unixSeconds;
@@ -11,10 +12,9 @@ function timeAgo(unixSeconds) {
     return `${Math.floor(diff / 86400)}d ago`;
 }
 
-export default function Drawer({ open, onClose, currentSessionId, onNewChat, onOpenSession, token, onLogout }) {
+export default function Drawer({ open, onClose, currentSessionId, onNewChat, onOpenSession, token, onLogout, onViewAllChats, onSessionRenamed, onSessionDeleted }) {
     const [sessions, setSessions] = useState([]);
     const [loading, setLoading] = useState(false);
-    const [showFeed, setShowFeed] = useState(false);
 
     const authHeaders = { Authorization: `Bearer ${token}` };
 
@@ -40,6 +40,16 @@ export default function Drawer({ open, onClose, currentSessionId, onNewChat, onO
         } catch {
             onOpenSession(id, [], "");
         }
+    };
+
+    const handleRenamed = (id, title) => {
+        setSessions(s => s.map(x => (x.session_id === id ? { ...x, title } : x)));
+        onSessionRenamed(id, title);
+    };
+
+    const handleDeleted = (id) => {
+        setSessions(s => s.filter(x => x.session_id !== id));
+        onSessionDeleted(id);
     };
 
     return (
@@ -81,29 +91,34 @@ export default function Drawer({ open, onClose, currentSessionId, onNewChat, onO
                     {!loading && sessions.length === 0 && (
                         <div style={{ color: "var(--text-muted)", fontSize: "13px" }}>No past chats yet</div>
                     )}
-                    {sessions.map(s => (
-                        <button
+                    {sessions.slice(0, RECENT_LIMIT).map(s => (
+                        <div
                             key={s.session_id}
                             onClick={() => openSession(s.session_id)}
                             style={{
-                                display: "block", width: "100%", textAlign: "left", background: s.session_id === currentSessionId ? "var(--surface)" : "none",
-                                border: "none", borderRadius: "8px", padding: "8px 8px", marginBottom: "2px", cursor: "pointer",
+                                display: "flex", alignItems: "center", justifyContent: "space-between",
+                                background: s.session_id === currentSessionId ? "var(--surface)" : "none",
+                                borderRadius: "8px", padding: "8px 8px", marginBottom: "2px", cursor: "pointer",
                             }}
                         >
-                            <div style={{ color: "var(--text)", fontSize: "13px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                {s.title || s.preview || s.session_id}
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                                <div style={{ color: "var(--text)", fontSize: "13px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                    {s.title || s.preview || s.session_id}
+                                </div>
+                                <div style={{ color: "var(--text-muted)", fontSize: "11px" }}>{timeAgo(s.last_at)}</div>
                             </div>
-                            <div style={{ color: "var(--text-muted)", fontSize: "11px" }}>{timeAgo(s.last_at)}</div>
-                        </button>
+                            <SessionMenu session={s} token={token} onRenamed={handleRenamed} onDeleted={handleDeleted} onLogout={onLogout} />
+                        </div>
                     ))}
 
-                    <button
-                        onClick={() => setShowFeed(v => !v)}
-                        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", background: "none", border: "none", color: "var(--text-muted)", fontSize: "11px", fontWeight: "600", letterSpacing: "1px", margin: "16px 0 8px", padding: 0, cursor: "pointer" }}
-                    >
-                        AGENT FEED <span>{showFeed ? "▾" : "▸"}</span>
-                    </button>
-                    {showFeed && <AgentFeed sessionId={currentSessionId} token={token} />}
+                    {sessions.length > 0 && (
+                        <button
+                            onClick={onViewAllChats}
+                            style={{ width: "100%", textAlign: "left", background: "none", border: "none", color: "var(--text-muted)", fontSize: "12px", fontWeight: "600", padding: "10px 8px", cursor: "pointer" }}
+                        >
+                            View all chats →
+                        </button>
+                    )}
                 </div>
 
                 <button

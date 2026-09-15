@@ -352,6 +352,20 @@ class NeonStore:
             )
             return [dict(r) for r in rows]
 
+    async def delete_session(self, session_id: str):
+        """Removes a session's chat history entirely — conversations,
+        title, and its embedded memories. Deliberately leaves session_repos/
+        plans/buddies/agent_events alone: those are keyed the same way but
+        represent separate state (an attached repo, an in-progress plan, a
+        buddy) a user deleting a chat transcript likely doesn't mean to
+        wipe too, and none of them are shown anywhere the deleted session
+        would still be visible."""
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("DELETE FROM conversations WHERE session_id=$1", session_id)
+                await conn.execute("DELETE FROM session_titles WHERE session_id=$1", session_id)
+                await conn.execute("DELETE FROM memories WHERE session_id=$1", session_id)
+
     async def get_conversation(self, session_id: str, limit: int = 200) -> list[dict]:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(

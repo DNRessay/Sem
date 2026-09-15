@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import ChatWindow from "./components/ChatWindow";
 import StatusBar from "./components/StatusBar";
 import Drawer from "./components/Drawer";
+import AgentFeedPanel from "./components/AgentFeedPanel";
+import AllChatsPage from "./components/AllChatsPage";
 import Login from "./components/Login";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { turnsToHistory } from "./utils/toolMarker";
@@ -26,6 +28,8 @@ export default function App() {
     const [initialHistory, setInitialHistory] = useState([]);
     const [sessionTitle, setSessionTitle] = useState("");
     const [menuOpen, setMenuOpen] = useState(false);
+    const [agentFeedOpen, setAgentFeedOpen] = useState(false);
+    const [view, setView] = useState("chat"); // "chat" | "allChats"
     const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || "");
     const [restoring, setRestoring] = useState(true);
     const sessionIdRef = useRef(sessionId);
@@ -82,6 +86,7 @@ export default function App() {
         setInitialHistory(turnsToHistory(turns));
         setSessionTitle(title || "");
         setMenuOpen(false);
+        setView("chat");
         setRestoring(false);
     };
 
@@ -90,6 +95,17 @@ export default function App() {
     // switched sessions shouldn't overwrite what's on screen.
     const handleTitle = (id, title) => {
         if (id === sessionIdRef.current) setSessionTitle(title);
+    };
+
+    // A rename/delete can happen to the session currently on screen (from
+    // either Drawer's recent-5 list or the full AllChatsPage) — this keeps
+    // the header and chat area in sync with whatever the list did.
+    const handleSessionRenamed = (id, title) => {
+        if (id === sessionIdRef.current) setSessionTitle(title);
+    };
+
+    const handleSessionDeleted = (id) => {
+        if (id === sessionIdRef.current) startNewChat();
     };
 
     if (!token) {
@@ -102,7 +118,14 @@ export default function App() {
 
     return (
         <div className="app-shell" style={{ display: "flex", flexDirection: "column", background: "var(--bg)" }}>
-            <StatusBar sessionId={sessionId} title={sessionTitle} streaming={streaming} onMenu={() => setMenuOpen(true)} onTitleClick={startNewChat} />
+            <StatusBar
+                sessionId={sessionId}
+                title={sessionTitle}
+                streaming={streaming}
+                onMenu={() => setMenuOpen(true)}
+                onTitleClick={startNewChat}
+                onFeed={() => setAgentFeedOpen(true)}
+            />
             <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
                 {!restoring && (
                     <ErrorBoundary key={sessionId}>
@@ -126,7 +149,27 @@ export default function App() {
                 onOpenSession={openSession}
                 token={token}
                 onLogout={logout}
+                onViewAllChats={() => { setMenuOpen(false); setView("allChats"); }}
+                onSessionRenamed={handleSessionRenamed}
+                onSessionDeleted={handleSessionDeleted}
             />
+            <AgentFeedPanel
+                open={agentFeedOpen}
+                onClose={() => setAgentFeedOpen(false)}
+                sessionId={sessionId}
+                token={token}
+            />
+            {view === "allChats" && (
+                <AllChatsPage
+                    token={token}
+                    currentSessionId={sessionId}
+                    onOpenSession={openSession}
+                    onBack={() => setView("chat")}
+                    onLogout={logout}
+                    onSessionRenamed={handleSessionRenamed}
+                    onSessionDeleted={handleSessionDeleted}
+                />
+            )}
         </div>
     );
 }
