@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     SERP_API_KEY: str = ""
     WHATSAPP_TOKEN: str = ""
     WHATSAPP_PHONE_ID: str = ""
+    WHATSAPP_VERIFY_TOKEN: str = ""  # arbitrary string you also enter in the Meta App Dashboard webhook config
     GOOGLE_CALENDAR_CREDS: str = "./creds/google.json"
     OPENCLAW_URL: str = ""  # optional self-hosted WhatsApp/Telegram/Slack bridge
 
