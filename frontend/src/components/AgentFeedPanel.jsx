@@ -5,7 +5,7 @@ import AgentFeed from "./AgentFeed";
 // the top-right) rather than a full-height side menu — this is a live
 // activity readout you glance at, not a navigation surface, so it
 // shouldn't compete with or block the chat underneath it.
-export default function AgentFeedPanel({ open, onClose, sessionId, token }) {
+export default function AgentFeedPanel({ open, onClose, events }) {
     return (
         <>
             <div
@@ -31,7 +31,7 @@ export default function AgentFeedPanel({ open, onClose, sessionId, token }) {
                     <button onClick={onClose} aria-label="Close agent feed" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "16px", color: "var(--text-muted)" }}>✕</button>
                 </div>
                 <div style={{ flex: 1, overflowY: "auto", padding: "10px 14px" }}>
-                    <AgentFeed sessionId={sessionId} token={token} />
+                    <AgentFeed events={events} />
                 </div>
             </div>
         </>

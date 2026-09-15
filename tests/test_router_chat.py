@@ -13,6 +13,15 @@ class FakeBootstrap:
         yield "ok"
 
 
+class _NoopStore:
+    """Minimal store double for tests that only need get_store() to resolve
+    to something — a blocked/failed tool branch now always logs an agent
+    event, even when nothing else in the test cares about persistence."""
+
+    async def save_agent_event(self, session_id, agent, action):
+        pass
+
+
 @pytest.fixture
 def client(monkeypatch):
     app.dependency_overrides[require_account] = lambda: {"account_id": "owner", "role": "owner"}
@@ -87,7 +96,11 @@ def test_a_url_the_user_actually_typed_still_triggers_a_fetch(client, monkeypatc
         calls.append((kind, target))
         return ""
 
+    async def fake_get_store():
+        return _NoopStore()
+
     monkeypatch.setattr("gateway.router.run_web_intent", fake_run_web_intent)
+    monkeypatch.setattr("gateway.router.get_store", fake_get_store)
 
     resp = client.post("/chat", json={
         "message": "check out https://example.com/page",
@@ -104,7 +117,11 @@ def test_web_search_enabled_defaults_to_true_when_omitted(client, monkeypatch):
         calls.append((kind, target))
         return ""
 
+    async def fake_get_store():
+        return _NoopStore()
+
     monkeypatch.setattr("gateway.router.run_web_intent", fake_run_web_intent)
+    monkeypatch.setattr("gateway.router.get_store", fake_get_store)
 
     resp = client.post("/chat", json={"message": "check out https://example.com/page", "session_id": "sess1"})
     assert resp.status_code == 200
@@ -147,8 +164,12 @@ def test_repo_intent_takes_priority_over_web_intent(client, monkeypatch):
         repo_calls.append((target, session_id))
         return ""
 
+    async def fake_get_store():
+        return _NoopStore()
+
     monkeypatch.setattr("gateway.router.run_web_intent", fake_run_web_intent)
     monkeypatch.setattr("gateway.router.run_repo_intent", fake_run_repo_intent)
+    monkeypatch.setattr("gateway.router.get_store", fake_get_store)
 
     resp = client.post("/chat", json={
         "message": "search the repo for save_turn",
@@ -181,6 +202,9 @@ def test_readme_question_bypasses_the_llm_and_streams_the_raw_file(client, monke
         async def save_memory(self, session_id, content, salience=0.5, embedding=None):
             self.memories.append((session_id, content))
 
+        async def save_agent_event(self, session_id, agent, action):
+            pass
+
     store = RecordingStore()
 
     async def fake_get_store():
@@ -207,7 +231,11 @@ def test_repo_read_falls_back_to_normal_flow_when_fetch_fails(client, monkeypatc
     async def fake_fetch_repo_file_raw(target, session_id):
         return None
 
+    async def fake_get_store():
+        return _NoopStore()
+
     monkeypatch.setattr("gateway.router.fetch_repo_file_raw", fake_fetch_repo_file_raw)
+    monkeypatch.setattr("gateway.router.get_store", fake_get_store)
 
     resp = client.post("/chat", json={"message": "what's in the readme", "session_id": "sess1"})
     assert resp.status_code == 200
@@ -290,6 +318,9 @@ def test_plan_intent_bypasses_the_llm_and_streams_the_formatted_plan(client, mon
         async def save_memory(self, session_id, content, salience=0.5, embedding=None):
             self.memories.append((session_id, content))
 
+        async def save_agent_event(self, session_id, agent, action):
+            pass
+
     store = RecordingStore()
 
     async def fake_get_store():
@@ -337,6 +368,9 @@ def test_explore_code_intent_bypasses_the_llm_and_streams_the_matches(client, mo
         async def save_memory(self, session_id, content, salience=0.5, embedding=None):
             pass
 
+        async def save_agent_event(self, session_id, agent, action):
+            pass
+
     store = RecordingStore()
 
     async def fake_get_store():
@@ -366,8 +400,12 @@ def test_explore_code_intent_does_not_fire_on_repo_grep_phrasing(client, monkeyp
         repo_calls.append(target)
         return ""
 
+    async def fake_get_store():
+        return _NoopStore()
+
     monkeypatch.setattr("gateway.router.run_explore_intent", fake_run_explore_intent)
     monkeypatch.setattr("gateway.router.run_repo_intent", fake_run_repo_intent)
+    monkeypatch.setattr("gateway.router.get_store", fake_get_store)
 
     resp = client.post("/chat", json={"message": "search the codebase for TODO", "session_id": "sess1"})
     assert resp.status_code == 200
@@ -392,6 +430,9 @@ def test_guide_intent_bypasses_the_llm_and_streams_the_answer(client, monkeypatc
             self.turns.append((session_id, role, content))
 
         async def save_memory(self, session_id, content, salience=0.5, embedding=None):
+            pass
+
+        async def save_agent_event(self, session_id, agent, action):
             pass
 
     store = RecordingStore()
@@ -428,6 +469,9 @@ def test_buddy_intent_bypasses_the_llm_and_streams_the_status(client, monkeypatc
             self.turns.append((session_id, role, content))
 
         async def save_memory(self, session_id, content, salience=0.5, embedding=None):
+            pass
+
+        async def save_agent_event(self, session_id, agent, action):
             pass
 
     store = RecordingStore()
@@ -469,6 +513,9 @@ def test_memory_search_intent_bypasses_the_llm_and_streams_grounded_results(clie
         async def save_memory(self, session_id, content, salience=0.5, embedding=None):
             pass
 
+        async def save_agent_event(self, session_id, agent, action):
+            pass
+
     store = RecordingStore()
 
     async def fake_get_store():
@@ -503,6 +550,9 @@ def test_bash_intent_bypasses_the_llm_and_streams_the_command_output(client, mon
             self.turns.append((session_id, role, content))
 
         async def save_memory(self, session_id, content, salience=0.5, embedding=None):
+            pass
+
+        async def save_agent_event(self, session_id, agent, action):
             pass
 
     store = RecordingStore()
@@ -557,6 +607,9 @@ def test_continue_intent_bypasses_the_llm_and_advances_the_plan(client, monkeypa
         async def save_memory(self, session_id, content, salience=0.5, embedding=None):
             pass
 
+        async def save_agent_event(self, session_id, agent, action):
+            pass
+
     store = RecordingStore()
 
     async def fake_get_store():
@@ -586,6 +639,9 @@ def test_continue_intent_never_falls_back_to_the_normal_flow(client, monkeypatch
             pass
 
         async def save_memory(self, session_id, content, salience=0.5, embedding=None):
+            pass
+
+        async def save_agent_event(self, session_id, agent, action):
             pass
 
     async def fake_get_store():
@@ -631,6 +687,42 @@ def test_status_endpoint_returns_no_event_for_a_quiet_session(client, monkeypatc
     resp = client.get("/status/sess1")
     assert resp.status_code == 200
     assert resp.json()["event"] is None
+
+
+def test_status_events_endpoint_returns_events_since_a_cursor(client, monkeypatch):
+    class RecordingStore:
+        async def get_recent_agent_events(self, session_id, since_id=0, limit=30):
+            assert session_id == "sess1"
+            assert since_id == 5
+            assert limit == 30
+            return [{"id": 6, "agent": "web", "action": "ok:Searching web", "ts": 12345}]
+
+    async def fake_get_store():
+        return RecordingStore()
+
+    monkeypatch.setattr("gateway.router.get_store", fake_get_store)
+
+    resp = client.get("/status/sess1/events?since=5")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["session_id"] == "sess1"
+    assert body["events"] == [{"id": 6, "agent": "web", "action": "ok:Searching web", "ts": 12345}]
+
+
+def test_status_events_endpoint_defaults_since_to_zero(client, monkeypatch):
+    class RecordingStore:
+        async def get_recent_agent_events(self, session_id, since_id=0, limit=30):
+            assert since_id == 0
+            return []
+
+    async def fake_get_store():
+        return RecordingStore()
+
+    monkeypatch.setattr("gateway.router.get_store", fake_get_store)
+
+    resp = client.get("/status/sess1/events")
+    assert resp.status_code == 200
+    assert resp.json()["events"] == []
 
 
 def test_delete_session_endpoint_calls_db_delete(client, monkeypatch):

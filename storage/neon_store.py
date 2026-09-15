@@ -486,6 +486,22 @@ class NeonStore:
             )
             return dict(row) if row else None
 
+    async def get_recent_agent_events(self, session_id: str, since_id: int = 0, limit: int = 30) -> list[dict]:
+        """Every event for this session with id > since_id, oldest first —
+        what AgentFeed.jsx polls, unlike get_latest_agent_event's single
+        row, so a burst of several tool calls within one turn (a memory
+        search followed by a web search, say) doesn't lose all but the
+        last one to a 3s poll interval. Ordered by id (BIGSERIAL), not
+        created_at — that column is whole-second precision, so several
+        events landing in the same second can't be ordered by it alone."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, agent, action, created_at AS ts FROM agent_events "
+                "WHERE session_id=$1 AND id > $2 ORDER BY id ASC LIMIT $3",
+                session_id, since_id, limit,
+            )
+            return [dict(r) for r in rows]
+
     async def get_active_repo(self, session_id: str) -> dict | None:
         """The repo this session last cloned via "Add repo" — lets a
         follow-up question like "what's in the readme" resolve against a

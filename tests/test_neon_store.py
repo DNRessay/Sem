@@ -161,6 +161,26 @@ async def test_search_conversations_with_a_window_filters_by_cutoff():
 
 
 @pytest.mark.asyncio
+async def test_get_recent_agent_events_queries_by_id_not_timestamp():
+    """created_at is whole-second precision, so several events landing in
+    the same second can't be ordered by it alone — must page by id."""
+    rows = [{"id": 6, "agent": "web", "action": "ok:Searching web", "ts": 12345}]
+    conn = _FakeSearchConn(rows)
+    store = NeonStore()
+    store._pool = _FakePool.__new__(_FakePool)
+    store._pool._conn = conn
+    store._pool.acquire = lambda: _FakeAcquire(conn)
+
+    result = await store.get_recent_agent_events("sess1", since_id=5, limit=30)
+
+    assert result == rows
+    query, args = conn.queries[0]
+    assert args == ("sess1", 5, 30)
+    assert "id >" in query
+    assert "ORDER BY id ASC" in query
+
+
+@pytest.mark.asyncio
 async def test_delete_session_removes_conversations_title_and_memories():
     conn = _RecordingTxnConn()
     store = NeonStore()

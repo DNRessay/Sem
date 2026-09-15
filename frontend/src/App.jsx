@@ -7,6 +7,7 @@ import AllChatsPage from "./components/AllChatsPage";
 import Login from "./components/Login";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { turnsToHistory } from "./utils/toolMarker";
+import useAgentFeed from "./hooks/useAgentFeed";
 
 const API = import.meta.env.VITE_API_URL || "";
 const TOKEN_KEY = "semblance_token";
@@ -33,6 +34,7 @@ export default function App() {
     const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || "");
     const [restoring, setRestoring] = useState(true);
     const sessionIdRef = useRef(sessionId);
+    const { events: agentEvents, hasError: agentHasError, acknowledgeErrors } = useAgentFeed(sessionId, token);
 
     useEffect(() => {
         sessionIdRef.current = sessionId;
@@ -124,7 +126,8 @@ export default function App() {
                 streaming={streaming}
                 onMenu={() => setMenuOpen(true)}
                 onTitleClick={startNewChat}
-                onFeed={() => setAgentFeedOpen(true)}
+                onFeed={() => { setAgentFeedOpen(true); acknowledgeErrors(); }}
+                hasError={agentHasError}
             />
             <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
                 {!restoring && (
@@ -156,8 +159,7 @@ export default function App() {
             <AgentFeedPanel
                 open={agentFeedOpen}
                 onClose={() => setAgentFeedOpen(false)}
-                sessionId={sessionId}
-                token={token}
+                events={agentEvents}
             />
             {view === "allChats" && (
                 <AllChatsPage

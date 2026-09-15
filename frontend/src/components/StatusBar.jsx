@@ -1,4 +1,4 @@
-export default function StatusBar({ sessionId, title, streaming, onMenu, onTitleClick, onFeed }) {
+export default function StatusBar({ sessionId, title, streaming, onMenu, onTitleClick, onFeed, hasError }) {
     return (
         <div style={{ display: "flex", flexDirection: "column", background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px 4px", fontSize: "12px", color: "var(--text-muted)" }}>
@@ -17,11 +17,19 @@ export default function StatusBar({ sessionId, title, streaming, onMenu, onTitle
                 </span>
                 <button
                     onClick={onFeed}
-                    aria-label="Agent activity feed"
-                    title="Agent activity feed"
-                    style={{ background: "none", border: "none", cursor: "pointer", padding: "6px 0 6px 2px", color: "var(--text-muted)", fontSize: "16px", lineHeight: 1 }}
+                    aria-label={hasError ? "Agent activity feed (has an error)" : "Agent activity feed"}
+                    title={hasError ? "Agent activity feed — an action hit an error" : "Agent activity feed"}
+                    style={{ position: "relative", background: "none", border: "none", cursor: "pointer", padding: "6px 0 6px 2px", color: "var(--text-muted)", fontSize: "16px", lineHeight: 1 }}
                 >
                     ⚡
+                    {hasError && (
+                        <span
+                            style={{
+                                position: "absolute", top: "3px", right: "-1px", width: "7px", height: "7px",
+                                borderRadius: "50%", background: "#e33", border: "1.5px solid var(--bg)",
+                            }}
+                        />
+                    )}
                 </button>
             </div>
             <button

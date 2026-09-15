@@ -104,30 +104,49 @@ def _extract_docx_text(raw: bytes) -> str:
     return "\n".join(p.text for p in document.paragraphs)
 
 
-def _attachment_text(a: dict) -> str:
+async def _attachment_text(a: dict, session_id: str) -> str:
     """Plain-text attachments (from the frontend's client-side FileReader
     path) carry their text directly in `content`. Binary formats we can't
     read client-side (PDF, Word) instead carry base64 + a mime type, and get
-    extracted here, server-side, into the same plain text."""
+    extracted here, server-side, into the same plain text. Extraction is
+    wrapped so a malformed/password-protected/corrupt file logs a visible
+    "blocked" agent event and degrades to an empty string instead of
+    crashing the whole /chat request."""
     if a.get("content") is not None:
         return a["content"]
 
     mime = a.get("mime", "")
+    name = a.get("name", "file")
     b64 = a.get("base64", "")
     if not b64:
         return ""
     raw = base64.b64decode(b64)
 
+    from storage.neon_store import get_store
+    db = await get_store()
+
     if mime == "application/pdf":
-        return _extract_pdf_text(raw)
+        try:
+            text = _extract_pdf_text(raw)
+            await db.save_agent_event(session_id, "file", f"ok:Reading {name}")
+            return text
+        except Exception as exc:
+            await db.save_agent_event(session_id, "file", f"blocked:{name}: {exc}")
+            return ""
     if mime in (
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ):
-        return _extract_docx_text(raw)
+        try:
+            text = _extract_docx_text(raw)
+            await db.save_agent_event(session_id, "file", f"ok:Reading {name}")
+            return text
+        except Exception as exc:
+            await db.save_agent_event(session_id, "file", f"blocked:{name}: {exc}")
+            return ""
     return ""
 
 
-def _fold_attachments(user_msg: str, attachments: list) -> str:
+async def _fold_attachments(user_msg: str, attachments: list, session_id: str) -> str:
     """Appends uploaded/fetched file content to the query as fenced blocks the
     model can read like any other context — there's no separate multimodal
     text channel on the Groq models this app runs on, so text (including
@@ -140,7 +159,7 @@ def _fold_attachments(user_msg: str, attachments: list) -> str:
     blocks = ["<attachments>"]
     for a in attachments:
         name = a.get("name", "file")
-        content = _attachment_text(a)
+        content = await _attachment_text(a, session_id)
         blocks.append(f'<file name="{name}">\n{content}\n</file>')
     blocks.append("</attachments>")
     return f"{user_msg}\n\n" + "\n".join(blocks)
@@ -174,7 +193,7 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
     # said" and embedded into long-term memory — these used to be the same
     # string, so a search result dump ended up saved and later displayed as
     # if the user had typed it themselves.
-    augmented = _fold_attachments(raw_msg, text_attachments)
+    augmented = await _fold_attachments(raw_msg, text_attachments, session_id)
     tau_ctx = await _tau.observe_and_inject(session_id, augmented, history)
     bootstrap = Bootstrap(trust_mode=trust, tau_context=tau_ctx)
     # Deliberately raw_msg, not augmented: web-intent detection must only look
@@ -223,7 +242,7 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
     # meaningful collision risk with the looser ones below.
     continue_intent = detect_continue_intent(raw_msg)
 
-    async def _bypass_with_reply(kind: str, label: str, detail: str, reply: str):
+    async def _bypass_with_reply(kind: str, label: str, detail: str, reply: str, result=None):
         """Shared tail for an intent that answers the message completely on
         its own, with no LLM call needed to phrase around it (a generated
         plan, a code search's results) — same shape as the repo "read"
@@ -231,13 +250,20 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
         Streams the tool chip + reply, persists both turns, embeds only the
         query (the reply's source of truth — the plan, the source file —
         lives outside chat history and would go stale/duplicate here), and
-        generates a session title on the first turn."""
+        generates a session title on the first turn.
+
+        `result` (optional) is whatever the intent runner returned, checked
+        for an "error"/"blocked" key so the Agent Feed can flag it — same
+        outcome convention as pipeline.tool_execution.ToolExecution._persist,
+        kept consistent so a failure looks the same everywhere it's logged."""
         tool = {"kind": kind, "label": label, "detail": detail}
         yield f"data: {json.dumps({'tool': tool})}\n\n"
         for i in range(0, len(reply), 400):
             yield f"data: {json.dumps({'chunk': reply[i:i + 400]})}\n\n"
 
         db = await get_store()
+        outcome = "blocked" if isinstance(result, dict) and (result.get("blocked") or result.get("error")) else "ok"
+        await db.save_agent_event(session_id, kind, f"{outcome}:{label}")
         marker = f"[[SEMBLANCE_TOOL:{json.dumps({'kind': kind, 'label': label})}]]\n"
         await db.save_turn(session_id, "user", raw_msg)
         await db.save_turn(session_id, "assistant", f"{marker}{reply}")
@@ -288,6 +314,7 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
                     yield f"data: {json.dumps({'chunk': reply[i:i + 400]})}\n\n"
 
                 db = await get_store()
+                await db.save_agent_event(session_id, "read", f"ok:{label}")
                 marker = f"[[SEMBLANCE_TOOL:{json.dumps({'kind': 'read', 'label': label})}]]\n"
                 await db.save_turn(session_id, "user", raw_msg)
                 await db.save_turn(session_id, "assistant", f"{marker}{reply}")
@@ -307,6 +334,9 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
 
                 yield "data: [DONE]\n\n"
                 return
+            else:
+                db = await get_store()
+                await db.save_agent_event(session_id, "read", f"blocked:no active repo or read failed for {target}")
 
         if bash_intent:
             yield f"data: {json.dumps({'status': bash_status_label()})}\n\n"
@@ -314,7 +344,7 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
             reply = format_bash_result(result)
             if reply:
                 label = f"$ {bash_intent}"
-                async for line in _bypass_with_reply("bash", label, json.dumps(result), reply):
+                async for line in _bypass_with_reply("bash", label, json.dumps(result), reply, result=result):
                     yield line
                 return
 
@@ -335,6 +365,11 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
                 tool = {"kind": kind, "label": repo_status_label(kind, target).rstrip("…"), "detail": repo_block}
                 yield f"data: {json.dumps({'tool': tool})}\n\n"
                 tool_marker = f"[[SEMBLANCE_TOOL:{json.dumps({'kind': kind, 'label': tool['label']})}]]\n"
+                db = await get_store()
+                await db.save_agent_event(session_id, kind, f"ok:{tool['label']}")
+            else:
+                db = await get_store()
+                await db.save_agent_event(session_id, kind, f"blocked:no active repo or grep failed for {target}")
         elif plan_intent:
             yield f"data: {json.dumps({'status': plan_status_label()})}\n\n"
             plan = await run_plan_intent(plan_intent, session_id)
@@ -367,7 +402,7 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
             result = await run_buddy_intent(buddy_intent, session_id)
             reply = format_buddy_result(buddy_intent["action"], result)
             label = f"Buddy: {buddy_intent['action']}"
-            async for line in _bypass_with_reply("buddy", label, json.dumps(result), reply):
+            async for line in _bypass_with_reply("buddy", label, json.dumps(result), reply, result=result):
                 yield line
             return
         elif memory_search_intent:
@@ -406,6 +441,11 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
                 tool = {"kind": kind, "label": status_label(kind, target).rstrip("…"), "detail": web_block}
                 yield f"data: {json.dumps({'tool': tool})}\n\n"
                 tool_marker = f"[[SEMBLANCE_TOOL:{json.dumps({'kind': kind, 'label': tool['label']})}]]\n"
+                db = await get_store()
+                await db.save_agent_event(session_id, kind, f"ok:{tool['label']}")
+            else:
+                db = await get_store()
+                await db.save_agent_event(session_id, kind, f"blocked:no result for {target}")
 
         reply_parts = []
         async for chunk in bootstrap.run(
@@ -442,6 +482,18 @@ async def status(session_id: str, _account: dict = Depends(require_account)):
     db = await get_store()
     event = await db.get_latest_agent_event(session_id)
     return {"session_id": session_id, "status": "active", "event": event}
+
+
+@router.get("/status/{session_id}/events")
+async def status_events(session_id: str, since: int = 0, _account: dict = Depends(require_account)):
+    """Every tool-use/routing event for this session since `since` (an
+    event id, not a timestamp — created_at only has second granularity),
+    oldest first. Backs AgentFeed.jsx's poll so a burst of several tool
+    calls within one turn doesn't lose all but the last one the way
+    polling /status alone would."""
+    db = await get_store()
+    events = await db.get_recent_agent_events(session_id, since_id=since, limit=30)
+    return {"session_id": session_id, "events": events}
 
 
 @router.get("/sessions")
