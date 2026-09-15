@@ -1,5 +1,3 @@
-import json
-
 import pytest
 
 from storage.neon_store import NeonStore
