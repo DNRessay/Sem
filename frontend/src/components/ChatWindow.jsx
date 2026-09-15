@@ -4,13 +4,84 @@ import DOMPurify from "dompurify";
 import { useStream } from "../hooks/useStream";
 import VoiceInput from "./VoiceInput";
 import AttachMenu, { GitHubIcon, GitLabIcon, AttachFileIcon, ImageIcon } from "./AttachMenu";
+import { copyToClipboard } from "../utils/clipboard";
+import { extractCodeBlocks, filenameFor, downloadText, downloadAllAsZip } from "../utils/codeBlocks";
 
 const API = import.meta.env.VITE_API_URL || "";
 const MODEL_LABEL = "Qwen";
 const THINKING_WORDS = ["Thinking", "Pondering", "Mulling it over", "Sleuthing", "Working on it", "Piecing it together"];
 
+function escapeHtml(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// Fenced code blocks render as "code cards" — a header (language + Copy/
+// Download) above the code — instead of marked's plain <pre><code>, so a
+// reply with code doesn't force copying the whole message just to grab one
+// snippet. A fresh renderer per call resets the per-message snippet
+// counter (snippet-1.py, snippet-2.js, ...), keeping it in sync with
+// extractCodeBlocks' same top-to-bottom order used for the zip download.
+function buildRenderer() {
+    const renderer = new marked.Renderer();
+    let index = 0;
+    renderer.code = ({ text, lang }) => {
+        const filename = filenameFor(lang, index++);
+        const langLabel = (lang || "text").split(/\s+/)[0] || "text";
+        return (
+            `<div class="code-card">`
+            + `<div class="code-card-header">`
+            + `<span class="code-card-lang">${escapeHtml(langLabel)}</span>`
+            + `<span class="code-card-actions">`
+            + `<button type="button" class="code-card-btn" data-action="copy">Copy</button>`
+            + `<button type="button" class="code-card-btn" data-action="download" data-filename="${escapeHtml(filename)}">Download</button>`
+            + `</span></div>`
+            + `<pre><code>${escapeHtml(text)}</code></pre>`
+            + `</div>`
+        );
+    };
+    return renderer;
+}
+
 function renderMarkdown(text) {
-    return { __html: DOMPurify.sanitize(marked.parse(text, { breaks: true })) };
+    return { __html: DOMPurify.sanitize(marked.parse(text, { breaks: true, renderer: buildRenderer() })) };
+}
+
+// Event delegation, not a per-card React handler — the code cards are raw
+// HTML from dangerouslySetInnerHTML, so there's nowhere to attach a real
+// onClick inside them. One listener on the message's outer div catches
+// every card's button clicks instead.
+function handleCodeCardClick(e) {
+    const btn = e.target.closest(".code-card-btn");
+    if (!btn) return;
+    const codeEl = btn.closest(".code-card")?.querySelector("pre code");
+    if (!codeEl) return;
+    const text = codeEl.textContent;
+
+    if (btn.dataset.action === "copy") {
+        copyToClipboard(text);
+        const original = btn.textContent;
+        btn.textContent = "Copied";
+        setTimeout(() => { btn.textContent = original; }, 1200);
+    } else if (btn.dataset.action === "download") {
+        downloadText(btn.dataset.filename || "snippet.txt", text);
+    }
+}
+
+function DownloadAllButton({ content }) {
+    const blocks = extractCodeBlocks(content);
+    if (blocks.length < 2) return null;
+    return (
+        <button
+            onClick={() => downloadAllAsZip(blocks)}
+            style={{
+                display: "flex", alignItems: "center", gap: "4px", background: "none",
+                border: "1px solid var(--border)", borderRadius: "999px", padding: "4px 10px",
+                fontSize: "11px", color: "var(--text-muted)", cursor: "pointer",
+            }}
+        >
+            Download all ({blocks.length} files, .zip)
+        </button>
+    );
 }
 
 function CopyIcon() {
@@ -41,18 +112,7 @@ function CopyButton({ text }) {
     const [copied, setCopied] = useState(false);
 
     const handleCopy = async () => {
-        try {
-            await navigator.clipboard.writeText(text);
-        } catch {
-            const ta = document.createElement("textarea");
-            ta.value = text;
-            ta.style.position = "fixed";
-            ta.style.opacity = "0";
-            document.body.appendChild(ta);
-            ta.select();
-            document.execCommand("copy");
-            document.body.removeChild(ta);
-        }
+        await copyToClipboard(text);
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
     };
@@ -216,9 +276,13 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                             <div
                                 className="md-content"
                                 style={{ padding: "0 2px", fontSize: "15px", lineHeight: "1.7" }}
+                                onClick={handleCodeCardClick}
                                 dangerouslySetInnerHTML={renderMarkdown(m.content)}
                             />
-                            <CopyButton text={m.content} />
+                            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                <CopyButton text={m.content} />
+                                <DownloadAllButton content={m.content} />
+                            </div>
                         </div>
                     )
                 ))}
@@ -234,6 +298,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                         <div
                             className="md-content"
                             style={{ fontSize: "15px", lineHeight: "1.7" }}
+                            onClick={handleCodeCardClick}
                             dangerouslySetInnerHTML={renderMarkdown(fullResponse + " ▋")}
                         />
                     </div>

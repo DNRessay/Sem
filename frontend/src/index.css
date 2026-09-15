@@ -98,3 +98,55 @@ body {
 .md-content h1:first-child, .md-content h2:first-child, .md-content h3:first-child {
     margin-top: 0;
 }
+
+/* Fenced code blocks render as "code cards" (see ChatWindow's buildRenderer)
+   instead of a plain <pre> — a header with the language and its own Copy/
+   Download buttons, so grabbing one snippet doesn't mean copying the whole
+   message. */
+.code-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    margin: 0 0 10px;
+}
+.code-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 10px;
+    background: var(--surface-2);
+    font-size: 11px;
+    color: var(--text-muted);
+}
+.code-card-lang {
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.code-card-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+.code-card-btn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 3px 8px;
+    font-size: 11px;
+    font-family: inherit;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+.code-card-btn:hover {
+    color: var(--text);
+    border-color: var(--text-muted);
+}
+.code-card pre {
+    margin: 0;
+    border-radius: 0;
+}
