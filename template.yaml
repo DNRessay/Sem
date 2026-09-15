@@ -59,6 +59,12 @@ Parameters:
     Type: String
     Default: ""
     Description: Optional self-hosted OpenClaw gateway URL (WhatsApp/Telegram bridge)
+  McpServers:
+    Type: String
+    Default: ""
+    Description: >
+      Optional JSON object of name -> base_url registered with the "mcp" tool at startup,
+      e.g. {"slack": "https://my-slack-mcp.example.com"}
   GithubClientId:
     Type: String
     Default: ""
@@ -109,6 +115,7 @@ Globals:
         WHATSAPP_PHONE_ID: !Ref WhatsappPhoneId
         WHATSAPP_VERIFY_TOKEN: !Ref WhatsappVerifyToken
         OPENCLAW_URL: !Ref OpenclawUrl
+        MCP_SERVERS: !Ref McpServers
         GITHUB_CLIENT_ID: !Ref GithubClientId
         GITHUB_CLIENT_SECRET: !Ref GithubClientSecret
         GITLAB_CLIENT_ID: !Ref GitlabClientId

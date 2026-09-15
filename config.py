@@ -49,6 +49,13 @@ class Settings(BaseSettings):
     WHATSAPP_VERIFY_TOKEN: str = ""  # arbitrary string you also enter in the Meta App Dashboard webhook config
     GOOGLE_CALENDAR_CREDS: str = "./creds/google.json"
     OPENCLAW_URL: str = ""  # optional self-hosted WhatsApp/Telegram/Slack bridge
+    # Optional: JSON object of name -> base_url, e.g.
+    # {"slack": "https://my-slack-mcp.example.com"} — each gets registered
+    # with the shared MCPTool instance (tools/mcp_tool.py) at startup, so
+    # the "mcp" tool in the registry actually has a server to call. Left
+    # unset, "mcp" stays registered but every call returns a clear "not
+    # registered" error, same as any other unconfigured optional tool here.
+    MCP_SERVERS: str = ""
 
     SECRET_KEY: str = "change-me"
     TRUST_MODE: str = "AUTO"  # BYPASS | ALLOW_EDITS | AUTO

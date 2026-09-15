@@ -141,6 +141,33 @@ def get_registry() -> ToolsRegistry:
     return _registry
 
 
+def _register_configured_mcp_servers(mcp) -> None:
+    """MCP_SERVERS (config.py) is an optional JSON object of name ->
+    base_url — each gets registered with the shared MCPTool instance so
+    the "mcp" tool actually has something to call. Left unset (the
+    default), this is a no-op and "mcp" stays real-but-unconfigured, same
+    as every other optional integration in this registry: a clear "not
+    registered" error on every call rather than silently doing nothing.
+    Any malformed config (bad JSON, wrong shape) is ignored rather than
+    crashing registry bootstrap, which every tool call path depends on."""
+    import json
+
+    from config import settings
+
+    raw = (settings.MCP_SERVERS or "").strip()
+    if not raw:
+        return
+    try:
+        servers = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return
+    if not isinstance(servers, dict):
+        return
+    for name, url in servers.items():
+        if isinstance(name, str) and isinstance(url, str) and url:
+            mcp.register_server(name, url)
+
+
 def _bootstrap_registry(reg: ToolsRegistry):
     """Register all built-in tools at startup."""
     from tools.artifact_tool import ArtifactTool
@@ -158,6 +185,7 @@ def _bootstrap_registry(reg: ToolsRegistry):
     news    = NewsTool()
     bash    = BashTool()
     mcp     = MCPTool()
+    _register_configured_mcp_servers(mcp)
     artifact = ArtifactTool()
     calendar = CalendarTool()
     whatsapp = WhatsAppTool()
