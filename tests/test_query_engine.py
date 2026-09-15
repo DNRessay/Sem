@@ -4,7 +4,7 @@ import pytest
 import respx
 from httpx import Response
 
-from pipeline.query_engine import QueryEngine, _retry_after_seconds
+from pipeline.query_engine import QueryEngine, RateLimitError, _parse_retry_seconds, _retry_after_seconds
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
@@ -27,6 +27,32 @@ def test_retry_after_seconds_defaults_when_nothing_is_parseable():
 def test_retry_after_seconds_is_capped():
     resp = Response(429, headers={"retry-after": "9999"})
     assert _retry_after_seconds(resp) == 20.0
+
+
+def test_parse_retry_seconds_handles_the_minutes_and_seconds_format():
+    """A live TPD (tokens-per-day) failure named its wait as "10m55.776s" —
+    the old seconds-only pattern still matched (regexes don't require
+    matching from the start of the string), silently capturing just the
+    "55.776" tail and treating an ~11 minute wait as ~1 minute."""
+    resp = Response(429)
+    body = b'{"error":{"message":"...on tokens per day (TPD): Limit 200000, Used 197484, Requested 4034. Please try again in 10m55.776s."}}'
+    assert _parse_retry_seconds(resp, body) == pytest.approx(655.776)
+
+
+def test_parse_retry_seconds_plain_seconds_format_still_works():
+    resp = Response(429)
+    assert _parse_retry_seconds(resp, b"Please try again in 13.86s") == pytest.approx(13.86)
+
+
+def test_parse_retry_seconds_returns_none_when_nothing_is_parseable():
+    resp = Response(429)
+    assert _parse_retry_seconds(resp, b"no timing info here") is None
+
+
+def test_retry_after_seconds_caps_a_minutes_scale_wait():
+    resp = Response(429)
+    body = b"Please try again in 10m55.776s."
+    assert _retry_after_seconds(resp, body) == 20.0
 
 
 def _groq_response(content: str):
@@ -284,6 +310,34 @@ async def test_stream_llm_raises_if_the_retry_also_429s(moto_cache_table, monkey
         with pytest.raises(RuntimeError, match="429"):
             async for _ in engine.stream_llm([{"role": "user", "content": "hi"}], session_id="s1"):
                 pass
+
+
+@pytest.mark.asyncio
+async def test_stream_llm_fails_fast_without_retrying_on_a_daily_quota_wait(moto_cache_table, monkeypatch):
+    """A TPD (tokens-per-day) 429 names a wait of minutes, not seconds — a
+    real one hit this exact case: "try again in 10m55.776s". Retrying
+    after a short capped sleep is pointless (it's still going to be
+    exceeded), so this should fail fast, as a RateLimitError carrying the
+    real (uncapped) wait, instead of burning a second call and 20s first."""
+    engine = QueryEngine()
+    sleeps = []
+
+    async def fake_sleep(s):
+        sleeps.append(s)
+
+    monkeypatch.setattr("pipeline.query_engine.asyncio.sleep", fake_sleep)
+
+    with respx.mock:
+        route = respx.post(GROQ_URL).mock(
+            return_value=Response(429, content=b"...on tokens per day (TPD)... Please try again in 10m55.776s.")
+        )
+        with pytest.raises(RateLimitError) as exc_info:
+            async for _ in engine.stream_llm([{"role": "user", "content": "hi"}], session_id="s1"):
+                pass
+
+    assert route.call_count == 1  # no wasted retry
+    assert sleeps == []
+    assert exc_info.value.retry_after == pytest.approx(655.776)
 
 
 def test_fire_break_invalidates_known_vector_only(moto_cache_table):

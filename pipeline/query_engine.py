@@ -36,20 +36,55 @@ _DEFAULT_MAX_TOKENS = 800
 # into the chat. Capped well under Lambda's own timeout — a wait this
 # function decided not to honor is worse than just failing fast.
 _MAX_RETRY_WAIT_SECONDS = 20.0
-_RETRY_AFTER_RE = re.compile(r"try again in (\d+(?:\.\d+)?)s", re.I)
+# A longer-scale quota (TPD — tokens per day) reports its wait with a
+# minutes component too: "Please try again in 10m55.776s", not just
+# "55.776s". The old pattern (seconds-only) still technically matched that
+# string — regex engines don't require matching from the start — silently
+# capturing just the "55.776" tail and treating an ~11 minute wait as ~1
+# minute. The minutes group is optional so a plain "13.86s" (the common
+# per-minute case) still matches exactly as before.
+_RETRY_AFTER_RE = re.compile(r"try again in (?:(\d+)m)?(\d+(?:\.\d+)?)s", re.I)
 
 
-def _retry_after_seconds(response: httpx.Response, body: bytes = b"") -> float:
+def _parse_retry_seconds(response: httpx.Response, body: bytes = b"") -> float | None:
+    """The wait Groq actually asked for, uncapped — None if nothing
+    parseable was found. Separate from _retry_after_seconds (which is
+    capped, for deciding how long this process should actually sleep) so a
+    caller can also tell the user an accurate "back in ~11 minutes" for a
+    wait too long to be worth sleeping through."""
     header = response.headers.get("retry-after")
     if header:
         try:
-            return min(float(header), _MAX_RETRY_WAIT_SECONDS)
+            return float(header)
         except ValueError:
             pass
     m = _RETRY_AFTER_RE.search(body.decode(errors="replace"))
     if m:
-        return min(float(m.group(1)), _MAX_RETRY_WAIT_SECONDS)
-    return 5.0  # Groq didn't say — a sane default rather than not retrying at all
+        minutes = float(m.group(1)) if m.group(1) else 0.0
+        return minutes * 60 + float(m.group(2))
+    return None
+
+
+def _retry_after_seconds(response: httpx.Response, body: bytes = b"") -> float:
+    parsed = _parse_retry_seconds(response, body)
+    if parsed is None:
+        return 5.0  # Groq didn't say — a sane default rather than not retrying at all
+    return min(parsed, _MAX_RETRY_WAIT_SECONDS)
+
+
+class RateLimitError(RuntimeError):
+    """A Groq 429 that either named a wait too long to be worth sleeping
+    through here (a daily/hour-scale quota, not the per-minute window the
+    one built-in retry is for) or came back 429 again on that retry. Same
+    message shape as the plain RuntimeError every other Groq failure
+    raises (so generic error handling/tests keep working unchanged), but
+    carries the actual, uncapped wait Groq asked for — `retry_after` is
+    None when nothing parseable was in the response — so a caller can
+    surface a real "back in ~11 minutes" instead of this raw text."""
+
+    def __init__(self, status_code: int, model: str, body: str, retry_after: float | None):
+        self.retry_after = retry_after
+        super().__init__(f"Groq API error (status {status_code}) for model '{model}': {body}")
 
 
 class QueryEngine:
@@ -159,11 +194,21 @@ class QueryEngine:
                     "POST", "https://api.groq.com/openai/v1/chat/completions",
                     json=payload, headers=headers,
                 ) as r:
-                    if r.status_code == 429 and not retried:
+                    if r.status_code == 429:
                         body = await r.aread()
-                        retried = True
-                        await asyncio.sleep(_retry_after_seconds(r, body))
-                        continue
+                        wait = _parse_retry_seconds(r, body)
+                        # Worth one silent retry only the first time, and only
+                        # when the wait is short enough that sleeping through
+                        # it here is reasonable — a wait this long is a
+                        # daily/hour-scale quota, not the per-minute window
+                        # this retry is for, and a second call right now
+                        # would just fail again immediately.
+                        effective_wait = wait if wait is not None else 5.0
+                        if not retried and effective_wait <= _MAX_RETRY_WAIT_SECONDS:
+                            retried = True
+                            await asyncio.sleep(effective_wait)
+                            continue
+                        raise RateLimitError(429, model, body.decode(errors="replace"), wait)
                     if r.status_code != 200:
                         body = await r.aread()
                         raise RuntimeError(

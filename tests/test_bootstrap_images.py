@@ -2,6 +2,7 @@ import pytest
 
 from config import settings
 from pipeline.bootstrap import Bootstrap
+from pipeline.query_engine import RateLimitError
 
 
 class FakeStore:
@@ -397,3 +398,78 @@ async def test_run_prepends_assistant_prefix_only_to_persisted_content(monkeypat
 
     assert "".join(streamed) == "the reply"  # marker never appears in what's actually streamed
     assert ("assistant", "[[SEMBLANCE_TOOL:{\"kind\":\"news\"}]]\nthe reply") in saved_turns
+
+
+@pytest.mark.asyncio
+async def test_run_surfaces_a_daily_rate_limit_as_a_friendly_minutes_message(monkeypatch):
+    """A real one dumped Groq's raw error JSON straight into the chat as
+    the reply — this is the one LLM failure worth a distinct, readable
+    message instead of that."""
+    async def fake_get_store():
+        return FakeStore()
+
+    monkeypatch.setattr("pipeline.bootstrap.get_store", fake_get_store)
+    bootstrap = Bootstrap()
+
+    async def fake_retrieve(query, top_k=5):
+        return []
+
+    bootstrap.sem_retrieval.retrieve = fake_retrieve
+
+    async def fake_stream_llm(messages, model=None, session_id="default", **kwargs):
+        raise RateLimitError(429, "qwen/qwen3.8-27b", "TPD limit exceeded", retry_after=655.776)
+        yield  # pragma: no cover — makes this an async generator
+
+    bootstrap.query_engine.stream_llm = fake_stream_llm
+
+    result = [piece async for piece in bootstrap.run("hello", "sess1", [])]
+    reply = "".join(result)
+    assert "Groq" not in reply and "TPD" not in reply  # no raw error text leaked into the reply
+    assert "11 minute" in reply
+
+
+@pytest.mark.asyncio
+async def test_run_surfaces_a_short_rate_limit_as_a_friendly_seconds_message(monkeypatch):
+    async def fake_get_store():
+        return FakeStore()
+
+    monkeypatch.setattr("pipeline.bootstrap.get_store", fake_get_store)
+    bootstrap = Bootstrap()
+
+    async def fake_retrieve(query, top_k=5):
+        return []
+
+    bootstrap.sem_retrieval.retrieve = fake_retrieve
+
+    async def fake_stream_llm(messages, model=None, session_id="default", **kwargs):
+        raise RateLimitError(429, "qwen/qwen3.8-27b", "ITPM limit exceeded", retry_after=13.86)
+        yield  # pragma: no cover
+
+    bootstrap.query_engine.stream_llm = fake_stream_llm
+
+    result = [piece async for piece in bootstrap.run("hello", "sess1", [])]
+    reply = "".join(result)
+    assert "14s" in reply or "13s" in reply
+
+
+@pytest.mark.asyncio
+async def test_run_surfaces_a_rate_limit_with_no_known_wait(monkeypatch):
+    async def fake_get_store():
+        return FakeStore()
+
+    monkeypatch.setattr("pipeline.bootstrap.get_store", fake_get_store)
+    bootstrap = Bootstrap()
+
+    async def fake_retrieve(query, top_k=5):
+        return []
+
+    bootstrap.sem_retrieval.retrieve = fake_retrieve
+
+    async def fake_stream_llm(messages, model=None, session_id="default", **kwargs):
+        raise RateLimitError(429, "qwen/qwen3.8-27b", "rate limited", retry_after=None)
+        yield  # pragma: no cover
+
+    bootstrap.query_engine.stream_llm = fake_stream_llm
+
+    result = [piece async for piece in bootstrap.run("hello", "sess1", [])]
+    assert "give it a moment" in "".join(result).lower()

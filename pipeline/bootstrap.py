@@ -8,7 +8,7 @@ from config import settings
 from memory.sem_retrieval import SEMRetrieval
 from pipeline.ctx_assembly import CTXAssembly
 from pipeline.ctx_pressure import CTXPressure
-from pipeline.query_engine import QueryEngine
+from pipeline.query_engine import QueryEngine, RateLimitError
 from storage.embeddings import embed_text
 from storage.neon_store import get_store
 
@@ -109,9 +109,20 @@ class Bootstrap:
             async for piece in self.query_engine.stream_llm(messages, session_id=session_id, model=model):
                 reply_parts.append(piece)
                 yield piece
+        except RateLimitError as e:
+            # A real one dumped Groq's raw error JSON straight into the chat
+            # ("Rate limit reached for model... on tokens per day (TPD):
+            # Limit 200000, Used 197484... Please try again in 10m55.776s")
+            # — technically accurate, completely unreadable. This is the
+            # one LLM failure worth a distinct, human message: it's not a
+            # bug, it's a quota, and the user can act on "try again in ~11
+            # minutes" in a way they can't act on a raw JSON blob.
+            error_msg = self._rate_limit_message(e.retry_after)
+            reply_parts.append(error_msg)
+            yield error_msg
         except Exception as e:
             # A Groq API failure (context length exceeded — easy to hit with
-            # a big repo attach, rate limit, bad key, network blip) used to
+            # a big repo attach, bad key, network blip) used to
             # propagate straight out of this generator and silently kill the
             # whole streamed response: nothing shown, nothing saved, no error
             # surfaced. Same failure shape as the earlier news-tool KeyError
@@ -149,6 +160,19 @@ class Bootstrap:
         if reply and not assistant_prefix:
             reply_embedding = await embed_text(reply)
             await db.save_memory(session_id, reply, embedding=reply_embedding)
+
+    def _rate_limit_message(self, retry_after: float | None) -> str:
+        """Groq's own wording ranges from "13.86s" (a per-minute window)
+        to "10m55.776s" (a daily quota) — round to whichever unit reads
+        naturally instead of always saying seconds or always minutes."""
+        if retry_after is None:
+            return "I've hit a rate limit — give it a moment and try again."
+        if retry_after >= 60:
+            minutes = max(1, round(retry_after / 60))
+            plural = "s" if minutes != 1 else ""
+            return f"I've hit my message limit for today — try again in about {minutes} minute{plural}."
+        seconds = max(1, round(retry_after))
+        return f"I've hit a rate limit — try again in about {seconds}s."
 
     async def _skills_context(self, query: str) -> str:
         """Two-tier skill disclosure, mirroring how Claude sees Skills: a

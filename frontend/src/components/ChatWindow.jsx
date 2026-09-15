@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { useStream } from "../hooks/useStream";
+import { useTypewriter } from "../hooks/useTypewriter";
 import VoiceInput from "./VoiceInput";
 import AttachMenu, { GitHubIcon, GitLabIcon, AttachFileIcon, ImageIcon } from "./AttachMenu";
 import { copyToClipboard } from "../utils/clipboard";
@@ -218,8 +219,14 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
     const [webSearchEnabled, setWebSearchEnabled] = useState(true);
     const { chunks, streaming, error, status, tool, send, abort } = useStream(API, token, onUnauthorized);
     const bottomRef = useRef(null);
+    // Set once send() resolves and cleared once the typewriter below has
+    // fully caught up to it — history isn't updated until then, so the
+    // live streaming bubble (mid-animation) never gets abruptly swapped
+    // out for the static final message.
+    const [pendingReply, setPendingReply] = useState(null);
 
     const fullResponse = chunks.join("");
+    const revealed = useTypewriter(fullResponse);
     const isWaiting = streaming && fullResponse.length === 0;
     const elapsed = useElapsedSeconds(isWaiting);
 
@@ -229,7 +236,17 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
 
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, [chunks, history]);
+    }, [chunks, revealed, history]);
+
+    // Commits the finished reply to history only once the typewriter has
+    // revealed all of it — until then the live bubble below keeps showing
+    // (and animating) the same content instead of a hard cut.
+    useEffect(() => {
+        if (!pendingReply || revealed.length < fullResponse.length) return;
+        setHistory(h => [...h, { role: "assistant", content: pendingReply.reply, tool: pendingReply.tool }]);
+        if (pendingReply.title) onTitle?.(sessionId, pendingReply.title);
+        setPendingReply(null);
+    }, [pendingReply, revealed, fullResponse, sessionId, onTitle]);
 
     const submit = async () => {
         if ((!input.trim() && attachments.length === 0) || streaming) return;
@@ -239,8 +256,8 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
         setAttachments([]);
         setHistory(h => [...h, { role: "user", content: msg, files: files.map(f => ({ name: f.name, source: f.source, mime: f.mime })) }]);
         const { reply, tool: toolResult, title } = await send(msg, sessionId, history, files, webSearchEnabled);
-        if (reply) setHistory(h => [...h, { role: "assistant", content: reply, tool: toolResult }]);
-        if (title) onTitle?.(sessionId, title);
+        if (reply) setPendingReply({ reply, tool: toolResult, title });
+        else if (title) onTitle?.(sessionId, title);
     };
 
     const addAttachment = (file) => setAttachments(a => [...a, file]);
@@ -292,14 +309,14 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                         <WaitLabel elapsed={elapsed} status={status} />
                     </div>
                 )}
-                {streaming && fullResponse.length > 0 && (
+                {(streaming || pendingReply) && fullResponse.length > 0 && (
                     <div style={{ alignSelf: "flex-start", maxWidth: "88%", padding: "0 2px" }}>
                         {tool && <ToolChip tool={tool} />}
                         <div
                             className="md-content"
                             style={{ fontSize: "15px", lineHeight: "1.7" }}
                             onClick={handleCodeCardClick}
-                            dangerouslySetInnerHTML={renderMarkdown(fullResponse + " ▋")}
+                            dangerouslySetInnerHTML={renderMarkdown(revealed + " ▋")}
                         />
                     </div>
                 )}
