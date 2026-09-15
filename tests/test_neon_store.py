@@ -116,6 +116,50 @@ class _RecordingTxnConn:
         return _FakeAcquire(self)  # a no-op async context manager is enough here
 
 
+class _FakeSearchConn:
+    def __init__(self, rows):
+        self._rows = rows
+        self.queries: list[tuple] = []
+
+    async def fetch(self, query, *args):
+        self.queries.append((query, args))
+        return self._rows
+
+
+@pytest.mark.asyncio
+async def test_search_conversations_without_a_window_searches_everything():
+    rows = [{"session_id": "s1", "role": "user", "content": "Who is Nelson Mandela",
+             "created_at": 1000, "title": "Who is Nelson Mandela"}]
+    conn = _FakeSearchConn(rows)
+    store = NeonStore()
+    store._pool = _FakePool.__new__(_FakePool)
+    store._pool._conn = conn
+    store._pool.acquire = lambda: _FakeAcquire(conn)
+
+    result = await store.search_conversations("mandela", limit=30)
+
+    assert result == rows
+    query, args = conn.queries[0]
+    assert args == ("mandela", 30)
+    assert "created_at >=" not in query
+
+
+@pytest.mark.asyncio
+async def test_search_conversations_with_a_window_filters_by_cutoff():
+    conn = _FakeSearchConn([])
+    store = NeonStore()
+    store._pool = _FakePool.__new__(_FakePool)
+    store._pool._conn = conn
+    store._pool.acquire = lambda: _FakeAcquire(conn)
+
+    await store.search_conversations("mandela", window_seconds=86400, limit=10)
+
+    query, args = conn.queries[0]
+    assert args[0] == "mandela"
+    assert args[2] == 10
+    assert "created_at >=" in query
+
+
 @pytest.mark.asyncio
 async def test_delete_session_removes_conversations_title_and_memories():
     conn = _RecordingTxnConn()

@@ -352,6 +352,38 @@ class NeonStore:
             )
             return [dict(r) for r in rows]
 
+    async def search_conversations(self, term: str, window_seconds: int | None = None, limit: int = 30) -> list[dict]:
+        """Literal substring search across EVERY session's conversation
+        history, not scoped to the current one — the deterministic,
+        grounded alternative to letting the model answer "when did I say
+        X" from whatever happens to be in its current context window. A
+        real query hit this: asked "when did I ask about Mandela" in one
+        session, the model confidently answered from its own session
+        history even though the actual mention was in a different
+        session entirely, 17 hours earlier. Joins session_titles so a
+        result can show a readable name instead of a bare session id."""
+        async with self._pool.acquire() as conn:
+            if window_seconds is not None:
+                cutoff = int(time.time()) - window_seconds
+                rows = await conn.fetch(
+                    """SELECT c.session_id, c.role, c.content, c.created_at, st.title
+                       FROM conversations c
+                       LEFT JOIN session_titles st ON st.session_id = c.session_id
+                       WHERE c.content ILIKE '%' || $1 || '%' AND c.created_at >= $2
+                       ORDER BY c.created_at DESC LIMIT $3""",
+                    term, cutoff, limit,
+                )
+            else:
+                rows = await conn.fetch(
+                    """SELECT c.session_id, c.role, c.content, c.created_at, st.title
+                       FROM conversations c
+                       LEFT JOIN session_titles st ON st.session_id = c.session_id
+                       WHERE c.content ILIKE '%' || $1 || '%'
+                       ORDER BY c.created_at DESC LIMIT $2""",
+                    term, limit,
+                )
+            return [dict(r) for r in rows]
+
     async def delete_session(self, session_id: str):
         """Removes a session's chat history entirely — conversations,
         title, and its embedded memories. Deliberately leaves session_repos/

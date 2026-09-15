@@ -36,6 +36,12 @@ from pipeline.guide_intent import (
     guide_status_label,
     run_guide_intent,
 )
+from pipeline.memory_search_intent import (
+    detect_memory_search_intent,
+    format_memory_search_result,
+    memory_search_status_label,
+    run_memory_search_intent,
+)
 from pipeline.plan_continue import (
     continue_status_label,
     detect_continue_intent,
@@ -199,6 +205,12 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
     # both are always safe to fire regardless of rate-limit state.
     guide_intent = detect_guide_intent(raw_msg)
     buddy_intent = detect_buddy_intent(raw_msg)
+    # "when did I ask about X" / "how many times have I mentioned X" — a
+    # real, grounded search across every session's history (not just this
+    # one) instead of letting the model guess from whatever's already in
+    # its own context. See pipeline/memory_search_intent.py's docstring
+    # for the exact wrong-answer case this fixes.
+    memory_search_intent = detect_memory_search_intent(raw_msg)
     # "run bash: X" — Step 5's permission-gated tool execution reachable
     # directly from chat, not just from a sub-agent. Runs inside this
     # Lambda's own /tmp sandbox only — see pipeline/bash_intent.py's
@@ -356,6 +368,14 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
             reply = format_buddy_result(buddy_intent["action"], result)
             label = f"Buddy: {buddy_intent['action']}"
             async for line in _bypass_with_reply("buddy", label, json.dumps(result), reply):
+                yield line
+            return
+        elif memory_search_intent:
+            yield f"data: {json.dumps({'status': memory_search_status_label(memory_search_intent['term'])})}\n\n"
+            result = await run_memory_search_intent(memory_search_intent, session_id)
+            reply = format_memory_search_result(result)
+            label = f'Searching conversation history for "{memory_search_intent["term"]}"'
+            async for line in _bypass_with_reply("memory_search", label, json.dumps(result, default=str), reply):
                 yield line
             return
         elif web_intent:

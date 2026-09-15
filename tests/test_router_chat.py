@@ -445,6 +445,45 @@ def test_buddy_intent_bypasses_the_llm_and_streams_the_status(client, monkeypatc
     assert ("sess1", "user", "buddy") in store.turns
 
 
+def test_memory_search_intent_bypasses_the_llm_and_streams_grounded_results(client, monkeypatch):
+    """"when did I ask about X" routes through run_memory_search_intent —
+    a real cross-session DB search, never the model guessing from its own
+    session-scoped context (the exact wrong-answer case this fixes)."""
+    calls = []
+
+    async def fake_run_memory_search_intent(intent, session_id):
+        calls.append((intent, session_id))
+        return {
+            "term": "Mandela", "mode": "when",
+            "matches": [{"session_id": "session_old", "role": "user", "content": "Who is Nelson Mandela",
+                         "created_at": 1000.0, "title": "Who is Nelson Mandela"}],
+        }
+
+    class RecordingStore:
+        def __init__(self):
+            self.turns = []
+
+        async def save_turn(self, session_id, role, content):
+            self.turns.append((session_id, role, content))
+
+        async def save_memory(self, session_id, content, salience=0.5, embedding=None):
+            pass
+
+    store = RecordingStore()
+
+    async def fake_get_store():
+        return store
+
+    monkeypatch.setattr("gateway.router.run_memory_search_intent", fake_run_memory_search_intent)
+    monkeypatch.setattr("gateway.router.get_store", fake_get_store)
+
+    resp = client.post("/chat", json={"message": "When did I ask u about Mandela", "session_id": "sess1"})
+    assert resp.status_code == 200
+    assert calls == [({"mode": "when", "term": "Mandela", "window": None}, "sess1")]
+    assert "Who is Nelson Mandela" in resp.text
+    assert ("sess1", "user", "When did I ask u about Mandela") in store.turns
+
+
 def test_bash_intent_bypasses_the_llm_and_streams_the_command_output(client, monkeypatch):
     """Step 5 (tool execution) reachable directly from chat, not just from
     a sub-agent: "run bash: X" routes through run_bash_intent instead of
