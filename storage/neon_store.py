@@ -253,6 +253,23 @@ class NeonStore:
                 )
             """)
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_events_session ON agent_events (session_id, created_at DESC)")
+            # One active plan per session (like session_repos) — a plan
+            # PlanAgent generates now survives past the single reply that
+            # showed it, so "continue" (see pipeline/plan_intent.py) can
+            # come back later, in a different turn, and pick up the next
+            # unfinished step instead of the plan just evaporating once
+            # shown. steps is the same {n, action, tool, expected_output}
+            # shape PlanAgent already produces, plus a "status" field
+            # ("pending"/"done") this table is responsible for.
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS plans (
+                    session_id TEXT PRIMARY KEY,
+                    goal TEXT NOT NULL,
+                    steps JSONB NOT NULL,
+                    created_at BIGINT NOT NULL,
+                    updated_at BIGINT NOT NULL
+                )
+            """)
 
     async def save_memory(self, session_id: str, content: str, salience: float = 0.5,
                            embedding: list[float] | None = None) -> int:
@@ -426,6 +443,51 @@ class NeonStore:
                    VALUES ($1, $2, $3, $4, $5)
                    ON CONFLICT (session_id) DO UPDATE SET provider=$2, repo=$3, ref=$4, updated_at=$5""",
                 session_id, provider, repo, ref, int(time.time()),
+            )
+
+    async def save_plan(self, session_id: str, goal: str, steps: list[dict]):
+        """One active plan per session — a new plan (asking to plan
+        something else) replaces the old one outright, same as
+        set_active_repo. Each step gets status="pending" if the caller
+        didn't already set one (PlanAgent's own steps never do)."""
+        stamped = [{**s, "status": s.get("status", "pending")} for s in steps]
+        async with self._pool.acquire() as conn:
+            now = int(time.time())
+            await conn.execute(
+                """INSERT INTO plans (session_id, goal, steps, created_at, updated_at)
+                   VALUES ($1, $2, $3, $4, $4)
+                   ON CONFLICT (session_id) DO UPDATE SET goal=$2, steps=$3, updated_at=$4""",
+                session_id, goal, json.dumps(stamped), now,
+            )
+
+    async def get_active_plan(self, session_id: str) -> dict | None:
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT goal, steps FROM plans WHERE session_id=$1", session_id,
+            )
+            if not row:
+                return None
+            return {"goal": row["goal"], "steps": json.loads(row["steps"])}
+
+    async def update_plan_step(self, session_id: str, step_n, status: str, result: str = ""):
+        """Marks one step done (or whatever status) in place. Steps are a
+        handful of items in one small JSONB column — reading the whole
+        plan, mutating the one step, and writing it back whole is simpler
+        and plenty fast at this size, versus reaching for Postgres's own
+        jsonb_set path-update functions for a table this small."""
+        plan = await self.get_active_plan(session_id)
+        if not plan:
+            return
+        for step in plan["steps"]:
+            if step.get("n") == step_n:
+                step["status"] = status
+                if result:
+                    step["result"] = result
+                break
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE plans SET steps=$1, updated_at=$2 WHERE session_id=$3",
+                json.dumps(plan["steps"]), int(time.time()), session_id,
             )
 
     async def list_skills(self, enabled_only: bool = False) -> list[dict]:

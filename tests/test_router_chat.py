@@ -409,6 +409,70 @@ def test_bash_intent_falls_back_to_normal_flow_when_formatting_yields_nothing(cl
     assert "ok" in resp.text  # FakeBootstrap's fixed reply — the normal flow ran
 
 
+def test_continue_intent_bypasses_the_llm_and_advances_the_plan(client, monkeypatch):
+    """A bare "continue" routes through run_continue_intent instead of
+    Bootstrap/the main LLM call — same bypass shape as every other
+    deterministic intent in this router."""
+    calls = []
+
+    async def fake_run_continue_intent(session_id):
+        calls.append(session_id)
+        return {"done": False, "step_n": 1, "action": "list files", "command": "ls -la",
+                "outcome": "a.py\nb.py", "remaining": 1, "total": 2}
+
+    class RecordingStore:
+        def __init__(self):
+            self.turns = []
+
+        async def save_turn(self, session_id, role, content):
+            self.turns.append((session_id, role, content))
+
+        async def save_memory(self, session_id, content, salience=0.5, embedding=None):
+            pass
+
+    store = RecordingStore()
+
+    async def fake_get_store():
+        return store
+
+    monkeypatch.setattr("gateway.router.run_continue_intent", fake_run_continue_intent)
+    monkeypatch.setattr("gateway.router.get_store", fake_get_store)
+
+    resp = client.post("/chat", json={"message": "continue", "session_id": "sess1"})
+    assert resp.status_code == 200
+    assert calls == ["sess1"]
+    assert "Step 1 of 2" in resp.text
+    assert "ls -la" in resp.text
+    assert ("sess1", "user", "continue") in store.turns
+
+
+def test_continue_intent_never_falls_back_to_the_normal_flow(client, monkeypatch):
+    """Even with no active plan, "continue" alone has nothing else for
+    Bootstrap to meaningfully respond to — the deterministic "no active
+    plan" message is always the right answer, so this never falls
+    through the way plan/explore do on failure."""
+    async def fake_run_continue_intent(session_id):
+        return {"done": None}
+
+    class RecordingStore:
+        async def save_turn(self, session_id, role, content):
+            pass
+
+        async def save_memory(self, session_id, content, salience=0.5, embedding=None):
+            pass
+
+    async def fake_get_store():
+        return RecordingStore()
+
+    monkeypatch.setattr("gateway.router.run_continue_intent", fake_run_continue_intent)
+    monkeypatch.setattr("gateway.router.get_store", fake_get_store)
+
+    resp = client.post("/chat", json={"message": "continue", "session_id": "sess1"})
+    assert resp.status_code == 200
+    assert "no active plan" in resp.text.lower()
+    assert "ok" not in resp.text  # FakeBootstrap's fixed reply must NOT have run
+
+
 def test_status_endpoint_returns_the_latest_agent_event(client, monkeypatch):
     class RecordingStore:
         async def get_latest_agent_event(self, session_id):

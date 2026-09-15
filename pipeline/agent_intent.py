@@ -59,7 +59,13 @@ async def run_plan_intent(goal: str, session_id: str) -> dict:
     PlanAgent, a single bounded Groq call via the shared QueryEngine (see
     agents/plan_agent.py). Returns the raw plan dict, or an empty dict on
     any failure so a broken/misconfigured planner degrades to "no plan
-    generated," never a chat-breaking error."""
+    generated," never a chat-breaking error.
+
+    Persists the plan (see storage.neon_store.save_plan) when it comes
+    back with real steps — a generated plan used to only ever exist in
+    that one reply; now "continue" (pipeline/plan_continue.py) can come
+    back on a later turn and pick up the next unfinished step instead of
+    the plan being gone the moment the reply scrolled away."""
     from core.cables_man import CablesMan
     cables = CablesMan()
     result = await cables.route({
@@ -67,7 +73,12 @@ async def run_plan_intent(goal: str, session_id: str) -> dict:
     })
     if not isinstance(result, dict) or result.get("error"):
         return {}
-    return result.get("plan") or {}
+    plan = result.get("plan") or {}
+    if plan.get("steps"):
+        from storage.neon_store import get_store
+        db = await get_store()
+        await db.save_plan(session_id, goal, plan["steps"])
+    return plan
 
 
 def format_plan(plan: dict) -> str:

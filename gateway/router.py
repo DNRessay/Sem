@@ -24,6 +24,12 @@ from pipeline.bash_intent import (
     run_bash_intent,
 )
 from pipeline.bootstrap import Bootstrap
+from pipeline.plan_continue import (
+    continue_status_label,
+    detect_continue_intent,
+    format_continue_result,
+    run_continue_intent,
+)
 from pipeline.repo_context import (
     detect_repo_intent,
     fetch_repo_file_raw,
@@ -171,6 +177,12 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
     # Lambda's own /tmp sandbox only — see pipeline/bash_intent.py's
     # docstring for exactly what that does and doesn't reach.
     bash_intent = detect_bash_intent(raw_msg)
+    # A bare "continue"-shaped message — advances the session's persisted
+    # plan (see pipeline/plan_continue.py) by exactly one step. Checked
+    # ahead of everything else: it's the most specific/narrowest trigger of
+    # all of them (anchored, whole-message match only), so there's no
+    # meaningful collision risk with the looser ones below.
+    continue_intent = detect_continue_intent(raw_msg)
 
     async def _bypass_with_reply(kind: str, label: str, detail: str, reply: str):
         """Shared tail for an intent that answers the message completely on
@@ -204,6 +216,15 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
     async def stream_gen():
         msg = augmented
         tool_marker = ""
+        if continue_intent:
+            yield f"data: {json.dumps({'status': continue_status_label()})}\n\n"
+            result = await run_continue_intent(session_id)
+            reply = format_continue_result(result)
+            label = "Continuing plan" if result.get("done") is False else "Plan status"
+            async for line in _bypass_with_reply("continue", label, json.dumps(result), reply):
+                yield line
+            return
+
         if repo_intent and repo_intent[0] == "read":
             # A file read bypasses the LLM entirely — see
             # pipeline.repo_context.fetch_repo_file_raw for why: reproducing

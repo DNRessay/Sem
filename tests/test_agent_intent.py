@@ -87,19 +87,66 @@ def test_format_matches_returns_empty_string_for_no_matches():
     assert format_matches("nothing", []) == ""
 
 
+class _FakeStore:
+    def __init__(self):
+        self.saved = []
+
+    async def save_plan(self, session_id, goal, steps):
+        self.saved.append((session_id, goal, steps))
+
+
 @pytest.mark.asyncio
 async def test_run_plan_intent_routes_through_cables_man_and_returns_the_plan(monkeypatch):
     calls = []
+    store = _FakeStore()
 
     class FakeCablesMan:
         async def route(self, task):
             calls.append(task)
             return {"status": "complete", "result": {}, "plan": {"steps": [{"n": 1, "action": "do it"}]}}
 
+    async def fake_get_store():
+        return store
+
     monkeypatch.setattr("core.cables_man.CablesMan", FakeCablesMan)
+    monkeypatch.setattr("storage.neon_store.get_store", fake_get_store)
     result = await run_plan_intent("plan the launch", "sess1")
     assert result == {"steps": [{"n": 1, "action": "do it"}]}
     assert calls == [{"query": "plan the launch", "agent": "plan", "goal": "plan the launch", "session_id": "sess1"}]
+
+
+@pytest.mark.asyncio
+async def test_run_plan_intent_persists_the_plan_so_continue_can_find_it_later(monkeypatch):
+    store = _FakeStore()
+
+    class FakeCablesMan:
+        async def route(self, task):
+            return {"status": "complete", "plan": {"steps": [{"n": 1, "action": "do it"}]}}
+
+    async def fake_get_store():
+        return store
+
+    monkeypatch.setattr("core.cables_man.CablesMan", FakeCablesMan)
+    monkeypatch.setattr("storage.neon_store.get_store", fake_get_store)
+    await run_plan_intent("plan the launch", "sess1")
+    assert store.saved == [("sess1", "plan the launch", [{"n": 1, "action": "do it"}])]
+
+
+@pytest.mark.asyncio
+async def test_run_plan_intent_does_not_persist_when_there_are_no_steps(monkeypatch):
+    store = _FakeStore()
+
+    class FakeCablesMan:
+        async def route(self, task):
+            return {"status": "complete", "plan": {}}
+
+    async def fake_get_store():
+        return store
+
+    monkeypatch.setattr("core.cables_man.CablesMan", FakeCablesMan)
+    monkeypatch.setattr("storage.neon_store.get_store", fake_get_store)
+    await run_plan_intent("plan the launch", "sess1")
+    assert store.saved == []
 
 
 @pytest.mark.asyncio
