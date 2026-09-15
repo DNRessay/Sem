@@ -172,6 +172,7 @@ def _bootstrap_registry(reg: ToolsRegistry):
     """Register all built-in tools at startup."""
     from tools.artifact_tool import ArtifactTool
     from tools.bash_tool import BashTool
+    from tools.dev_loop_tool import DevLoopTool
     from tools.mcp_tool import MCPTool
     from tools.misc.calendar_tool import CalendarTool
     from tools.misc.whatsapp_tool import WhatsAppTool
@@ -192,6 +193,7 @@ def _bootstrap_registry(reg: ToolsRegistry):
     whatsapp = WhatsAppTool()
     repo    = RepoTool()
     repo_write = RepoWriteTool()
+    dev_loop = DevLoopTool(bash=bash, repo_write=repo_write)
 
     reg.register("web_search",   serp.search,    {"query": "string", "num": "int"},       "AUTO",        "Google search via SerpAPI")
     reg.register("web_search_full", serp.search_full, {"query": "string", "num": "int"}, "AUTO",         "Google search + AI Overview (one call) via SerpAPI")
@@ -214,5 +216,15 @@ def _bootstrap_registry(reg: ToolsRegistry):
             "pr_title": "string", "pr_body": "string", "base_branch": "string",
         },
         "AUTO",
-        "Branch + commit (with a SemVer VERSION bump) + open a PR for a validated fix — never touches the default branch, a human reviews via the PR",
+        "Branch + commit (with a SemVer VERSION bump) + open a PR for an ALREADY-VALIDATED fix — never touches the default branch, a human reviews via the PR. Prefer check_and_propose_fix, which lints first; use this directly only when validation already happened some other way.",
+    )
+    reg.register(
+        "check_and_propose_fix", dev_loop.check_and_propose_fix,
+        {
+            "provider": "string", "repo": "string", "token": "string", "level": "string",
+            "slug": "string", "files": "dict", "commit_message": "string",
+            "pr_title": "string", "pr_body": "string", "base_branch": "string",
+        },
+        "AUTO",
+        "Lints every changed .py file (ruff) before calling propose_fix — a failing lint blocks the branch/commit/PR entirely and returns the lint output instead, so nothing unvalidated ever gets proposed. The primary way to land an autonomous fix.",
     )
