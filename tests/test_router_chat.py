@@ -357,6 +357,76 @@ def test_explore_code_intent_does_not_fire_on_repo_grep_phrasing(client, monkeyp
     assert repo_calls == ["TODO"]
 
 
+def test_guide_intent_bypasses_the_llm_and_streams_the_answer(client, monkeypatch):
+    """"what can you do" routes through run_guide_intent (CablesMan ->
+    GuideAgent) — a pure string lookup, no LLM call involved at all."""
+    calls = []
+
+    async def fake_run_guide_intent(query, session_id):
+        calls.append((query, session_id))
+        return "I can plan, search my own code, and remember things."
+
+    class RecordingStore:
+        def __init__(self):
+            self.turns = []
+
+        async def save_turn(self, session_id, role, content):
+            self.turns.append((session_id, role, content))
+
+        async def save_memory(self, session_id, content, salience=0.5, embedding=None):
+            pass
+
+    store = RecordingStore()
+
+    async def fake_get_store():
+        return store
+
+    monkeypatch.setattr("gateway.router.run_guide_intent", fake_run_guide_intent)
+    monkeypatch.setattr("gateway.router.get_store", fake_get_store)
+
+    resp = client.post("/chat", json={"message": "what can you do", "session_id": "sess1"})
+    assert resp.status_code == 200
+    assert calls == [("what can you do", "sess1")]
+    assert "remember things" in resp.text
+    assert ("sess1", "user", "what can you do") in store.turns
+
+
+def test_buddy_intent_bypasses_the_llm_and_streams_the_status(client, monkeypatch):
+    """"buddy" (bare, whole-message) routes through run_buddy_intent
+    (CablesMan -> BuddyAgent) — no LLM call involved."""
+    calls = []
+
+    async def fake_run_buddy_intent(intent, session_id):
+        calls.append((intent, session_id))
+        return {"name": "Sparkcub_1", "species": "Sparkcub", "rarity": "Rare", "mood": "calm",
+                "level": 1, "xp": 0, "xp_next": 100, "hp": 100,
+                "stats": {"energy": 80, "happiness": 90, "focus": 70}}
+
+    class RecordingStore:
+        def __init__(self):
+            self.turns = []
+
+        async def save_turn(self, session_id, role, content):
+            self.turns.append((session_id, role, content))
+
+        async def save_memory(self, session_id, content, salience=0.5, embedding=None):
+            pass
+
+    store = RecordingStore()
+
+    async def fake_get_store():
+        return store
+
+    monkeypatch.setattr("gateway.router.run_buddy_intent", fake_run_buddy_intent)
+    monkeypatch.setattr("gateway.router.get_store", fake_get_store)
+
+    resp = client.post("/chat", json={"message": "buddy", "session_id": "sess1"})
+    assert resp.status_code == 200
+    assert calls == [({"action": "status"}, "sess1")]
+    assert "Sparkcub_1" in resp.text
+    assert ("sess1", "user", "buddy") in store.turns
+
+
 def test_bash_intent_bypasses_the_llm_and_streams_the_command_output(client, monkeypatch):
     """Step 5 (tool execution) reachable directly from chat, not just from
     a sub-agent: "run bash: X" routes through run_bash_intent instead of

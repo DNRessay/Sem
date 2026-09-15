@@ -270,6 +270,20 @@ class NeonStore:
                     updated_at BIGINT NOT NULL
                 )
             """)
+            # One buddy per session (same shape as plans) — BuddyAgent
+            # (agents/buddy.py) used to keep its Buddy objects in an
+            # in-memory dict, but CablesMan.route() builds a fresh
+            # BuddyAgent on every call, so that dict reset on every turn.
+            # The whole Buddy.to_dict() blob is stored as-is; it's a
+            # handful of scalar fields plus one small stats dict, not
+            # worth its own columns.
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS buddies (
+                    session_id TEXT PRIMARY KEY,
+                    data JSONB NOT NULL,
+                    updated_at BIGINT NOT NULL
+                )
+            """)
 
     async def save_memory(self, session_id: str, content: str, salience: float = 0.5,
                            embedding: list[float] | None = None) -> int:
@@ -468,6 +482,23 @@ class NeonStore:
             if not row:
                 return None
             return {"goal": row["goal"], "steps": json.loads(row["steps"])}
+
+    async def get_buddy(self, session_id: str) -> dict | None:
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT data FROM buddies WHERE session_id=$1", session_id,
+            )
+            return json.loads(row["data"]) if row else None
+
+    async def save_buddy(self, session_id: str, data: dict):
+        async with self._pool.acquire() as conn:
+            now = int(time.time())
+            await conn.execute(
+                """INSERT INTO buddies (session_id, data, updated_at)
+                   VALUES ($1, $2, $3)
+                   ON CONFLICT (session_id) DO UPDATE SET data=$2, updated_at=$3""",
+                session_id, json.dumps(data), now,
+            )
 
     async def update_plan_step(self, session_id: str, step_n, status: str, result: str = ""):
         """Marks one step done (or whatever status) in place. Steps are a

@@ -80,46 +80,64 @@ class Buddy:
     def to_dict(self) -> dict:
         return {**self.status(), "born_at": self.born_at, "last_fed": self.last_fed}
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "Buddy":
+        buddy = cls(species=data.get("species"), name=data.get("name"))
+        buddy.rarity  = data.get("rarity", buddy.rarity)
+        buddy.mood    = data.get("mood", buddy.mood)
+        buddy.level   = data.get("level", buddy.level)
+        buddy.xp      = data.get("xp", buddy.xp)
+        buddy.xp_next = data.get("xp_next", buddy.xp_next)
+        buddy.hp      = data.get("hp", buddy.hp)
+        buddy.born_at = data.get("born_at", buddy.born_at)
+        buddy.last_fed = data.get("last_fed", buddy.last_fed)
+        buddy.stats   = data.get("stats", buddy.stats)
+        return buddy
+
 
 class BuddyAgent(BaseAgent):
     """
     Tamagotchi-style companion agent.
     18 species, rarity tiers, stats.
-    One buddy per session — persists across turns.
+    One buddy per session, persisted in Neon (storage.neon_store.get_buddy/
+    save_buddy) — CablesMan.route() builds a fresh BuddyAgent on every
+    call, so keeping the Buddy in an in-memory dict (the old approach)
+    never actually survived past a single turn; only the DB round-trip
+    does.
     """
-
-    def __init__(self, tools_registry=None, cables_man_ref=None, **kwargs):
-        super().__init__(tools_registry, cables_man_ref, **kwargs)
-        self._buddies: dict[str, Buddy] = {}
 
     async def run(self, task: dict) -> dict:
         session  = task.get("session_id", "default")
         action   = task.get("action", "status")
 
-        buddy = self._get_or_create(session)
+        from storage.neon_store import get_store
+        db = await get_store()
         self.log_audit(f"buddy:{session}:{action}")
 
+        if action == "new":
+            buddy = Buddy(species=task.get("species"), name=task.get("name"))
+            await db.save_buddy(session, buddy.to_dict())
+            return {"message": f"New buddy {buddy.name} hatched!", "status": buddy.status()}
+
+        buddy = await self._load_or_create(db, session)
+
         if action == "status":
-            return buddy.status()
+            result = buddy.status()
         elif action in ("pet", "feed", "train", "play"):
             message = buddy.interact(action)
-            return {"message": message, "status": buddy.status()}
+            result = {"message": message, "status": buddy.status()}
         elif action == "rename":
             buddy.name = task.get("name", buddy.name)
-            return {"message": f"Renamed to {buddy.name}!", "status": buddy.status()}
-        elif action == "new":
-            self._buddies[session] = Buddy(
-                species=task.get("species"),
-                name=task.get("name"),
-            )
-            return {"message": f"New buddy {self._buddies[session].name} hatched!", "status": self._buddies[session].status()}
+            result = {"message": f"Renamed to {buddy.name}!", "status": buddy.status()}
         else:
             return {"error": f"Unknown buddy action: {action}"}
 
-    def _get_or_create(self, session_id: str) -> Buddy:
-        if session_id not in self._buddies:
-            self._buddies[session_id] = Buddy()
-        return self._buddies[session_id]
+        await db.save_buddy(session, buddy.to_dict())
+        return result
+
+    async def _load_or_create(self, db, session_id: str) -> Buddy:
+        data = await db.get_buddy(session_id)
+        return Buddy.from_dict(data) if data else Buddy()
 
     def get_all_species(self) -> list[str]:
         return SPECIES

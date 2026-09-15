@@ -24,6 +24,18 @@ from pipeline.bash_intent import (
     run_bash_intent,
 )
 from pipeline.bootstrap import Bootstrap
+from pipeline.buddy_intent import (
+    buddy_status_label,
+    detect_buddy_intent,
+    format_buddy_result,
+    run_buddy_intent,
+)
+from pipeline.guide_intent import (
+    detect_guide_intent,
+    format_guide_result,
+    guide_status_label,
+    run_guide_intent,
+)
 from pipeline.plan_continue import (
     continue_status_label,
     detect_continue_intent,
@@ -172,6 +184,13 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
     # detection is — see the comment above web_intent.
     plan_intent = detect_plan_intent(raw_msg)
     explore_intent = detect_explore_intent(raw_msg)
+    # GuideAgent (agents/guide_agent.py) and BuddyAgent (agents/buddy.py) —
+    # same Step 7 sub-agent delegation pattern as plan/explore above.
+    # Guide is a pure string lookup (no LLM, no network) and buddy is a
+    # small Neon-persisted state machine; neither makes a Groq call, so
+    # both are always safe to fire regardless of rate-limit state.
+    guide_intent = detect_guide_intent(raw_msg)
+    buddy_intent = detect_buddy_intent(raw_msg)
     # "run bash: X" — Step 5's permission-gated tool execution reachable
     # directly from chat, not just from a sub-agent. Runs inside this
     # Lambda's own /tmp sandbox only — see pipeline/bash_intent.py's
@@ -316,6 +335,21 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
                 async for line in _bypass_with_reply("explore", label, reply, reply):
                     yield line
                 return
+        elif guide_intent:
+            yield f"data: {json.dumps({'status': guide_status_label()})}\n\n"
+            answer = await run_guide_intent(guide_intent, session_id)
+            reply = format_guide_result(answer)
+            async for line in _bypass_with_reply("guide", "SEMBLANCE self-knowledge", reply, reply):
+                yield line
+            return
+        elif buddy_intent:
+            yield f"data: {json.dumps({'status': buddy_status_label(buddy_intent['action'])})}\n\n"
+            result = await run_buddy_intent(buddy_intent, session_id)
+            reply = format_buddy_result(buddy_intent["action"], result)
+            label = f"Buddy: {buddy_intent['action']}"
+            async for line in _bypass_with_reply("buddy", label, json.dumps(result), reply):
+                yield line
+            return
         elif web_intent:
             kind, target = web_intent
             yield f"data: {json.dumps({'status': status_label(kind, target)})}\n\n"
