@@ -16,6 +16,17 @@ Parameters:
   GroqPlanningModel:
     Type: String
     Default: openai/gpt-oss-120b
+  CohereApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: >
+      Optional — Cohere's free Trial key, used only as a fallback when Groq's own rate limit
+      isn't worth retrying through (see pipeline/query_engine.py's RateLimitError path).
+      Blank disables the fallback entirely; the old "try again in ~N minutes" message still works.
+  CohereModel:
+    Type: String
+    Default: command-a-03-2025
   NeonDatabaseUrl:
     Type: String
     NoEcho: true
@@ -115,6 +126,8 @@ Globals:
         GROQ_API_KEY: !Ref GroqApiKey
         GROQ_MODEL: !Ref GroqModel
         GROQ_PLANNING_MODEL: !Ref GroqPlanningModel
+        COHERE_API_KEY: !Ref CohereApiKey
+        COHERE_MODEL: !Ref CohereModel
         NEON_DATABASE_URL: !Ref NeonDatabaseUrl
         MODAL_EMBEDDINGS_URL: !Ref ModalEmbeddingsUrl
         MODAL_REPO_URL: !Ref ModalRepoUrl

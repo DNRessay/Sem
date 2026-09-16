@@ -22,6 +22,16 @@ class Settings(BaseSettings):
     # against this account's actual model list" caveat as above.
     GROQ_VISION_MODEL: str = "meta-llama/llama-4-scout-17b-16e-instruct"
 
+    # Optional fallback for when Groq itself is rate-limited (a daily/
+    # hourly quota, not the per-minute window QueryEngine already retries
+    # through) — Cohere's free "Trial" key is rate-limited and explicitly
+    # not for production use per Cohere's own terms, but it's exactly
+    # enough to answer the occasional message that would otherwise just
+    # get "try again in ~11 minutes." Left blank, this is a no-op and
+    # stream_llm behaves exactly as it did before (see RateLimitError).
+    COHERE_API_KEY: str = ""
+    COHERE_MODEL: str = "command-a-03-2025"
+
     # Storage — Neon serverless Postgres (+ pgvector) replaces Aiven MySQL + ChromaDB.
     # One database, two roles: raw records and vector search over the same rows.
     NEON_DATABASE_URL: str = "postgresql://user:pass@host/semblance?sslmode=require"

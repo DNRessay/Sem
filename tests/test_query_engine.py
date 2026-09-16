@@ -4,9 +4,16 @@ import pytest
 import respx
 from httpx import Response
 
-from pipeline.query_engine import QueryEngine, RateLimitError, _parse_retry_seconds, _retry_after_seconds
+from pipeline.query_engine import (
+    QueryEngine,
+    RateLimitError,
+    _cohere_fallback,
+    _parse_retry_seconds,
+    _retry_after_seconds,
+)
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+COHERE_URL = "https://api.cohere.com/v2/chat"
 
 
 def test_retry_after_seconds_prefers_the_header():
@@ -310,6 +317,111 @@ async def test_stream_llm_raises_if_the_retry_also_429s(moto_cache_table, monkey
         with pytest.raises(RuntimeError, match="429"):
             async for _ in engine.stream_llm([{"role": "user", "content": "hi"}], session_id="s1"):
                 pass
+
+
+@pytest.mark.asyncio
+async def test_cohere_fallback_returns_none_when_no_key_configured(monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "COHERE_API_KEY", "")
+    result = await _cohere_fallback([{"role": "user", "content": "hi"}], 800)
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_cohere_fallback_returns_the_reply_text(monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "COHERE_API_KEY", "test-key")
+    with respx.mock:
+        respx.post(COHERE_URL).mock(return_value=Response(200, json={
+            "message": {"role": "assistant", "content": [{"type": "text", "text": "hello from cohere"}]},
+        }))
+        result = await _cohere_fallback([{"role": "user", "content": "hi"}], 800)
+    assert result == "hello from cohere"
+
+
+@pytest.mark.asyncio
+async def test_cohere_fallback_returns_none_on_non_200(monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "COHERE_API_KEY", "test-key")
+    with respx.mock:
+        respx.post(COHERE_URL).mock(return_value=Response(401, json={"message": "invalid key"}))
+        result = await _cohere_fallback([{"role": "user", "content": "hi"}], 800)
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_cohere_fallback_returns_none_on_network_failure(monkeypatch):
+    import httpx as httpx_mod
+
+    from config import settings
+    monkeypatch.setattr(settings, "COHERE_API_KEY", "test-key")
+    with respx.mock:
+        respx.post(COHERE_URL).mock(side_effect=httpx_mod.ConnectError("down"))
+        result = await _cohere_fallback([{"role": "user", "content": "hi"}], 800)
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_cohere_fallback_returns_none_on_empty_content(monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "COHERE_API_KEY", "test-key")
+    with respx.mock:
+        respx.post(COHERE_URL).mock(return_value=Response(200, json={"message": {"content": []}}))
+        result = await _cohere_fallback([{"role": "user", "content": "hi"}], 800)
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_stream_llm_falls_back_to_cohere_on_a_daily_quota_wait(moto_cache_table, monkeypatch):
+    """The exact live scenario this was built for: Groq's TPD wait is too
+    long to sleep through, but with a Cohere key configured, the turn
+    still gets a real answer instead of "try again in ~11 minutes."""
+    from config import settings
+    monkeypatch.setattr(settings, "COHERE_API_KEY", "test-key")
+    engine = QueryEngine()
+    sleeps = []
+
+    async def fake_sleep(s):
+        sleeps.append(s)
+
+    monkeypatch.setattr("pipeline.query_engine.asyncio.sleep", fake_sleep)
+
+    with respx.mock:
+        respx.post(GROQ_URL).mock(
+            return_value=Response(429, content=b"...on tokens per day (TPD)... Please try again in 10m55.776s.")
+        )
+        respx.post(COHERE_URL).mock(return_value=Response(200, json={
+            "message": {"content": [{"type": "text", "text": "the cohere answer"}]},
+        }))
+        pieces = [p async for p in engine.stream_llm([{"role": "user", "content": "hi"}], session_id="s1")]
+
+    assert sleeps == []  # never slept — the wait was too long to bother
+    full = "".join(pieces)
+    assert "the cohere answer" in full
+    assert "Cohere fallback" in full
+
+
+@pytest.mark.asyncio
+async def test_stream_llm_still_raises_when_cohere_fallback_also_fails(moto_cache_table, monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "COHERE_API_KEY", "test-key")
+    engine = QueryEngine()
+
+    async def fake_sleep(s):
+        pass
+
+    monkeypatch.setattr("pipeline.query_engine.asyncio.sleep", fake_sleep)
+
+    with respx.mock:
+        respx.post(GROQ_URL).mock(
+            return_value=Response(429, content=b"...on tokens per day (TPD)... Please try again in 10m55.776s.")
+        )
+        respx.post(COHERE_URL).mock(return_value=Response(500, text="cohere is down too"))
+        with pytest.raises(RateLimitError) as exc_info:
+            async for _ in engine.stream_llm([{"role": "user", "content": "hi"}], session_id="s1"):
+                pass
+
+    assert exc_info.value.retry_after == pytest.approx(655.776)
 
 
 @pytest.mark.asyncio

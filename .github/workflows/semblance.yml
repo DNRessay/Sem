@@ -84,6 +84,7 @@ jobs:
       - name: sam deploy
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
           NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
           MODAL_EMBEDDINGS_URL: ${{ secrets.MODAL_EMBEDDINGS_URL }}
           MODAL_REPO_URL: ${{ secrets.MODAL_REPO_URL }}
@@ -114,6 +115,7 @@ jobs:
           # a separate, harmless no-op shell statement instead of erroring,
           # so sam deploy "succeeded" while quietly deploying nothing.
           groq_api_key=$(printf '%s' "$GROQ_API_KEY" | tr -d '\r\n')
+          cohere_api_key=$(printf '%s' "$COHERE_API_KEY" | tr -d '\r\n')
           neon_database_url=$(printf '%s' "$NEON_DATABASE_URL" | tr -d '\r\n')
           modal_embeddings_url=$(printf '%s' "$MODAL_EMBEDDINGS_URL" | tr -d '\r\n')
           modal_repo_url=$(printf '%s' "$MODAL_REPO_URL" | tr -d '\r\n')
@@ -137,13 +139,13 @@ jobs:
           # are unset get left out entirely rather than passed as empty; the
           # template's own Default: "" covers them the same way either way.
           #
-          # GroqModel/GroqPlanningModel are passed explicitly, always, even
-          # though they're not secrets — CloudFormation reuses a parameter's
-          # *previous deployed value* for any parameter omitted from
-          # --parameter-overrides on a stack update, not the template's
-          # current Default. Two model-ID fixes both silently no-op'd for
-          # exactly this reason before this was caught. Keep these two
-          # literal values in sync with the Default: in template.yaml.
+          # GroqModel/GroqPlanningModel/CohereModel are passed explicitly,
+          # always, even though they're not secrets — CloudFormation reuses
+          # a parameter's *previous deployed value* for any parameter
+          # omitted from --parameter-overrides on a stack update, not the
+          # template's current Default. Two model-ID fixes both silently
+          # no-op'd for exactly this reason before this was caught. Keep
+          # these literal values in sync with the Default: in template.yaml.
           # PublicApiUrl is this stack's own ChatFunctionUrl — stable once
           # created (Function URLs don't change across in-place updates,
           # confirmed repeatedly this session), so it's safe to hardcode
@@ -154,8 +156,10 @@ jobs:
             "SecretKey=${secret_key}"
             "GroqModel=qwen/qwen3.8-27b"
             "GroqPlanningModel=openai/gpt-oss-120b"
+            "CohereModel=command-a-03-2025"
             "PublicApiUrl=https://sv2uw47le4udr57ojay37ey3ry0nssoa.lambda-url.eu-west-1.on.aws"
           )
+          [ -n "$cohere_api_key" ] && params+=("CohereApiKey=${cohere_api_key}")
           [ -n "$modal_embeddings_url" ] && params+=("ModalEmbeddingsUrl=${modal_embeddings_url}")
           [ -n "$modal_repo_url" ] && params+=("ModalRepoUrl=${modal_repo_url}")
           [ -n "$modal_repo_secret" ] && params+=("ModalRepoSecret=${modal_repo_secret}")

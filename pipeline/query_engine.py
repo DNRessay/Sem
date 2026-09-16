@@ -87,6 +87,46 @@ class RateLimitError(RuntimeError):
         super().__init__(f"Groq API error (status {status_code}) for model '{model}': {body}")
 
 
+async def _cohere_fallback(messages: list, max_tokens: int) -> str | None:
+    """Best-effort fallback tried only once Groq's own rate limit isn't
+    worth retrying through — returns None (never raises) on any failure,
+    so the caller falls through to the normal RateLimitError path
+    unchanged: no COHERE_API_KEY configured, Cohere itself down, an
+    unexpected response shape, anything. This is a nice-to-have extra
+    chance at an answer, never a required dependency.
+
+    Not streamed — Cohere's v2 chat SSE event shape isn't worth matching
+    exactly for a path that only fires when Groq is already failing;
+    the whole reply comes back as one piece, same as a cache hit already
+    does elsewhere in this pipeline."""
+    if not settings.COHERE_API_KEY:
+        return None
+    cohere_messages = [
+        {"role": m.get("role", "user"), "content": m["content"]}
+        for m in messages if isinstance(m.get("content"), str)
+    ]
+    try:
+        async with httpx.AsyncClient(timeout=25) as client:
+            r = await client.post(
+                "https://api.cohere.com/v2/chat",
+                json={"model": settings.COHERE_MODEL, "messages": cohere_messages, "max_tokens": max_tokens},
+                headers={"Authorization": f"Bearer {settings.COHERE_API_KEY}", "Content-Type": "application/json"},
+            )
+            if r.status_code != 200:
+                return None
+            data = r.json()
+    except httpx.HTTPError:
+        return None
+
+    content = (data.get("message") or {}).get("content")
+    if isinstance(content, list) and content and isinstance(content[0], dict):
+        text = content[0].get("text")
+        return text if isinstance(text, str) and text else None
+    if isinstance(content, str) and content:
+        return content
+    return None
+
+
 class QueryEngine:
     def __init__(self):
         self.sys_cache = SysCache()
@@ -208,6 +248,14 @@ class QueryEngine:
                             retried = True
                             await asyncio.sleep(effective_wait)
                             continue
+                        fallback = await _cohere_fallback(messages, max_tokens)
+                        if fallback:
+                            note = "_(Groq's rate limit was hit — answered via Cohere fallback)_\n\n"
+                            full_reply = note + fallback
+                            yield full_reply
+                            self.cache_ctrl.write(prefix_hash, full_reply)
+                            self.conv_cache.append(session_id, {"role": "assistant", "content": full_reply})
+                            return
                         raise RateLimitError(429, model, body.decode(errors="replace"), wait)
                     if r.status_code != 200:
                         body = await r.aread()
