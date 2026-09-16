@@ -7,8 +7,6 @@ class TAUEngine:
     def __init__(self):
         self.pacific = PACIFICEngine()
         self.cache = TAUCache()
-        self._session_counts: dict[str, int] = {}
-        self._last_dream: dict[str, float] = {}
 
     async def observe_and_inject(self, session_id: str, query: str, history: list) -> str:
         cached = self.cache.get(session_id)
@@ -28,8 +26,6 @@ class TAUEngine:
 
         ctx = self._build_context(user_model, signals)
         self.cache.set(session_id, ctx)
-
-        self._session_counts[session_id] = self._session_counts.get(session_id, 0) + 1
         return ctx
 
     def _build_context(self, user_model: dict, ocean: dict) -> str:
@@ -67,13 +63,3 @@ class TAUEngine:
         if prefs := user_model.get("preferences"):
             parts.append(f"Known preferences: {prefs}")
         return "\n".join(parts)
-
-    def trigger_dream_if_ready(self, session_id: str) -> bool:
-        import time
-        now = time.time()
-        last = self._last_dream.get(session_id, 0)
-        sessions = self._session_counts.get(session_id, 0)
-        if (now - last) >= 86400 and sessions >= 5:
-            self._last_dream[session_id] = now
-            return True
-        return False

@@ -180,6 +180,62 @@ async def test_get_recent_agent_events_queries_by_id_not_timestamp():
     assert "ORDER BY id ASC" in query
 
 
+class _FakeRowConn:
+    def __init__(self, row=None):
+        self._row = row
+        self.executed: list[tuple] = []
+
+    async def fetchrow(self, query, *args):
+        return self._row
+
+    async def execute(self, query, *args):
+        self.executed.append((query, args))
+
+
+@pytest.mark.asyncio
+async def test_get_dream_last_run_returns_zero_when_never_run():
+    conn = _FakeRowConn(row=None)
+    store = NeonStore()
+    store._pool = _FakePool.__new__(_FakePool)
+    store._pool.acquire = lambda: _FakeAcquire(conn)
+
+    assert await store.get_dream_last_run() == 0
+
+
+@pytest.mark.asyncio
+async def test_get_dream_last_run_returns_the_stored_value():
+    conn = _FakeRowConn(row={"last_run_at": 12345})
+    store = NeonStore()
+    store._pool = _FakePool.__new__(_FakePool)
+    store._pool.acquire = lambda: _FakeAcquire(conn)
+
+    assert await store.get_dream_last_run() == 12345
+
+
+@pytest.mark.asyncio
+async def test_set_dream_last_run_upserts_the_global_row():
+    conn = _FakeRowConn()
+    store = NeonStore()
+    store._pool = _FakePool.__new__(_FakePool)
+    store._pool.acquire = lambda: _FakeAcquire(conn)
+
+    await store.set_dream_last_run(999)
+
+    query, args = conn.executed[0]
+    assert "ON CONFLICT" in query
+    assert args == (999,)
+
+
+@pytest.mark.asyncio
+async def test_count_sessions_since_returns_the_distinct_count():
+    conn = _FakeRowConn(row={"n": 7})
+    store = NeonStore()
+    store._pool = _FakePool.__new__(_FakePool)
+    store._pool.acquire = lambda: _FakeAcquire(conn)
+
+    assert await store.count_sessions_since(1000) == 7
+
+
 @pytest.mark.asyncio
 async def test_delete_session_removes_conversations_title_and_memories():
     conn = _RecordingTxnConn()

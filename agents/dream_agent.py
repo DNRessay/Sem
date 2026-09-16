@@ -1,4 +1,3 @@
-import asyncio
 import time
 
 from agents.base_agent import BaseAgent
@@ -13,6 +12,20 @@ class DreamAgent(BaseAgent):
     3-gate trigger: 24hr + 5 sessions + lock.
     4 phases: Orient → Gather → Consolidate → Index.
     Nothing pruned — ever.
+
+    The gate used to live on in-memory instance attributes
+    (self._last_run/self._sessions), which reset on every Lambda
+    invocation (AgentTool.spawn() constructs a fresh DreamAgent on every
+    call) and were never actually incremented from anywhere in the live
+    request path — the gate could never pass. It's now backed by Neon
+    (storage.neon_store's dream_state table + a real distinct-session
+    count from conversations), so it survives across invocations and
+    reflects real activity. See tick_handler.py for the EventBridge
+    schedule that actually calls run() periodically — Lambda has no
+    persistent process for this to run on its own, and consolidation is
+    deliberately not chat-triggerable: it iterates up to 500 memories and
+    re-embeds them, a background maintenance job, not something a stray
+    chat phrase should be able to kick off mid-conversation.
     """
 
     GATE_HOURS = 24
@@ -21,30 +34,26 @@ class DreamAgent(BaseAgent):
     def __init__(self, tools_registry=None, cables_man_ref=None, **kwargs):
         super().__init__(tools_registry, cables_man_ref, **kwargs)
         self.salience = SalienceEngine()
-        self._lock = asyncio.Lock()
-        self._last_run = 0.0
-        self._sessions = 0
 
     async def run(self, task: dict) -> dict:
-        if not self.check_gates():
-            return {"status": "gates_not_met", "sessions": self._sessions,
-                    "hours_since_last": (time.time() - self._last_run) / 3600}
+        gate = await self.check_gates()
+        if not gate["ready"]:
+            return {"status": "gates_not_met", **gate}
 
-        async with self._lock:
-            self.log_audit("dream:orient")
-            orientation = self.phase_orient()
+        self.log_audit("dream:orient")
+        orientation = self.phase_orient(gate)
 
-            self.log_audit("dream:gather")
-            raw = await self.phase_gather()
+        self.log_audit("dream:gather")
+        raw = await self.phase_gather()
 
-            self.log_audit(f"dream:consolidate:{len(raw)}:memories")
-            consolidated = await self.phase_consolidate(raw)
+        self.log_audit(f"dream:consolidate:{len(raw)}:memories")
+        consolidated = await self.phase_consolidate(raw)
 
-            self.log_audit("dream:index")
-            await self.phase_index(consolidated)
+        self.log_audit("dream:index")
+        await self.phase_index(consolidated)
 
-            self._last_run = time.time()
-            self._sessions = 0
+        db = await get_store()
+        await db.set_dream_last_run(int(time.time()))
 
         return {
             "status": "complete",
@@ -52,19 +61,20 @@ class DreamAgent(BaseAgent):
             "orientation": orientation,
         }
 
-    def check_gates(self) -> bool:
-        elapsed_hrs = (time.time() - self._last_run) / 3600
-        return (elapsed_hrs >= self.GATE_HOURS
-                and self._sessions >= self.GATE_SESSIONS
-                and not self._lock.locked())
+    async def check_gates(self) -> dict:
+        """Real, Neon-backed gate check — returns the full state (not just
+        a bool) so a caller (tick_handler, a future status surface) can
+        show *why* it isn't ready yet, not just that it isn't."""
+        db = await get_store()
+        last_run = await db.get_dream_last_run()
+        elapsed_hrs = (time.time() - last_run) / 3600
+        sessions = await db.count_sessions_since(last_run)
+        ready = elapsed_hrs >= self.GATE_HOURS and sessions >= self.GATE_SESSIONS
+        return {"ready": ready, "hours_since_last": elapsed_hrs, "sessions_since_last": sessions}
 
-    def phase_orient(self) -> dict:
+    def phase_orient(self, gate: dict) -> dict:
         """Phase 1: Survey current memory state."""
-        return {
-            "last_run": self._last_run,
-            "sessions_since": self._sessions,
-            "status": "ready_to_consolidate",
-        }
+        return {**gate, "status": "ready_to_consolidate"}
 
     async def phase_gather(self) -> list:
         """Phase 2: Pull raw memories from Neon."""
@@ -95,6 +105,3 @@ class DreamAgent(BaseAgent):
                 await db.update_memory_salience(m["id"], m.get("salience", 0.5), embedding)
             except Exception:
                 continue
-
-    def increment_session(self):
-        self._sessions += 1

@@ -167,8 +167,14 @@ Resources:
       FunctionName: semblance-tick
       CodeUri: ./
       Handler: tick_handler.handler
-      Description: Medium tier — one KAIROS tick per schedule firing, replacing the Heavy-tier daemon loop
-      Timeout: 20
+      Description: Medium tier — one KAIROS tick + a DREAM gate check per schedule firing, replacing the Heavy-tier daemon loop
+      # KAIROS alone needs only its old 20s — but when DREAM's gate passes
+      # (rare: 24hr + 5 sessions), phase_index re-embeds up to 500 memories
+      # one Modal HTTP call at a time, which can run well past 20s. 300s
+      # gives real headroom for that while staying comfortably under the
+      # 15-minute schedule interval (so one tick finishes before the next
+      # fires) and far under Lambda's 900s hard ceiling.
+      Timeout: 300
       MemorySize: 256
       Policies:
         - DynamoDBCrudPolicy:

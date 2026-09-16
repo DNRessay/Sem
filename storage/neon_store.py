@@ -284,6 +284,19 @@ class NeonStore:
                     updated_at BIGINT NOT NULL
                 )
             """)
+            # DREAM's 3-gate trigger (24hr + 5 sessions + lock) used to live
+            # on DreamAgent's own instance attributes, which reset on every
+            # Lambda invocation (a fresh DreamAgent is constructed on every
+            # AgentTool.spawn() call) and were never actually incremented
+            # from anywhere in the live request path — the gate could never
+            # pass. One row, keyed by a fixed id since there's only ever one
+            # DREAM cycle running across the whole app, not one per session.
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS dream_state (
+                    id TEXT PRIMARY KEY DEFAULT 'global',
+                    last_run_at BIGINT NOT NULL DEFAULT 0
+                )
+            """)
 
     async def save_memory(self, session_id: str, content: str, salience: float = 0.5,
                            embedding: list[float] | None = None) -> int:
@@ -383,6 +396,34 @@ class NeonStore:
                     term, limit,
                 )
             return [dict(r) for r in rows]
+
+    async def get_dream_last_run(self) -> int:
+        """0 if DREAM has never run — that's a real "24hr ago" for gate
+        purposes (GATE_HOURS is trivially satisfied), not a missing value
+        to special-case."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT last_run_at FROM dream_state WHERE id='global'")
+            return row["last_run_at"] if row else 0
+
+    async def set_dream_last_run(self, ts: int):
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO dream_state (id, last_run_at) VALUES ('global', $1)
+                   ON CONFLICT (id) DO UPDATE SET last_run_at=$1""",
+                ts,
+            )
+
+    async def count_sessions_since(self, since_ts: int) -> int:
+        """Distinct sessions with at least one turn since `since_ts` —
+        DREAM's "5 sessions" gate, computed from real conversation
+        activity instead of an in-memory counter that reset every Lambda
+        invocation and was never actually incremented anywhere."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT COUNT(DISTINCT session_id) AS n FROM conversations WHERE created_at >= $1",
+                since_ts,
+            )
+            return row["n"] if row else 0
 
     async def delete_session(self, session_id: str):
         """Removes a session's chat history entirely — conversations,
