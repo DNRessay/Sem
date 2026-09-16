@@ -30,6 +30,12 @@ from pipeline.buddy_intent import (
     format_buddy_result,
     run_buddy_intent,
 )
+from pipeline.coordinator_intent import (
+    coordinator_status_label,
+    detect_coordinator_intent,
+    format_coordinator_result,
+    run_coordinator_intent,
+)
 from pipeline.guide_intent import (
     detect_guide_intent,
     format_guide_result,
@@ -55,6 +61,12 @@ from pipeline.repo_context import (
     run_repo_intent,
 )
 from pipeline.session_title import generate_title
+from pipeline.ultraplan_intent import (
+    detect_ultraplan_intent,
+    format_ultraplan_result,
+    run_ultraplan_intent,
+    ultraplan_status_label,
+)
 from pipeline.web_context import detect_web_intent, run_web_intent, status_label
 from storage.embeddings import embed_text
 from storage.neon_store import get_store
@@ -209,13 +221,19 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
     # search) — repo phrasing is the more specific signal, and only ever
     # does anything when this session actually has an active cloned repo.
     repo_intent = detect_repo_intent(raw_msg)
+    # "deep plan for X" / "ultraplan X" — routes to UltraPlanAgent (Groq's
+    # larger GPT-OSS-120B model) instead of PlanAgent's quick pass. Checked
+    # before plan_intent: its own trigger phrase ("deep plan for X") would
+    # otherwise also match plan_intent's looser "plan (?:for|to)" pattern,
+    # and the more specific one should win.
+    ultraplan_intent = detect_ultraplan_intent(raw_msg)
     # Step 7 (sub-agent delegation) wired to a real chat message: "make a
     # plan for X" routes through CablesMan -> PlanAgent, "search the code
     # for X" through CablesMan -> ExploreAgent. Checked after repo_intent
     # (more specific, and only fires with an active attached repo) and
     # before web_intent, on raw_msg only for the same reason web/repo intent
     # detection is — see the comment above web_intent.
-    plan_intent = detect_plan_intent(raw_msg)
+    plan_intent = None if ultraplan_intent else detect_plan_intent(raw_msg)
     explore_intent = detect_explore_intent(raw_msg)
     # GuideAgent (agents/guide_agent.py) and BuddyAgent (agents/buddy.py) —
     # same Step 7 sub-agent delegation pattern as plan/explore above.
@@ -224,6 +242,11 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
     # both are always safe to fire regardless of rate-limit state.
     guide_intent = detect_guide_intent(raw_msg)
     buddy_intent = detect_buddy_intent(raw_msg)
+    # "run these in parallel: a, b, c" — routes to CoordinatorAgent (Step 7),
+    # a real asyncio.gather fan-out over the listed subtasks. See
+    # pipeline/coordinator_intent.py for the XML-building it does under the
+    # hood to match CoordinatorAgent's own tested interface.
+    coordinator_intent = detect_coordinator_intent(raw_msg)
     # "when did I ask about X" / "how many times have I mentioned X" — a
     # real, grounded search across every session's history (not just this
     # one) instead of letting the model guess from whatever's already in
@@ -370,6 +393,16 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
             else:
                 db = await get_store()
                 await db.save_agent_event(session_id, kind, f"blocked:no active repo or grep failed for {target}")
+        elif ultraplan_intent:
+            yield f"data: {json.dumps({'status': ultraplan_status_label()})}\n\n"
+            result = await run_ultraplan_intent(ultraplan_intent, session_id)
+            reply = format_ultraplan_result(result)
+            if reply:
+                async for line in _bypass_with_reply("ultraplan", "Deep planning", json.dumps(result), reply, result=result):
+                    yield line
+                return
+            # No plan came back — fall through to the normal Bootstrap flow
+            # below rather than leaving the request hanging with no reply.
         elif plan_intent:
             yield f"data: {json.dumps({'status': plan_status_label()})}\n\n"
             plan = await run_plan_intent(plan_intent, session_id)
@@ -405,6 +438,16 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
             async for line in _bypass_with_reply("buddy", label, json.dumps(result), reply, result=result):
                 yield line
             return
+        elif coordinator_intent:
+            yield f"data: {json.dumps({'status': coordinator_status_label(coordinator_intent)})}\n\n"
+            result = await run_coordinator_intent(coordinator_intent, session_id)
+            reply = format_coordinator_result(coordinator_intent, result)
+            if reply:
+                async for line in _bypass_with_reply("coordinator", "Coordinating", json.dumps(result), reply, result=result):
+                    yield line
+                return
+            # No usable result came back — fall through to the normal
+            # Bootstrap flow below rather than leaving the request hanging.
         elif memory_search_intent:
             yield f"data: {json.dumps({'status': memory_search_status_label(memory_search_intent['term'])})}\n\n"
             result = await run_memory_search_intent(memory_search_intent, session_id)
@@ -532,4 +575,4 @@ async def rename_session(session_id: str, request: Request, _account: dict = Dep
 
 @router.get("/health")
 async def health():
-    return {"status": "ok", "version": "semblance-v9"}
+    return {"status": "ok", "version": "semblance-v1"}

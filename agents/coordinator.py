@@ -68,7 +68,7 @@ class CoordinatorAgent(BaseAgent):
         if not query or query.lower() in ("delegate", "pass", "forward"):
             return {"error": "Lazy delegation rejected — task must have real content"}
 
-        result = await self.call_tool("web_fetch", {"url": ""}) if task_type == "fetch" \
+        result = await self.call_tool("web_fetch", {"url": query}) if task_type == "fetch" \
                else {"status": "processed", "query": query, "type": task_type}
 
         if parent_id in self._scratchpad:

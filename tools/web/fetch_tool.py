@@ -36,7 +36,7 @@ class FetchTool:
             return {"error": "No URL provided"}
         try:
             async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-                r = await client.get(url, headers={"User-Agent": "Semblance/9.0"})
+                r = await client.get(url, headers={"User-Agent": "Semblance/1.0"})
         except Exception as e:
             return {"error": str(e), "url": url}
 

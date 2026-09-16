@@ -1,7 +1,7 @@
 from agents.base_agent import BaseAgent
 
 SEMBLANCE_KNOWLEDGE = """
-SEMBLANCE v9 — CABLES MAN Architecture
+SEMBLANCE v1 — CABLES MAN Architecture
 
 PIPELINE: Bootstrap (7-stage init) → CTX Assembly (SEMBLANCE.md hierarchy, 40k limit)
 → Memory Load (SEM RETRIEVAL cosine + MySQL raw) → Query Engine (14 cache vectors)

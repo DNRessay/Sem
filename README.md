@@ -1,7 +1,7 @@
 # SEMBLANCE
 
 > **Coordinated Autonomous Background Learning Execution System — Multi Agent Network**
-> *v9 · CABLES MAN Architecture*
+> *v1 · CABLES MAN Architecture*
 
 SEMBLANCE is a multi-agent AI assistant framework built on top of free-tier infrastructure. It combines adaptive identity modeling, emotional intelligence, semantic memory, a 7-stage execution pipeline, and a flat tool registry into a single coherent system — designed to run in production on close to zero budget, on AWS. See **[docs/AWS_DEPLOYMENT.md](docs/AWS_DEPLOYMENT.md)** for the full deployment guide and cost breakdown.
 

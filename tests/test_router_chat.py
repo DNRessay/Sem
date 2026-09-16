@@ -295,6 +295,79 @@ def test_later_turns_do_not_regenerate_the_title(client, monkeypatch):
     assert calls == []
 
 
+def test_ultraplan_intent_bypasses_the_llm_and_streams_the_deep_plan(client, monkeypatch):
+    """"deep plan for X" routes through run_ultraplan_intent (CablesMan ->
+    UltraPlanAgent, the larger GPT-OSS-120B model) instead of Bootstrap/the
+    main LLM call — and instead of plan_intent, which would otherwise also
+    match "plan for X"."""
+    calls = []
+
+    async def fake_run_ultraplan_intent(goal, session_id):
+        calls.append((goal, session_id))
+        return {"status": "complete", "goal": goal, "plan": "1. Do the deep thing."}
+
+    async def fake_run_plan_intent(goal, session_id):
+        raise AssertionError("plan_intent must not fire when ultraplan_intent matched")
+
+    class RecordingStore:
+        async def save_turn(self, session_id, role, content):
+            pass
+
+        async def save_memory(self, session_id, content, salience=0.5, embedding=None):
+            pass
+
+        async def save_agent_event(self, session_id, agent, action):
+            pass
+
+    async def fake_get_store():
+        return RecordingStore()
+
+    monkeypatch.setattr("gateway.router.run_ultraplan_intent", fake_run_ultraplan_intent)
+    monkeypatch.setattr("gateway.router.run_plan_intent", fake_run_plan_intent)
+    monkeypatch.setattr("gateway.router.get_store", fake_get_store)
+
+    resp = client.post("/chat", json={"message": "deep plan for launching the bot", "session_id": "sess1"})
+    assert resp.status_code == 200
+    assert calls == [("deep plan for launching the bot", "sess1")]
+    assert "Do the deep thing" in resp.text
+
+
+def test_coordinator_intent_bypasses_the_llm_and_streams_the_result(client, monkeypatch):
+    """"run these in parallel: a, b" routes through run_coordinator_intent
+    (CablesMan -> CoordinatorAgent) instead of Bootstrap/the main LLM call."""
+    calls = []
+
+    async def fake_run_coordinator_intent(subtasks, session_id):
+        calls.append((subtasks, session_id))
+        return {"results": {
+            "worker_0": {"status": "processed", "query": "write the report", "type": "general"},
+            "worker_1": {"status": "processed", "query": "check the numbers", "type": "general"},
+        }}
+
+    class RecordingStore:
+        async def save_turn(self, session_id, role, content):
+            pass
+
+        async def save_memory(self, session_id, content, salience=0.5, embedding=None):
+            pass
+
+        async def save_agent_event(self, session_id, agent, action):
+            pass
+
+    async def fake_get_store():
+        return RecordingStore()
+
+    monkeypatch.setattr("gateway.router.run_coordinator_intent", fake_run_coordinator_intent)
+    monkeypatch.setattr("gateway.router.get_store", fake_get_store)
+
+    resp = client.post("/chat", json={
+        "message": "run these in parallel: write the report, check the numbers", "session_id": "sess1",
+    })
+    assert resp.status_code == 200
+    assert calls == [(["write the report", "check the numbers"], "sess1")]
+    assert "write the report" in resp.text
+
+
 def test_plan_intent_bypasses_the_llm_and_streams_the_formatted_plan(client, monkeypatch):
     """Step 7 (sub-agent delegation) reachable from a real chat message: a
     "make a plan for X" message routes through run_plan_intent (CablesMan

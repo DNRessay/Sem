@@ -1,45 +1,45 @@
-import asyncio
-import time
-
 import httpx
 
 from agents.base_agent import BaseAgent
 from config import settings
 
-POLL_INTERVAL = 3      # seconds
-MAX_WINDOW    = 1800   # 30 minutes
-
 
 class UltraPlanAgent(BaseAgent):
     """
-    Remote GPT-OSS-120B planning agent via Groq.
-    Up to 30-minute planning window. Polls every 3s.
-    Browser approval gate before any execution.
+    Deep planning via Groq's larger GPT-OSS-120B model (GROQ_PLANNING_MODEL)
+    — a bigger-budget, slower alternative to PlanAgent's quick pass, for a
+    goal that genuinely needs more reasoning. Single bounded call, same
+    shape as PlanAgent (agents/plan_agent.py).
+
+    The original design here (poll every 3s for up to 30 minutes, wait for
+    a browser approval gate before returning) could never actually run:
+    AgentTool.spawn() (tools/agent_tool.py) constructs a fresh
+    UltraPlanAgent on every call, so `_pending_approval` never survived
+    past the single request that created it, and nothing exposed an
+    `approve()` endpoint for a second HTTP request to call anyway — the
+    same class of bug as DreamAgent's in-memory gate counters resetting
+    every Lambda invocation. Returns the plan directly instead.
     """
 
-    def __init__(self, tools_registry=None, cables_man_ref=None, **kwargs):
-        super().__init__(tools_registry, cables_man_ref, **kwargs)
-        self._pending_approval: dict[str, dict] = {}
+    _MAX_TOKENS = 4096
+    _TIMEOUT_SECONDS = 25  # well under Lambda's 30s Globals.Function.Timeout
 
     async def run(self, task: dict) -> dict:
-        task_id = task.get("id", str(time.time()))
-        query   = task.get("query", "")
-        self.log_audit(f"ultraplan:start:{task_id}")
+        query = task.get("query", "")
+        self.log_audit(f"ultraplan:start:{query[:60]}")
+        if not query:
+            return {"error": "No goal provided to UltraPlanAgent"}
 
         plan = await self._deep_plan(query)
-        self._pending_approval[task_id] = {"plan": plan, "approved": False, "ts": time.time()}
-
-        # Wait for approval (browser / human gate) up to MAX_WINDOW
-        approved = await self._wait_for_approval(task_id)
-        if not approved:
-            self.log_audit(f"ultraplan:rejected:{task_id}")
-            return {"status": "rejected", "task_id": task_id}
-
-        self.log_audit(f"ultraplan:executing:{task_id}")
-        return {"status": "approved", "plan": plan, "task_id": task_id}
+        return {"status": "complete", "goal": query, "plan": plan}
 
     async def _deep_plan(self, query: str) -> str:
-        """Call GPT-OSS-120B via Groq for extended reasoning."""
+        """Calls GPT-OSS-120B via Groq directly (not through QueryEngine —
+        this model's own use case, one long detailed reply, is exactly what
+        QueryEngine's tight _DEFAULT_MAX_TOKENS/cache-vector machinery isn't
+        tuned for). Any failure returns a plain error string rather than
+        raising, so a bad response degrades to a visible message instead of
+        crashing the whole chat turn."""
         headers = {
             "Authorization": f"Bearer {settings.GROQ_API_KEY}",
             "Content-Type": "application/json",
@@ -50,38 +50,19 @@ class UltraPlanAgent(BaseAgent):
                 {"role": "system", "content": "You are a deep strategic planner. Think step-by-step, produce a detailed execution plan."},
                 {"role": "user", "content": query},
             ],
-            "max_tokens": 4096,
+            "max_tokens": self._MAX_TOKENS,
             "temperature": 0.6,
         }
-        deadline = time.time() + MAX_WINDOW
-        async with httpx.AsyncClient(timeout=MAX_WINDOW) as client:
-            while time.time() < deadline:
-                try:
-                    r = await client.post("https://api.groq.com/openai/v1/chat/completions",
-                                          json=payload, headers=headers)
-                    data = r.json()
-                    return data["choices"][0]["message"]["content"]
-                except Exception:
-                    await asyncio.sleep(POLL_INTERVAL)
-        return "Planning timeout — no result produced."
+        try:
+            async with httpx.AsyncClient(timeout=self._TIMEOUT_SECONDS) as client:
+                r = await client.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    json=payload, headers=headers,
+                )
+                data = r.json()
+        except httpx.HTTPError as e:
+            return f"Planning failed — network error: {e}"
 
-    async def _wait_for_approval(self, task_id: str, timeout: int = 300) -> bool:
-        """Poll for human approval up to timeout seconds."""
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            entry = self._pending_approval.get(task_id, {})
-            if entry.get("approved"):
-                return True
-            await asyncio.sleep(POLL_INTERVAL)
-        return False
-
-    def approve(self, task_id: str) -> bool:
-        """Called externally (browser endpoint) to approve a pending plan."""
-        if task_id in self._pending_approval:
-            self._pending_approval[task_id]["approved"] = True
-            return True
-        return False
-
-    def get_pending(self) -> list[dict]:
-        return [{"task_id": k, **v} for k, v in self._pending_approval.items()
-                if not v["approved"]]
+        if "choices" not in data:
+            return f"Planning failed — Groq API error (status {r.status_code}): {data}"
+        return data["choices"][0]["message"]["content"]
