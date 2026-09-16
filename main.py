@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from cache.sys_cache import SysCache
 from gateway.connectors import router as connectors_router
+from gateway.google_oauth import router as google_oauth_router
 from gateway.router import router
 from gateway.skills import router as skills_router
 from gateway.webhooks import webhook_router
@@ -53,6 +54,12 @@ app.add_middleware(
 )
 
 app.include_router(router)
+# google_oauth_router before connectors_router: connectors.py's generic
+# GET /connectors/{provider}/authorize and /callback are parameterized
+# routes that would otherwise match "google" as a valid {provider} value
+# and shadow these more specific literal routes — Starlette matches in
+# registration order, so the more specific one has to come first.
+app.include_router(google_oauth_router)
 app.include_router(connectors_router)
 app.include_router(skills_router)
 app.include_router(webhook_router)

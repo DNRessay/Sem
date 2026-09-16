@@ -101,6 +101,8 @@ jobs:
           GH_OAUTH_CLIENT_SECRET: ${{ secrets.GH_OAUTH_CLIENT_SECRET }}
           GITLAB_OAUTH_CLIENT_ID: ${{ secrets.GITLAB_OAUTH_CLIENT_ID }}
           GITLAB_OAUTH_CLIENT_SECRET: ${{ secrets.GITLAB_OAUTH_CLIENT_SECRET }}
+          GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
         run: |
           # Secrets go through env vars (not string-interpolated straight into
           # the script) and get trimmed + individually quoted below. Directly
@@ -127,6 +129,8 @@ jobs:
           github_oauth_client_secret=$(printf '%s' "$GH_OAUTH_CLIENT_SECRET" | tr -d '\r\n')
           gitlab_oauth_client_id=$(printf '%s' "$GITLAB_OAUTH_CLIENT_ID" | tr -d '\r\n')
           gitlab_oauth_client_secret=$(printf '%s' "$GITLAB_OAUTH_CLIENT_SECRET" | tr -d '\r\n')
+          google_oauth_client_id=$(printf '%s' "$GOOGLE_OAUTH_CLIENT_ID" | tr -d '\r\n')
+          google_oauth_client_secret=$(printf '%s' "$GOOGLE_OAUTH_CLIENT_SECRET" | tr -d '\r\n')
 
           # sam deploy's --parameter-overrides shorthand rejects "Key=" with a
           # truly empty value ("not a valid format") — so optional params that
@@ -165,6 +169,8 @@ jobs:
           [ -n "$github_oauth_client_secret" ] && params+=("GithubClientSecret=${github_oauth_client_secret}")
           [ -n "$gitlab_oauth_client_id" ] && params+=("GitlabClientId=${gitlab_oauth_client_id}")
           [ -n "$gitlab_oauth_client_secret" ] && params+=("GitlabClientSecret=${gitlab_oauth_client_secret}")
+          [ -n "$google_oauth_client_id" ] && params+=("GoogleClientId=${google_oauth_client_id}")
+          [ -n "$google_oauth_client_secret" ] && params+=("GoogleClientSecret=${google_oauth_client_secret}")
 
           sam deploy \
             --debug \

@@ -173,8 +173,11 @@ def _bootstrap_registry(reg: ToolsRegistry):
     from tools.artifact_tool import ArtifactTool
     from tools.bash_tool import BashTool
     from tools.dev_loop_tool import DevLoopTool
+    from tools.google.calendar_tool import CalendarTool
+    from tools.google.contacts_tool import ContactsTool
+    from tools.google.drive_tool import DriveTool
+    from tools.google.gmail_tool import GmailTool
     from tools.mcp_tool import MCPTool
-    from tools.misc.calendar_tool import CalendarTool
     from tools.misc.whatsapp_tool import WhatsAppTool
     from tools.repo_tool import RepoTool
     from tools.repo_write_tool import RepoWriteTool
@@ -190,6 +193,9 @@ def _bootstrap_registry(reg: ToolsRegistry):
     _register_configured_mcp_servers(mcp)
     artifact = ArtifactTool()
     calendar = CalendarTool()
+    gmail   = GmailTool()
+    drive   = DriveTool()
+    contacts = ContactsTool()
     whatsapp = WhatsAppTool()
     repo    = RepoTool()
     repo_write = RepoWriteTool()
@@ -203,7 +209,10 @@ def _bootstrap_registry(reg: ToolsRegistry):
     reg.register("bash",         bash.execute,   {"command": "string"},                    "ALLOW_EDITS", "Shell execution with 23 security checks")
     reg.register("mcp",          mcp.call,       {"server": "string", "tool": "string", "args": "dict"}, "AUTO", "MCP bridge")
     reg.register("artifact",     artifact.render,{"type": "string", "content": "string"}, "AUTO",        "Render JSX/HTML/SVG/MD artifact")
-    reg.register("calendar",     calendar.query, {"action": "string"},                    "ALLOW_EDITS", "Google Calendar read/write")
+    reg.register("calendar",     calendar.query, {"action": "string", "account_id": "string"}, "ALLOW_EDITS", "Google Calendar read/write")
+    reg.register("gmail",        gmail.query,    {"action": "string", "account_id": "string"}, "ALLOW_EDITS", "Gmail read + send")
+    reg.register("drive",        drive.query,    {"action": "string", "account_id": "string"}, "ALLOW_EDITS", "Google Drive read + notes (drive.file scope — app-created files only)")
+    reg.register("contacts",     contacts.query, {"action": "string", "account_id": "string"}, "AUTO",         "Google Contacts read (People API)")
     reg.register("whatsapp",     whatsapp.send,  {"phone": "string", "message": "string"},"ALLOW_EDITS", "WhatsApp Business API outbound")
     reg.register("repo_clone",   repo.clone_or_pull, {"provider": "string", "repo": "string", "ref": "string"}, "AUTO", "Clone or pull a repo onto a persistent Modal-hosted clone")
     reg.register("repo_read",    repo.read_file, {"provider": "string", "repo": "string", "path": "string"}, "AUTO", "Read one file from a persistently cloned repo")

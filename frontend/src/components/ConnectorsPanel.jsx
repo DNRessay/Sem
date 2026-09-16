@@ -2,17 +2,17 @@ import { useState, useEffect, useRef } from "react";
 
 const API = import.meta.env.VITE_API_URL || "";
 
-// "real" providers have a working OAuth/token flow on the backend
-// (gateway/connectors.py's _PROVIDERS) — the rest are listed so the
-// directory shows what's coming, same as AttachMenu's "Deep research"
-// row, but nothing happens when you click them yet: wiring Google
-// Calendar/Drive needs real OAuth app credentials registered with Google
-// first, a separate setup step from anything this panel can do alone.
+// "real" providers have a working OAuth flow on the backend
+// (gateway/connectors.py's _PROVIDERS for GitHub/GitLab,
+// gateway/google_oauth.py for Google). One Google connection covers
+// Calendar, Gmail, Drive, and Contacts in a single consent screen — see
+// gateway/google_oauth.py's SCOPES — so this is one card, not four.
+// noManualToken: Google has no personal-access-token equivalent to paste,
+// unlike GitHub/GitLab, so that fallback UI doesn't apply here.
 const PROVIDERS = [
     { id: "github", label: "GitHub", real: true },
     { id: "gitlab", label: "GitLab", real: true },
-    { id: "google-calendar", label: "Google Calendar", real: false },
-    { id: "google-drive", label: "Google Drive", real: false },
+    { id: "google", label: "Google (Calendar, Gmail, Drive, Contacts)", real: true, noManualToken: true },
 ];
 
 export default function ConnectorsPanel({ token }) {
@@ -51,7 +51,8 @@ export default function ConnectorsPanel({ token }) {
             const data = await res.json().catch(() => ({}));
             if (!res.ok) {
                 setOauthError(e => ({ ...e, [provider]: data.detail || "OAuth isn't set up for this provider yet" }));
-                setShowManual(s => ({ ...s, [provider]: true }));
+                const p = PROVIDERS.find(x => x.id === provider);
+                if (!p?.noManualToken) setShowManual(s => ({ ...s, [provider]: true }));
                 return;
             }
             window.open(data.url, "_blank", "noopener");
@@ -119,7 +120,7 @@ export default function ConnectorsPanel({ token }) {
                         {oauthError[provider] && (
                             <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "6px" }}>{oauthError[provider]}</div>
                         )}
-                        {!showManual[provider] ? (
+                        {p.noManualToken ? null : !showManual[provider] ? (
                             <button onClick={() => setShowManual(s => ({ ...s, [provider]: true }))}
                                 style={{ marginTop: "6px", fontSize: "11px", background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: 0, textDecoration: "underline" }}>
                                 or paste a token instead

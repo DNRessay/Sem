@@ -368,6 +368,38 @@ def test_coordinator_intent_bypasses_the_llm_and_streams_the_result(client, monk
     assert "write the report" in resp.text
 
 
+def test_google_intent_bypasses_the_llm_and_streams_the_result(client, monkeypatch):
+    """"what's on my calendar" routes through run_google_intent instead of
+    Bootstrap/the main LLM call, scoped to the authenticated account's own
+    Google connector."""
+    calls = []
+
+    async def fake_run_google_intent(intent, account_id, session_id):
+        calls.append((intent["tool"], intent["action"], account_id, session_id))
+        return {"events": [{"summary": "Standup", "start": "2026-09-20T09:00:00Z", "location": None}]}
+
+    class RecordingStore:
+        async def save_turn(self, session_id, role, content):
+            pass
+
+        async def save_memory(self, session_id, content, salience=0.5, embedding=None):
+            pass
+
+        async def save_agent_event(self, session_id, agent, action):
+            pass
+
+    async def fake_get_store():
+        return RecordingStore()
+
+    monkeypatch.setattr("gateway.router.run_google_intent", fake_run_google_intent)
+    monkeypatch.setattr("gateway.router.get_store", fake_get_store)
+
+    resp = client.post("/chat", json={"message": "what's on my calendar", "session_id": "sess1"})
+    assert resp.status_code == 200
+    assert calls == [("calendar", "list_events", "owner", "sess1")]
+    assert "Standup" in resp.text
+
+
 def test_plan_intent_bypasses_the_llm_and_streams_the_formatted_plan(client, monkeypatch):
     """Step 7 (sub-agent delegation) reachable from a real chat message: a
     "make a plan for X" message routes through run_plan_intent (CablesMan

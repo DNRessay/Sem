@@ -36,6 +36,7 @@ from pipeline.coordinator_intent import (
     format_coordinator_result,
     run_coordinator_intent,
 )
+from pipeline.google_intent import detect_google_intent, format_google_result, run_google_intent
 from pipeline.guide_intent import (
     detect_guide_intent,
     format_guide_result,
@@ -247,6 +248,12 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
     # pipeline/coordinator_intent.py for the XML-building it does under the
     # hood to match CoordinatorAgent's own tested interface.
     coordinator_intent = detect_coordinator_intent(raw_msg)
+    # Calendar/Gmail/Drive-notes/Contacts — see pipeline/google_intent.py.
+    # One registry.execute call each, scoped to this account's own Google
+    # connector (gateway/google_oauth.py); a clear "connect Google first"
+    # error comes back if there isn't one yet, same shape as any other
+    # failure this dispatches through _bypass_with_reply below.
+    google_intent = detect_google_intent(raw_msg)
     # "when did I ask about X" / "how many times have I mentioned X" — a
     # real, grounded search across every session's history (not just this
     # one) instead of letting the model guess from whatever's already in
@@ -448,6 +455,16 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
                 return
             # No usable result came back — fall through to the normal
             # Bootstrap flow below rather than leaving the request hanging.
+        elif google_intent:
+            yield f"data: {json.dumps({'status': google_intent['label'] + '…'})}\n\n"
+            result = await run_google_intent(google_intent, _account["account_id"], session_id)
+            reply = format_google_result(google_intent, result)
+            if reply:
+                async for line in _bypass_with_reply(
+                    "google", google_intent["label"], json.dumps(result, default=str), reply, result=result,
+                ):
+                    yield line
+                return
         elif memory_search_intent:
             yield f"data: {json.dumps({'status': memory_search_status_label(memory_search_intent['term'])})}\n\n"
             result = await run_memory_search_intent(memory_search_intent, session_id)

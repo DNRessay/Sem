@@ -47,7 +47,6 @@ class Settings(BaseSettings):
     WHATSAPP_TOKEN: str = ""
     WHATSAPP_PHONE_ID: str = ""
     WHATSAPP_VERIFY_TOKEN: str = ""  # arbitrary string you also enter in the Meta App Dashboard webhook config
-    GOOGLE_CALENDAR_CREDS: str = "./creds/google.json"
     OPENCLAW_URL: str = ""  # optional self-hosted WhatsApp/Telegram/Slack bridge
     # Optional: JSON object of name -> base_url, e.g.
     # {"slack": "https://my-slack-mcp.example.com"} — each gets registered
@@ -71,6 +70,15 @@ class Settings(BaseSettings):
     GITHUB_CLIENT_SECRET: str = ""
     GITLAB_CLIENT_ID: str = ""
     GITLAB_CLIENT_SECRET: str = ""
+    # OAuth for Calendar/Gmail/Drive/Contacts — one consent screen covers all
+    # four (see gateway/google_oauth.py's SCOPES). One-time OAuth client
+    # registered by the account owner at console.cloud.google.com
+    # (APIs & Services > Credentials > Create OAuth client ID > Web
+    # application), with Calendar/Gmail/Drive/People APIs enabled for the
+    # project and this exact redirect URI added:
+    # {PUBLIC_API_URL}/connectors/google/callback
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
     # The Lambda Function URL itself — used to build the exact OAuth redirect_uri,
     # which must match what's registered in the OAuth App byte-for-byte. Not
     # inferred from the incoming request's Host header, to avoid depending on

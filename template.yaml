@@ -81,6 +81,17 @@ Parameters:
     Type: String
     NoEcho: true
     Default: ""
+  GoogleClientId:
+    Type: String
+    Default: ""
+    Description: >
+      Google OAuth client ID (console.cloud.google.com > APIs & Services > Credentials) for
+      Calendar/Gmail/Drive/Contacts — blank disables the Google connector entirely (no manual-token
+      fallback exists for Google the way it does for GitHub/GitLab PATs).
+  GoogleClientSecret:
+    Type: String
+    NoEcho: true
+    Default: ""
   PublicApiUrl:
     Type: String
     Default: ""
@@ -120,6 +131,8 @@ Globals:
         GITHUB_CLIENT_SECRET: !Ref GithubClientSecret
         GITLAB_CLIENT_ID: !Ref GitlabClientId
         GITLAB_CLIENT_SECRET: !Ref GitlabClientSecret
+        GOOGLE_CLIENT_ID: !Ref GoogleClientId
+        GOOGLE_CLIENT_SECRET: !Ref GoogleClientSecret
         PUBLIC_API_URL: !Ref PublicApiUrl
 
 Resources:
