@@ -1,4 +1,27 @@
-export default function StatusBar({ sessionId, title, streaming, onMenu, onTitleClick, onFeed, hasError }) {
+import { useEffect, useState } from "react";
+
+const API = import.meta.env.VITE_API_URL || "";
+
+// This month's AWS bill in rand (free CloudWatch estimate, refreshed every 6 hours server-side).
+function AwsCost({ token }) {
+    const [bill, setBill] = useState(null);
+    useEffect(() => {
+        if (!token) return;
+        fetch(`${API}/settings/aws-cost`, { headers: { Authorization: `Bearer ${token}` } })
+            .then(r => (r.ok ? r.json() : null)).then(setBill).catch(() => {});
+    }, [token]);
+    if (!bill?.ok) return null;
+    const amount = bill.zar != null
+        ? `R${bill.zar.toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        : `$${bill.usd.toFixed(2)}`;
+    return (
+        <span title="AWS bill so far this month (estimate)" style={{ color: "var(--gold-text)", fontWeight: 600, whiteSpace: "nowrap" }}>
+            AWS {amount}
+        </span>
+    );
+}
+
+export default function StatusBar({ sessionId, title, streaming, onMenu, onTitleClick, onFeed, hasError, token }) {
     return (
         <div style={{ display: "flex", flexDirection: "column", background: "var(--bg)", borderBottom: "1px solid var(--border)" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px 4px", fontSize: "12px", color: "var(--text-muted)" }}>
@@ -11,7 +34,8 @@ export default function StatusBar({ sessionId, title, streaming, onMenu, onTitle
                 </button>
                 <span style={{ color: "var(--text)", fontWeight: "700" }}>SEMBLANCE</span>
                 <span style={{ background: "var(--surface)", borderRadius: "999px", padding: "2px 9px", fontSize: "11px" }}>v1</span>
-                <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "6px", color: streaming ? "var(--accent)" : "var(--ready)", fontWeight: "600", whiteSpace: "nowrap" }}>
+                <span style={{ marginLeft: "auto" }}><AwsCost token={token} /></span>
+                <span style={{ display: "flex", alignItems: "center", gap: "6px", color: streaming ? "var(--accent)" : "var(--ready)", fontWeight: "600", whiteSpace: "nowrap" }}>
                     <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "currentColor", display: "inline-block" }} />
                     {streaming ? "thinking" : "ready"}
                 </span>

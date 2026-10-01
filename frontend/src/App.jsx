@@ -161,6 +161,7 @@ export default function App() {
                 onTitleClick={startNewChat}
                 onFeed={() => { setAgentFeedOpen(true); acknowledgeErrors(); }}
                 hasError={agentHasError}
+                token={token}
             />
             <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
                 {!restoring && (
