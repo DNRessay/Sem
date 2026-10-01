@@ -6,6 +6,7 @@ from fastapi.responses import StreamingResponse
 from agents.code_agent import CodeAgent
 from gateway.auth import require_account
 from pipeline.code_tasks import EVERY_SECONDS, connector_token, open_pr, valid_target
+from pipeline.mcp_tools import MCPToolset
 from storage.neon_store import get_store
 from tools.code_workspace import CodeWorkspace
 
@@ -32,12 +33,13 @@ async def open_repo(request: Request, account: dict = Depends(require_account)):
 
 
 @router.post("/run")
-async def run(request: Request, _account: dict = Depends(require_account)):
+async def run(request: Request, account: dict = Depends(require_account)):
     body, ws = await _target(request)
     message = (body.get("message") or "").strip()
     if not message:
         raise HTTPException(400, "message required")
-    agent = CodeAgent(ws, mode=body.get("mode") or "act", provider=body.get("model") or "auto")
+    mcp = await MCPToolset.for_account(account["account_id"])
+    agent = CodeAgent(ws, mode=body.get("mode") or "act", provider=body.get("model") or "auto", mcp=mcp)
 
     async def stream():
         try:

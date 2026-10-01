@@ -75,52 +75,6 @@ class ToolsRegistry:
         except Exception as e:
             return {"error": str(e)}
 
-    def load_mcp_tools(self, mcp_server_url: str) -> int:
-        """
-        Dynamically fetch and register tools from an MCP server at runtime.
-        Returns count of tools registered.
-        """
-        import asyncio
-
-        import httpx
-
-        async def _fetch():
-            try:
-                async with httpx.AsyncClient(timeout=10) as client:
-                    r = await client.get(f"{mcp_server_url}/tools")
-                    tools = r.json().get("tools", [])
-                    for t in tools:
-                        self.register(
-                            tool_name=t["name"],
-                            handler=self._make_mcp_handler(mcp_server_url, t["name"]),
-                            schema=t.get("inputSchema", {}),
-                            permission="AUTO",
-                            description=t.get("description", ""),
-                        )
-                    return len(tools)
-            except Exception:
-                return 0
-
-        try:
-            loop = asyncio.get_event_loop()
-            return loop.run_until_complete(_fetch())
-        except Exception:
-            return 0
-
-    def _make_mcp_handler(self, base_url: str, tool_name: str) -> Callable:
-        import httpx
-
-        async def handler(**kwargs):
-            async with httpx.AsyncClient(timeout=30) as client:
-                r = await client.post(
-                    f"{base_url}/tools/{tool_name}",
-                    json={"arguments": kwargs}
-                )
-                return r.json()
-
-        handler.__name__ = f"mcp_{tool_name}"
-        return handler
-
 
 def _is_write_op(args: dict) -> bool:
     """Heuristic: detect if tool call involves a write operation."""
@@ -143,7 +97,7 @@ def get_registry() -> ToolsRegistry:
 
 def _register_configured_mcp_servers(mcp) -> None:
     """MCP_SERVERS (config.py) is an optional JSON object of name ->
-    base_url — each gets registered with the shared MCPTool instance so
+    url (or {"url", "auth"}) — each gets registered with the shared MCPTool instance so
     the "mcp" tool actually has something to call. Left unset (the
     default), this is a no-op and "mcp" stays real-but-unconfigured, same
     as every other optional integration in this registry: a clear "not
@@ -163,9 +117,12 @@ def _register_configured_mcp_servers(mcp) -> None:
         return
     if not isinstance(servers, dict):
         return
-    for name, url in servers.items():
-        if isinstance(name, str) and isinstance(url, str) and url:
-            mcp.register_server(name, url)
+    for name, cfg in servers.items():
+        # Either "name": "https://url" or "name": {"url": ..., "auth": "Bearer ..."}.
+        if isinstance(cfg, str):
+            cfg = {"url": cfg}
+        if isinstance(name, str) and isinstance(cfg, dict) and isinstance(cfg.get("url"), str) and cfg["url"]:
+            mcp.register_server(name, cfg["url"], cfg.get("auth") or "")
 
 
 def _bootstrap_registry(reg: ToolsRegistry):

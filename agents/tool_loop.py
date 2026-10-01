@@ -40,10 +40,16 @@ class ToolLoopAgent:
     {"type": "text"|"tool"|"result"|"error"|"done", ...} plus whatever
     extra_events() adds (images, approval requests)."""
 
-    def __init__(self, provider: str = "auto", max_steps: int = 30, deadline_seconds: float = 780):
+    def __init__(self, provider: str = "auto", max_steps: int = 30, deadline_seconds: float = 780,
+                 mcp=None, allow_approvals: bool = False):
         self.provider = provider
         self.max_steps = max_steps
         self.deadline = time.monotonic() + deadline_seconds
+        # Tools from the user's MCP servers (pipeline/mcp_tools.MCPToolset).
+        # Servers marked require_approval only appear where approvals can
+        # be shown (Co-work), and their calls are queued, not run.
+        self.mcp = mcp
+        self.allow_approvals = allow_approvals
 
     def system_prompt(self) -> str:
         raise NotImplementedError
@@ -58,8 +64,10 @@ class ToolLoopAgent:
         return []
 
     def model_view(self, result: dict) -> dict:
-        """What the model gets back from a tool — override to drop bulky
-        fields (an image's base64) that only the UI needs."""
+        """What the model gets back from a tool — drops bulky fields (an
+        image's base64) that only the UI needs."""
+        if result.get("images"):
+            return {**result, "images": f"{len(result['images'])} image(s) shown to the user"}
         return result
 
     def _messages(self, task: str, history: list[dict]) -> list[dict]:
@@ -70,9 +78,30 @@ class ToolLoopAgent:
         msgs.append({"role": "user", "content": task})
         return msgs
 
+    def all_tools(self) -> list[dict]:
+        extra = self.mcp.tools(include_approval=self.allow_approvals) if self.mcp else []
+        return self.tools() + extra
+
+    async def _route(self, name: str, args: dict) -> dict:
+        if self.mcp and self.mcp.owns(name):
+            if self.mcp.needs_approval(name):
+                if not self.allow_approvals:
+                    return {"ok": False, "error": "this MCP server requires approval, which isn't available here"}
+                return {"ok": True, "status": "waiting for the user's approval", "summary": self.mcp.describe(name, args)}
+            return await self.mcp.call(name, args)
+        return await self.dispatch(name, args)
+
+    def _mcp_events(self, call_id: str, name: str, args: dict, result: dict) -> list[dict]:
+        if not (self.mcp and self.mcp.owns(name)):
+            return []
+        if self.mcp.needs_approval(name):
+            return [{"type": "approval", "id": call_id, "name": name, "args": args, "summary": result.get("summary", "")}]
+        return [{"type": "image", "id": f"{call_id}-{i}", "mime": img["mime"], "base64": img["base64"], "prompt": name}
+                for i, img in enumerate(result.get("images") or [])]
+
     async def _complete(self, client: httpx.AsyncClient, messages: list[dict]) -> dict:
         return await llm_providers.complete(
-            self.provider, messages, self.tools(), max_tokens=settings.LOCAL_LLM_MAX_TOKENS,
+            self.provider, messages, self.all_tools(), max_tokens=settings.LOCAL_LLM_MAX_TOKENS,
             deadline=self.deadline, client=client,
         )
 
@@ -108,13 +137,14 @@ class ToolLoopAgent:
                     except json.JSONDecodeError:
                         args = None
                     yield {"type": "tool", "id": call.get("id"), "name": name, "args": args or {}}
-                    result = (await self.dispatch(name, args) if isinstance(args, dict)
+                    result = (await self._route(name, args) if isinstance(args, dict)
                               else {"ok": False, "error": "arguments were not valid JSON"})
                     if not isinstance(result, dict):
                         result = {"result": result}
                     ok = bool(result.get("ok", "error" not in result))
                     yield {"type": "result", "id": call.get("id"), "name": name, "ok": ok, "output": preview(self.model_view(result))}
-                    for event in self.extra_events(call.get("id"), name, args or {}, result):
+                    for event in self._mcp_events(call.get("id"), name, args or {}, result) + \
+                            self.extra_events(call.get("id"), name, args or {}, result):
                         yield event
                     messages.append({
                         "role": "tool", "tool_call_id": call.get("id"),

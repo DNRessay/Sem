@@ -309,6 +309,19 @@ class NeonStore:
                     created_at BIGINT NOT NULL
                 )
             """)
+            # MCP servers added from the app's Connectors screen; their tools
+            # show up in the Code/Co-work agents (pipeline/mcp_tools.py).
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS mcp_servers (
+                    account_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    url TEXT NOT NULL,
+                    auth TEXT NOT NULL DEFAULT '',
+                    require_approval BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at BIGINT NOT NULL,
+                    PRIMARY KEY (account_id, name)
+                )
+            """)
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS dream_state (
                     id TEXT PRIMARY KEY DEFAULT 'global',
@@ -603,6 +616,28 @@ class NeonStore:
             if not row:
                 return None
             return {"goal": row["goal"], "steps": json.loads(row["steps"])}
+
+    async def list_mcp_servers(self, account_id: str) -> list[dict]:
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT name, url, auth, require_approval FROM mcp_servers WHERE account_id=$1 ORDER BY name",
+                account_id,
+            )
+            return [dict(r) for r in rows]
+
+    async def upsert_mcp_server(self, account_id: str, name: str, url: str, auth: str, require_approval: bool):
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO mcp_servers (account_id, name, url, auth, require_approval, created_at)
+                   VALUES ($1, $2, $3, $4, $5, $6)
+                   ON CONFLICT (account_id, name) DO UPDATE SET url=$3, auth=$4, require_approval=$5""",
+                account_id, name, url, auth, require_approval, int(time.time()),
+            )
+
+    async def delete_mcp_server(self, account_id: str, name: str) -> bool:
+        async with self._pool.acquire() as conn:
+            result = await conn.execute("DELETE FROM mcp_servers WHERE account_id=$1 AND name=$2", account_id, name)
+            return result.endswith("1")
 
     async def list_code_automations(self, account_id: str) -> list[dict]:
         async with self._pool.acquire() as conn:

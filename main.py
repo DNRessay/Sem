@@ -10,6 +10,7 @@ from gateway.connectors import router as connectors_router
 from gateway.cowork_router import router as cowork_router
 from gateway.design_router import router as design_router
 from gateway.google_oauth import router as google_oauth_router
+from gateway.mcp_router import router as mcp_router
 from gateway.media_router import router as media_router
 from gateway.router import router
 from gateway.skills import router as skills_router
@@ -71,3 +72,4 @@ app.include_router(code_router)
 app.include_router(media_router)
 app.include_router(cowork_router)
 app.include_router(design_router)
+app.include_router(mcp_router)

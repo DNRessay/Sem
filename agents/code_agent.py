@@ -48,8 +48,9 @@ class CodeAgent(ToolLoopAgent):
     only offers the read-only tools."""
 
     def __init__(self, workspace: CodeWorkspace, mode: str = "act", max_steps: int = 30,
-                 deadline_seconds: float = 780, aws: AwsReadTool | None = None, provider: str = "auto"):
-        super().__init__(provider, max_steps, deadline_seconds)
+                 deadline_seconds: float = 780, aws: AwsReadTool | None = None, provider: str = "auto", mcp=None):
+        # MCP tools have unknown side effects, so plan mode never gets them.
+        super().__init__(provider, max_steps, deadline_seconds, mcp=None if mode == "plan" else mcp)
         self.ws = workspace
         self.mode = "plan" if mode == "plan" else "act"
         self.aws = aws or AwsReadTool()

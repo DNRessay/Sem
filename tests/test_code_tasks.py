@@ -27,6 +27,9 @@ class FakeStore:
         self.automations.append(row)
         return row
 
+    async def list_mcp_servers(self, account_id):
+        return []
+
     async def claim_due_code_automation(self):
         return self.automations[0] if self.automations else None
 
@@ -83,6 +86,7 @@ def store(monkeypatch):
 
     monkeypatch.setattr("pipeline.code_tasks.get_store", fake_get_store)
     monkeypatch.setattr("gateway.code_router.get_store", fake_get_store)
+    monkeypatch.setattr("pipeline.mcp_tools.get_store", fake_get_store)
     FakeWriter.calls = []
     monkeypatch.setattr("pipeline.code_tasks.RepoWriteTool", FakeWriter)
     return s
@@ -166,7 +170,7 @@ def test_run_streams_agent_events(client, monkeypatch):
     c, _ = client
 
     class FakeAgent:
-        def __init__(self, ws, mode="act", provider="auto"):
+        def __init__(self, ws, mode="act", provider="auto", mcp=None):
             self.mode = mode
 
         async def run(self, message, history):

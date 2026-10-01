@@ -53,23 +53,52 @@ def test_register_configured_mcp_servers_skips_non_string_entries(monkeypatch):
     assert mcp.list_servers() == ["ok"]
 
 
+def fake_mcp_server(sse=False, session="sess-1", tools=None, calls=None):
+    """A respx side_effect that speaks MCP's Streamable HTTP JSON-RPC."""
+    tools = tools or [{"name": "echo", "description": "Echo back", "inputSchema": {"type": "object"}}]
+
+    def handler(request):
+        msg = json.loads(request.content)
+        if calls is not None:
+            calls.append((msg.get("method"), dict(request.headers)))
+        if "id" not in msg:
+            return Response(202)
+        method = msg["method"]
+        if method == "initialize":
+            result = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}}, "serverInfo": {"name": "fake"}}
+        elif method == "tools/list":
+            result = {"tools": tools}
+        elif method == "tools/call":
+            result = {"content": [{"type": "text", "text": f"echo:{json.dumps(msg['params']['arguments'])}"},
+                                  {"type": "image", "data": "QUJD", "mimeType": "image/png"}]}
+        else:
+            return Response(200, json={"jsonrpc": "2.0", "id": msg["id"], "error": {"code": -32601, "message": "nope"}})
+        body = {"jsonrpc": "2.0", "id": msg["id"], "result": result}
+        headers = {"mcp-session-id": session} if method == "initialize" else {}
+        if sse:
+            return Response(200, text=f"event: message\ndata: {json.dumps(body)}\n\n",
+                            headers={**headers, "content-type": "text/event-stream"})
+        return Response(200, json=body, headers=headers)
+
+    return handler
+
+
 def test_bootstrap_registry_wires_configured_servers_into_the_mcp_tool(monkeypatch):
-    """End-to-end: a fresh registry (not the module singleton) built with
-    MCP_SERVERS set should let the registered "mcp" tool actually reach a
-    configured server, not return the default "not registered" error."""
-    monkeypatch.setattr("config.settings.MCP_SERVERS", json.dumps({"testserver": "https://mcp.example.com"}))
+    monkeypatch.setattr("config.settings.MCP_SERVERS", json.dumps({"testserver": {"url": "https://mcp.example.com/mcp", "auth": "tok"}}))
     reg = ToolsRegistry()
     _bootstrap_registry(reg)
 
     import asyncio
 
+    calls = []
     with respx.mock:
-        respx.post("https://mcp.example.com/tools/echo").mock(
-            return_value=Response(200, json={"ok": True}),
-        )
-        result = asyncio.run(reg.execute("mcp", {"server": "testserver", "tool": "echo", "args": {}}))
+        respx.post("https://mcp.example.com/mcp").mock(side_effect=fake_mcp_server(calls=calls))
+        result = asyncio.run(reg.execute("mcp", {"server": "testserver", "tool": "echo", "args": {"x": 1}}))
 
-    assert result == {"ok": True}
+    assert result["ok"] and result["text"] == 'echo:{"x": 1}'
+    assert [c[0] for c in calls] == ["initialize", "notifications/initialized", "tools/call"]
+    assert calls[-1][1]["authorization"] == "Bearer tok"
+    assert calls[-1][1]["mcp-session-id"] == "sess-1"
 
 
 def test_bootstrap_registry_leaves_mcp_unconfigured_by_default(monkeypatch):
@@ -90,39 +119,30 @@ async def test_mcp_tool_call_against_an_unregistered_server_returns_a_clear_erro
 
 
 @pytest.mark.asyncio
-async def test_mcp_tool_call_posts_to_the_registered_server():
-    mcp = MCPTool()
-    mcp.register_server("myserver", "https://mcp.example.com")
+@pytest.mark.parametrize("sse", [False, True])
+async def test_client_lists_and_calls_tools_over_json_and_sse(sse):
+    from tools import mcp_client
+    mcp_client._tools_cache.clear()
+    client = mcp_client.MCPClient("https://srv.example/mcp")
     with respx.mock:
-        route = respx.post("https://mcp.example.com/tools/do_thing").mock(
-            return_value=Response(200, json={"result": 42}),
-        )
-        result = await mcp.call("myserver", "do_thing", {"x": 1})
-
-    assert result == {"result": 42}
-    assert json.loads(route.calls[0].request.content) == {"arguments": {"x": 1}}
+        respx.post("https://srv.example/mcp").mock(side_effect=fake_mcp_server(sse=sse))
+        tools = await client.list_tools()
+        result = await client.call_tool("echo", {"a": 2})
+    assert tools[0]["name"] == "echo"
+    assert result == {"ok": True, "text": 'echo:{"a": 2}', "images": [{"mime": "image/png", "base64": "QUJD"}]}
 
 
 @pytest.mark.asyncio
-async def test_mcp_tool_auto_route_uses_the_server_from_discover():
-    mcp = MCPTool()
-    mcp.register_server("myserver", "https://mcp.example.com")
+async def test_client_raises_on_a_json_rpc_error():
+    from tools import mcp_client
+
+    def handler(request):
+        msg = json.loads(request.content)
+        if msg.get("method") == "initialize":
+            return Response(200, json={"jsonrpc": "2.0", "id": 0, "error": {"code": 1, "message": "bad token"}})
+        return Response(202)
+
     with respx.mock:
-        respx.get("https://mcp.example.com/tools").mock(
-            return_value=Response(200, json={"tools": [{"name": "do_thing"}]}),
-        )
-        await mcp.discover("myserver")
-
-        respx.post("https://mcp.example.com/tools/do_thing").mock(
-            return_value=Response(200, json={"result": "ok"}),
-        )
-        result = await mcp.auto_route("do_thing", {})
-
-    assert result == {"result": "ok"}
-
-
-@pytest.mark.asyncio
-async def test_mcp_tool_auto_route_unknown_tool_returns_a_clear_error():
-    mcp = MCPTool()
-    result = await mcp.auto_route("never_discovered", {})
-    assert "not found in any registered MCP server" in result["error"]
+        respx.post("https://srv.example/mcp").mock(side_effect=handler)
+        with pytest.raises(mcp_client.MCPError, match="bad token"):
+            await mcp_client.MCPClient("https://srv.example/mcp").call_tool("echo", {})

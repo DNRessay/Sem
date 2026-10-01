@@ -71,8 +71,9 @@ async def run_approved(name: str, args: dict, account_id: str) -> dict:
 
 
 class CoworkAgent(ToolLoopAgent):
-    def __init__(self, account_id: str, provider: str = "auto", max_steps: int = 25, deadline_seconds: float = 780):
-        super().__init__(provider, max_steps, deadline_seconds)
+    def __init__(self, account_id: str, provider: str = "auto", max_steps: int = 25, deadline_seconds: float = 780,
+                 mcp=None):
+        super().__init__(provider, max_steps, deadline_seconds, mcp=mcp, allow_approvals=True)
         self.account_id = account_id
 
     def system_prompt(self) -> str:
@@ -129,7 +130,7 @@ class CoworkAgent(ToolLoopAgent):
     def model_view(self, result: dict) -> dict:
         if "base64" in result:
             return {"ok": True, "result": "Image generated and shown to the user."}
-        return result
+        return super().model_view(result)
 
 
 def _approval_summary(name: str, args: dict) -> str:
