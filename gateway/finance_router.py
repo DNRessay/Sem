@@ -5,6 +5,7 @@ from fastapi.responses import StreamingResponse
 
 from agents.finance_agent import FINANCE_SERVER, FinanceAgent
 from gateway.auth import require_account
+from pipeline.activity import RunLog, session_for
 from pipeline.mcp_tools import MCPToolset
 from storage.neon_store import get_store
 from tau.tau_engine import TAUEngine
@@ -62,14 +63,19 @@ async def run(request: Request, account: dict = Depends(require_account)):
     agent = FinanceAgent(provider=body.get("model") or "auto", mcp=toolset)
     agent.user_context = await TAUEngine().owner_context()
 
+    runlog = RunLog(session_for("finance", body), "finance")
+
     async def stream():
+        await runlog.start(message, body.get("model") or "auto")
         if toolset.errors:
             yield f"data: {json.dumps({'type': 'error', 'text': f'C-Lab unreachable: {toolset.errors[FINANCE_SERVER]}'})}\n\n"
         try:
             async for event in agent.run(message, body.get("history") or []):
+                await runlog.record(event)
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'text': f'Finance agent crashed: {str(e)[:300]}'})}\n\n"
+            await runlog.record({'type': 'error', 'text': f'Finance agent crashed: {str(e)[:300]}'})
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream")

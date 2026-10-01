@@ -5,6 +5,7 @@ from fastapi.responses import StreamingResponse
 
 from agents.cowork_agent import NEEDS_APPROVAL, CoworkAgent, run_approved
 from gateway.auth import require_account
+from pipeline.activity import RunLog, log, session_for
 from pipeline.mcp_tools import MCPToolset
 from tau.tau_engine import TAUEngine
 
@@ -21,12 +22,17 @@ async def run(request: Request, account: dict = Depends(require_account)):
     agent = CoworkAgent(account["account_id"], provider=body.get("model") or "auto", mcp=mcp)
     agent.user_context = await TAUEngine().owner_context()
 
+    runlog = RunLog(session_for("cowork", body), "cowork")
+
     async def stream():
+        await runlog.start(message, body.get("model") or "auto")
         try:
             async for event in agent.run(message, body.get("history") or []):
+                await runlog.record(event)
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as e:  # surface it in the UI instead of a silently dead stream
             yield f"data: {json.dumps({'type': 'error', 'text': f'Co-work agent crashed: {str(e)[:300]}'})}\n\n"
+            await runlog.record({'type': 'error', 'text': f'Co-work agent crashed: {str(e)[:300]}'})
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream")
@@ -50,6 +56,8 @@ async def execute(request: Request, account: dict = Depends(require_account)):
             result = {"error": result.get("error") or result.get("text") or "MCP tool failed"}
     else:
         raise HTTPException(400, "not an approvable action")
+    session = session_for("cowork", body)
+    await log(session, "cowork", f"{'blocked' if result.get('error') else 'ok'}:approved {name} — {result.get('error') or 'done'}")
     if result.get("error"):
         raise HTTPException(400, result["error"])
     return {"ok": True, "result": result}

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from gateway.auth import require_account
+from pipeline.activity import log, session_for
 from pipeline.ad_studio import PLACEMENTS, write_variants
 from pipeline.site_brief import learn_site
 from storage.neon_store import get_store
@@ -39,17 +40,23 @@ async def ads(request: Request, _account: dict = Depends(require_account)):
         raise HTTPException(400, "brief and campaign required")
 
     refs = gemini_media.clean_references(body.get("references"))
+    session = session_for("design", body)
 
     async def stream():
+        await log(session, "design", f"ok:create ads · {len(refs)} inspiration image(s) · {campaign[:100]}")
         style = ""
         if refs:
             yield f"data: {json.dumps({'type': 'status', 'text': 'Studying your inspiration…'})}\n\n"
             described = await gemini_media.describe_style(refs)
+            await log(session, "gemini", f"{'ok' if described['ok'] else 'blocked'}:style read — "
+                                         f"{(described.get('text') or described.get('error') or '')[:150]}")
             if described["ok"]:
                 style = described["text"]
                 yield f"data: {json.dumps({'type': 'style', 'text': style})}\n\n"
         written = await write_variants(brief, campaign, body.get("placements") or [], body.get("count") or 2,
                                        body.get("model") or "auto", style=style)
+        await log(session, "design", f"{'ok' if written['ok'] else 'blocked'}:ad copy — "
+                                     f"{len(written.get('variants') or [])} variant(s){'' if written['ok'] else ': ' + written['error']}")
         if not written["ok"]:
             yield f"data: {json.dumps({'type': 'error', 'text': written['error']})}\n\n"
             yield "data: [DONE]\n\n"
@@ -59,6 +66,8 @@ async def ads(request: Request, _account: dict = Depends(require_account)):
         if body.get("images", True):
             for i, v in enumerate(variants):
                 img = await gemini_media.generate_image(v["image_prompt"], v["aspect_ratio"], references=refs)
+                await log(session, "gemini", f"{'ok' if img['ok'] else 'blocked'}:image {i + 1} — "
+                                             f"{'made' if img['ok'] else img['error']}")
                 if img["ok"]:
                     yield f"data: {json.dumps({'type': 'image', 'index': i, 'mime': img['mime'], 'base64': img['base64']})}\n\n"
                 else:

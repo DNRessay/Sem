@@ -5,6 +5,8 @@ import { readEvents } from "../utils/sse";
 import { AssistantText, AttachedChips, CLEAR_COMMAND, ChatMenu, ConnectorsSheet, HELP_COMMAND, NEW_COMMAND, PlusMenu, SuggestModel, errorClass, helpText, parseSlash, readTextFiles, withAttachments } from "./MessageKit";
 import { HeaderStatus } from "./StatusBar";
 import { SendIcon, StopIcon } from "./Icons";
+import AgentFeedPanel from "./AgentFeedPanel";
+import useAgentFeed from "../hooks/useAgentFeed";
 import TabDrawer, { HandoffCard, MenuButton } from "./TabDrawer";
 import useTabChats from "../hooks/useTabChats";
 
@@ -61,7 +63,7 @@ export function ApprovalCard({ item, onDecide }) {
 // Full-screen Co-work tab: an assistant that does the work (research, email,
 // calendar, Drive notes, images) instead of only advising. Anything that
 // leaves SEMBLANCE — sending email, adding events — waits for Approve.
-export default function CoworkPage({ token, onNavigate, onUnauthorized, onFeed, feedError, handoff, onHandoff }) {
+export default function CoworkPage({ token, onNavigate, onUnauthorized, handoff, onHandoff }) {
     const { chats, chat, updateChat, newChat, selectChat, deleteChat } = useTabChats(STORE_KEY, {
         blank: () => ({ items: [] }),
         legacy: () => { const items = loadItems(); return { items, title: items.find(i => i.kind === "user")?.text.slice(0, 60) || "" }; },
@@ -70,6 +72,9 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized, onFeed, 
     const items = chat.items;
     const setItems = fn => updateChat(chat.id, x => ({ items: fn(x.items) }));
     const [menuOpen, setMenuOpen] = useState(false);
+    // The activity icon shows this chat's own log (tools, MCP calls, models, errors).
+    const feed = useAgentFeed(`cowork:${chat.id}`, token);
+    const [feedOpen, setFeedOpen] = useState(false);
     const [input, setInput] = useState("");
     const [files, setFiles] = useState([]);
     const [connectorsOpen, setConnectorsOpen] = useState(false);
@@ -125,7 +130,7 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized, onFeed, 
         try {
             const res = await fetch(`${API}/cowork/run`, {
                 method: "POST", headers, signal: abortRef.current.signal,
-                body: JSON.stringify({ message: sent, history, model: useModel }),
+                body: JSON.stringify({ message: sent, history, model: useModel, chat_id: chatId }),
             });
             if (res.status === 401) { onUnauthorized(); return; }
             if (!res.ok || !res.body) throw new Error(`Request failed: ${res.status}`);
@@ -149,7 +154,7 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized, onFeed, 
         let state = decision;
         if (decision === "approved" && item) {
             try {
-                const r = await fetch(`${API}/cowork/execute`, { method: "POST", headers, body: JSON.stringify({ name: item.name, args: item.args }) });
+                const r = await fetch(`${API}/cowork/execute`, { method: "POST", headers, body: JSON.stringify({ name: item.name, args: item.args, chat_id: chat.id }) });
                 const d = await r.json().catch(() => ({}));
                 state = r.ok ? "done" : (d.detail || `Failed (${r.status})`);
             } catch (e) { state = e.message; }
@@ -163,10 +168,12 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized, onFeed, 
             <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
                 <MenuButton onClick={() => setMenuOpen(true)} />
                 <span style={{ fontWeight: 700, color: "var(--text)", flex: 1 }}>Sem Co-work</span>
-                <HeaderStatus token={token} onFeed={onFeed} hasError={feedError} busy={busy} />
+                <HeaderStatus token={token} onFeed={() => { setFeedOpen(true); feed.acknowledgeErrors(); }} hasError={feed.hasError} busy={busy} />
                 <ChatMenu title={chat.title || "Sem Co-work"} messages={transcript} />
             </div>
 
+            <AgentFeedPanel open={feedOpen} onClose={() => setFeedOpen(false)} events={feed.events}
+                title={`Activity · ${chat.title || "New chat"}`} />
             <TabDrawer open={menuOpen} onClose={() => setMenuOpen(false)} title="Sem Co-work" current="cowork"
                 onNavigate={onNavigate} onNew={() => newChat()} chats={chats} activeId={chat.id} disabled={busy}
                 onSelect={selectChat} onDelete={deleteChat} />

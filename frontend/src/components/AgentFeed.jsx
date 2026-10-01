@@ -1,6 +1,7 @@
 const COLORS = {
     kairos: "#181818", general: "#8e8e8c", plan: "#b8860b",
     explore: "#3a9b5c", dream: "#a855c9", swarm: "#5b5bc9",
+    code: "var(--text)", cowork: "var(--text)", finance: "var(--text)", design: "var(--text)", gemini: "var(--info)",
 };
 
 // Purely presentational — polling lives in hooks/useAgentFeed so StatusBar's
@@ -9,7 +10,7 @@ export default function AgentFeed({ events }) {
     return (
         <div style={{ fontSize: "11px" }}>
             {events.length === 0 ? (
-                <div style={{ color: "var(--border)" }}>No activity yet</div>
+                <div style={{ color: "var(--text-muted)" }}>No activity in this chat yet</div>
             ) : events.map((e, i) => {
                 const action = e.action || "";
                 const blocked = action.startsWith("blocked:");
@@ -18,7 +19,7 @@ export default function AgentFeed({ events }) {
                 // strip it from what's actually shown.
                 const detail = action.replace(/^(ok|blocked):/, "");
                 return (
-                    <div key={e.id ?? i} style={{ color: blocked ? "#c0392b" : (COLORS[e.agent] || "var(--text-muted)"), marginBottom: "6px", lineHeight: "1.4" }}>
+                    <div key={e.id ?? i} style={{ color: blocked ? "var(--danger)" : (e.agent?.startsWith("mcp:") ? "var(--gold-text)" : COLORS[e.agent] || "var(--text-muted)"), marginBottom: "6px", lineHeight: "1.4" }}>
                         <span style={{ opacity: 0.5 }}>{new Date(e.ts * 1000).toLocaleTimeString()} </span>
                         <span style={{ fontWeight: "700" }}>{e.agent}</span>
                         {blocked && <span style={{ marginLeft: "6px", fontSize: "10px", fontWeight: "700" }}>error</span>}

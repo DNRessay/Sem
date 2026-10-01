@@ -204,8 +204,7 @@ export default function App() {
             />
             {view === "finance" && (
                 <ErrorBoundary>
-                    <FinancePage token={token} onNavigate={setView} onUnauthorized={logout} handoff={handoff} onHandoff={handOff}
-                        onFeed={() => { setAgentFeedOpen(true); acknowledgeErrors(); }} feedError={agentHasError} />
+                    <FinancePage token={token} onNavigate={setView} onUnauthorized={logout} handoff={handoff} onHandoff={handOff} />
                 </ErrorBoundary>
             )}
             {view === "settings" && (
@@ -215,20 +214,17 @@ export default function App() {
             )}
             {view === "design" && (
                 <ErrorBoundary>
-                    <DesignPage token={token} onNavigate={setView} onUnauthorized={logout} handoff={handoff} onHandoff={handOff}
-                        onFeed={() => { setAgentFeedOpen(true); acknowledgeErrors(); }} feedError={agentHasError} />
+                    <DesignPage token={token} onNavigate={setView} onUnauthorized={logout} handoff={handoff} onHandoff={handOff} />
                 </ErrorBoundary>
             )}
             {view === "cowork" && (
                 <ErrorBoundary>
-                    <CoworkPage token={token} onNavigate={setView} onUnauthorized={logout} handoff={handoff} onHandoff={handOff}
-                        onFeed={() => { setAgentFeedOpen(true); acknowledgeErrors(); }} feedError={agentHasError} />
+                    <CoworkPage token={token} onNavigate={setView} onUnauthorized={logout} handoff={handoff} onHandoff={handOff} />
                 </ErrorBoundary>
             )}
             {view === "code" && (
                 <ErrorBoundary>
-                    <CodePage token={token} onNavigate={setView} onUnauthorized={logout} handoff={handoff} onHandoff={handOff}
-                        onFeed={() => { setAgentFeedOpen(true); acknowledgeErrors(); }} feedError={agentHasError} />
+                    <CodePage token={token} onNavigate={setView} onUnauthorized={logout} handoff={handoff} onHandoff={handOff} />
                 </ErrorBoundary>
             )}
             {view === "allChats" && (

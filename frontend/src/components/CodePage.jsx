@@ -8,6 +8,8 @@ import { AssistantText, AttachedChips, CLEAR_COMMAND, ChatMenu, ConnectorsSheet,
 import { ApprovalCard } from "./CoworkPage";
 import { HeaderStatus, iconBtn } from "./StatusBar";
 import { PlusIcon, SendIcon, StopIcon } from "./Icons";
+import AgentFeedPanel from "./AgentFeedPanel";
+import useAgentFeed from "../hooks/useAgentFeed";
 import TabDrawer, { HandoffCard, MenuButton } from "./TabDrawer";
 import useTabChats from "../hooks/useTabChats";
 
@@ -146,7 +148,7 @@ function Automations({ token, provider, repo, onUnauthorized }) {
 
 // Full-screen Code tab: a coding agent working in a clone of one repo on
 // Modal. Nothing reaches the repo until "Open PR" (or an automation) does.
-export default function CodePage({ token, onNavigate, onUnauthorized, onFeed, feedError, handoff, onHandoff }) {
+export default function CodePage({ token, onNavigate, onUnauthorized, handoff, onHandoff }) {
     const { chats, chat, updateChat, newChat: addChat, selectChat, deleteChat } = useTabChats(STORE_KEY, {
         blank: () => ({ provider: "github", repo: "", items: [] }),
         legacy: () => {
@@ -161,6 +163,9 @@ export default function CodePage({ token, onNavigate, onUnauthorized, onFeed, fe
     // One working branch per chat: every run, PR and push from this chat goes to it.
     const branch = chat.branch || `sem/${(repo.split("/")[1] || "work").toLowerCase().replace(/[^a-z0-9-]/g, "-")}-${chat.id.slice(-6)}`;
     const [menuOpen, setMenuOpen] = useState(false);
+    // The activity icon shows this chat's own log (tools, MCP calls, models, errors).
+    const feed = useAgentFeed(`code:${chat.id}`, token);
+    const [feedOpen, setFeedOpen] = useState(false);
     const [repos, setRepos] = useState([]);
     const [reposError, setReposError] = useState("");
     const [opened, setOpened] = useState(null);
@@ -274,7 +279,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, onFeed, fe
         try {
             const res = await fetch(`${API}/code/run`, {
                 method: "POST", headers, signal: abortRef.current.signal,
-                body: JSON.stringify({ provider, repo, branch, message: sent, history: prior, mode: runMode, model: useModel }),
+                body: JSON.stringify({ provider, repo, branch, chat_id: chatId, message: sent, history: prior, mode: runMode, model: useModel }),
             });
             if (res.status === 401) { onUnauthorized(); return; }
             if (!res.ok || !res.body) throw new Error(`Request failed: ${res.status}`);
@@ -297,7 +302,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, onFeed, fe
         let state = decision;
         if (decision === "approved") {
             try {
-                const r = await fetch(`${API}/code/execute`, { method: "POST", headers, body: JSON.stringify({ id }) });
+                const r = await fetch(`${API}/code/execute`, { method: "POST", headers, body: JSON.stringify({ id, chat_id: chat.id }) });
                 const d = await r.json().catch(() => ({}));
                 state = r.ok ? "done" : (d.detail || `Failed (${r.status})`);
                 if (r.ok && (d.url || d.sha || d.status)) setItems(it => [...it, { kind: "text", text: [d.status, d.url && `[Open](${d.url})`, d.sha && `commit \`${String(d.sha).slice(0, 8)}\``].filter(Boolean).join(" · ") }]);
@@ -354,7 +359,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, onFeed, fe
                 <MenuButton onClick={() => setMenuOpen(true)} />
                 <span style={{ fontWeight: 700, color: "var(--text)", fontSize: "15px" }}>Sem Code</span>
                 <span style={{ flex: 1 }} />
-                <HeaderStatus token={token} onFeed={onFeed} hasError={feedError} busy={!!busy} />
+                <HeaderStatus token={token} onFeed={() => { setFeedOpen(true); feed.acknowledgeErrors(); }} hasError={feed.hasError} busy={!!busy} />
                 <button onClick={() => newChat(provider, "")} disabled={!!busy} aria-label="New chat with another repo" title="New chat with another repo" style={iconBtn}>
                     <PlusIcon size={18} />
                 </button>
@@ -370,6 +375,8 @@ export default function CodePage({ token, onNavigate, onUnauthorized, onFeed, fe
                         onChange={v => pickRepo(provider, v)} />
                 </div>
             </div>
+            <AgentFeedPanel open={feedOpen} onClose={() => setFeedOpen(false)} events={feed.events}
+                title={`Activity · ${chat.title || "New chat"}`} />
             <TabDrawer open={menuOpen} onClose={() => setMenuOpen(false)} title="Sem Code" current="code"
                 onNavigate={onNavigate} onNew={() => newChat()} chats={chats} activeId={chat.id} disabled={!!busy}
                 onSelect={id => { selectChat(id); setOpened(null); setNotice(""); }} onDelete={deleteChat}

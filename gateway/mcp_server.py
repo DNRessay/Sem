@@ -5,11 +5,12 @@ Claude Code, Claude Desktop, Cursor or any MCP client can use it:
 
 The MCP key comes from Settings in the app (POST /mcp/key)."""
 import json
+import time
 
 from agents.code_agent import CodeAgent
 from agents.cowork_agent import CoworkAgent
 from agents.research_agent import ResearchAgent
-from pipeline import llm_providers
+from pipeline import activity, llm_providers
 from pipeline.ad_studio import PLACEMENTS, write_variants
 from pipeline.code_tasks import connector_token, open_pr, valid_target
 from pipeline.mcp_tools import MCPToolset
@@ -67,6 +68,10 @@ TOOLS = [
 
 def _text(text: str, is_error: bool = False) -> dict:
     return {"content": [{"type": "text", "text": text}], "isError": is_error}
+
+
+# Calls from outside apps (Claude Code, Cursor…) into Sem's own MCP server; shown in Settings → Connectors.
+INBOUND_LOG = "mcp:inbound"
 
 
 async def _drain(agent, task: str) -> dict:
@@ -170,10 +175,15 @@ async def handle(message: dict, account_id: str) -> dict | None:
         name = params.get("name")
         if name not in {t["name"] for t in TOOLS}:
             return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32602, "message": f"Unknown tool: {name}"}}
+        started = time.monotonic()
+        await activity.log(INBOUND_LOG, "mcp", f"ok:→ {name} {activity._args(params.get('arguments') or {})}")
         try:
             result = await call_tool(name, params.get("arguments") or {}, account_id)
         except Exception as e:  # a tool failure is a result the client can show, not a protocol error
             result = _text(f"{name} failed: {str(e)[:300]}", True)
+        first = ((result.get("content") or [{}])[0].get("text") or "")[:160]
+        await activity.log(INBOUND_LOG, "mcp", f"{'blocked' if result.get('isError') else 'ok'}:← {name} "
+                                               f"({round(time.monotonic() - started)}s) {first}")
     else:
         return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": f"Method not found: {method}"}}
     return {"jsonrpc": "2.0", "id": mid, "result": result}

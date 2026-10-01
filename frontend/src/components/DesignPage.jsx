@@ -3,6 +3,8 @@ import ModelPicker, { loadModel } from "./ModelPicker";
 import { readEvents } from "../utils/sse";
 import { copyToClipboard } from "../utils/clipboard";
 import { HeaderStatus } from "./StatusBar";
+import AgentFeedPanel from "./AgentFeedPanel";
+import useAgentFeed from "../hooks/useAgentFeed";
 import TabDrawer, { MenuButton } from "./TabDrawer";
 import useTabChats from "../hooks/useTabChats";
 
@@ -265,7 +267,7 @@ function VideoStudio({ token, seedPrompt }) {
 // Design tab: digital-marketing assistant. Learns the business from its own
 // website, then writes ad copy and makes matching images per placement
 // (Nano Banana, free tier) and short video ads (Wan 2.1 on Modal, capped).
-export default function DesignPage({ token, onNavigate, onUnauthorized, onFeed, feedError, handoff, onHandoff }) {
+export default function DesignPage({ token, onNavigate, onUnauthorized, handoff, onHandoff }) {
     // Each campaign is a saved "chat": the business brief, the campaign and its ad copy (images aren't stored).
     const { chats, chat, updateChat, newChat, selectChat, deleteChat } = useTabChats(STORE_KEY, {
         blank: () => ({ site: "", brief: "", campaign: "", placements: ["fb_ig_feed", "story_reel"], count: 2, ads: [] }),
@@ -281,6 +283,9 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, onFeed, 
     const setPlacements = field$("placements");
     const setCount = field$("count");
     const [menuOpen, setMenuOpen] = useState(false);
+    // The activity icon shows this chat's own log (tools, MCP calls, models, errors).
+    const feed = useAgentFeed(`design:${chat.id}`, token);
+    const [feedOpen, setFeedOpen] = useState(false);
     // Inspiration images stay in memory only (too big for phone storage); the style text they produced is saved.
     const [refs, setRefs] = useState([]);
     useEffect(() => { setRefs([]); }, [chat.id]);
@@ -314,7 +319,7 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, onFeed, 
     const create = async () => {
         setBusy("Writing ads…"); setNotice(""); setAds([]);
         try {
-            const r = await fetch(`${API}/design/ads`, { method: "POST", headers, body: JSON.stringify({ brief, campaign, placements, count, model, references }) });
+            const r = await fetch(`${API}/design/ads`, { method: "POST", headers, body: JSON.stringify({ brief, campaign, placements, count, model, references, chat_id: chat.id }) });
             if (r.status === 401) { onUnauthorized(); return; }
             if (!r.ok || !r.body) throw new Error((await r.json().catch(() => ({}))).detail || `Failed (${r.status})`);
             await readEvents(r, (ev) => {
@@ -350,9 +355,11 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, onFeed, 
             <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
                 <MenuButton onClick={() => setMenuOpen(true)} />
                 <span style={{ fontWeight: 700, color: "var(--text)", flex: 1 }}>Sem Design</span>
-                <HeaderStatus token={token} onFeed={onFeed} hasError={feedError} busy={!!busy} />
+                <HeaderStatus token={token} onFeed={() => { setFeedOpen(true); feed.acknowledgeErrors(); }} hasError={feed.hasError} busy={!!busy} />
                 <ModelPicker token={token} value={model} onChange={setModel} storageKey="semblance_design_model" />
             </div>
+            <AgentFeedPanel open={feedOpen} onClose={() => setFeedOpen(false)} events={feed.events}
+                title={`Activity · ${chat.title || "New chat"}`} />
             <TabDrawer open={menuOpen} onClose={() => setMenuOpen(false)} title="Sem Design" current="design"
                 onNavigate={onNavigate} newLabel="+ New campaign" disabled={!!busy}
                 onNew={() => { newChat({ site, brief, placements, count }); setNotice(""); }}

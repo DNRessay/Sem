@@ -4,9 +4,10 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from agents.code_agent import APPROVAL_ACTIONS, CodeAgent
+from agents.code_agent import APPROVAL_ACTIONS, CodeAgent, describe_action
 from cache import ddb_backend
 from gateway.auth import require_account
+from pipeline.activity import RunLog, log, session_for
 from pipeline.code_tasks import EVERY_SECONDS, connector_token, open_pr, run_code_action, valid_target
 from pipeline.mcp_tools import MCPToolset
 from storage.neon_store import get_store
@@ -53,9 +54,13 @@ async def run(request: Request, account: dict = Depends(require_account)):
                       branch=_branch(body))
     agent.user_context = await TAUEngine().owner_context()
 
+    runlog = RunLog(session_for("code", body), "code")
+
     async def stream():
+        await runlog.start(message, body.get("model") or "auto", body.get("mode") or "act")
         try:
             async for event in agent.run(message, body.get("history") or []):
+                await runlog.record(event)
                 if event["type"] == "approval" and event["id"] in agent.pending:
                     # Kept server-side (an hour): Approve can only run exactly what was shown, and a secret's
                     # value never goes back to the browser.
@@ -65,6 +70,7 @@ async def run(request: Request, account: dict = Depends(require_account)):
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as e:  # surface it in the UI instead of a silently dead stream
             yield f"data: {json.dumps({'type': 'error', 'text': f'Code agent crashed: {str(e)[:300]}'})}\n\n"
+            await runlog.record({'type': 'error', 'text': f'Code agent crashed: {str(e)[:300]}'})
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream")
@@ -86,7 +92,11 @@ async def execute(request: Request, account: dict = Depends(require_account)):
     if not token and action["name"] != "aws_action":
         raise HTTPException(400, f"Connect {ws.provider} first")
     ddb_backend.delete(_APPROVALS, key)  # one approval, one run
+    session = session_for("code", body)
+    await log(session, "code", f"ok:approved — {describe_action(action['name'], action['args'], action['repo'])}")
     result = await run_code_action(ws, token, action["name"], action["args"])
+    await log(session, "code", f"{'ok' if result.get('ok') else 'blocked'}:{action['name']}: "
+                               f"{result.get('status') or result.get('url') or result.get('error') or result.get('message') or ''}"[:300])
     if not result.get("ok"):
         raise HTTPException(400, result.get("error") or result.get("message") or "action failed")
     return result

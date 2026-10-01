@@ -5,6 +5,8 @@ import { readEvents } from "../utils/sse";
 import { AssistantText, AttachedChips, CLEAR_COMMAND, ChatMenu, ConnectorsSheet, HELP_COMMAND, NEW_COMMAND, PlusMenu, SuggestModel, errorClass, helpText, parseSlash, readTextFiles, withAttachments } from "./MessageKit";
 import { HeaderStatus } from "./StatusBar";
 import { SendIcon, StopIcon } from "./Icons";
+import AgentFeedPanel from "./AgentFeedPanel";
+import useAgentFeed from "../hooks/useAgentFeed";
 import TabDrawer, { HandoffCard, MenuButton } from "./TabDrawer";
 import useTabChats from "../hooks/useTabChats";
 
@@ -61,7 +63,7 @@ function Connect({ headers, onConnected }) {
 
 // Finance tab: ask about your own money. Answers come from C-Lab over MCP
 // (read-only), with web search for outside context.
-export default function FinancePage({ token, onNavigate, onUnauthorized, onFeed, feedError, handoff, onHandoff }) {
+export default function FinancePage({ token, onNavigate, onUnauthorized, handoff, onHandoff }) {
     const [status, setStatus] = useState(null);
     const { chats, chat, updateChat, newChat, selectChat, deleteChat } = useTabChats(STORE_KEY, {
         blank: () => ({ items: [] }),
@@ -71,6 +73,9 @@ export default function FinancePage({ token, onNavigate, onUnauthorized, onFeed,
     const items = chat.items;
     const setItems = fn => updateChat(chat.id, x => ({ items: fn(x.items) }));
     const [menuOpen, setMenuOpen] = useState(false);
+    // The activity icon shows this chat's own log (tools, MCP calls, models, errors).
+    const feed = useAgentFeed(`finance:${chat.id}`, token);
+    const [feedOpen, setFeedOpen] = useState(false);
     const [input, setInput] = useState("");
     const [files, setFiles] = useState([]);
     const [connectorsOpen, setConnectorsOpen] = useState(false);
@@ -129,7 +134,7 @@ export default function FinancePage({ token, onNavigate, onUnauthorized, onFeed,
         abortRef.current = new AbortController();
         try {
             const res = await fetch(`${API}/finance/run`, {
-                method: "POST", headers, signal: abortRef.current.signal, body: JSON.stringify({ message: sent, history, model: useModel }),
+                method: "POST", headers, signal: abortRef.current.signal, body: JSON.stringify({ message: sent, history, model: useModel, chat_id: chatId }),
             });
             if (res.status === 401) { onUnauthorized(); return; }
             if (!res.ok || !res.body) throw new Error((await res.json().catch(() => ({}))).detail || `Request failed: ${res.status}`);
@@ -151,11 +156,13 @@ export default function FinancePage({ token, onNavigate, onUnauthorized, onFeed,
             <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
                 <MenuButton onClick={() => setMenuOpen(true)} />
                 <span style={{ fontWeight: 700, color: "var(--text)", flex: 1 }}>Sem Finance</span>
-                <HeaderStatus token={token} onFeed={onFeed} hasError={feedError} busy={busy} />
+                <HeaderStatus token={token} onFeed={() => { setFeedOpen(true); feed.acknowledgeErrors(); }} hasError={feed.hasError} busy={busy} />
                 <ChatMenu title={chat.title || "Sem Finance"} messages={transcript} />
                 {status?.connected && <span title="C-Lab connected" style={{ width: "7px", height: "7px", borderRadius: "50%", background: "var(--ready)", display: "inline-block" }} />}
             </div>
 
+            <AgentFeedPanel open={feedOpen} onClose={() => setFeedOpen(false)} events={feed.events}
+                title={`Activity · ${chat.title || "New chat"}`} />
             <TabDrawer open={menuOpen} onClose={() => setMenuOpen(false)} title="Sem Finance" current="finance"
                 onNavigate={onNavigate} onNew={() => newChat()} chats={chats} activeId={chat.id} disabled={busy}
                 onSelect={selectChat} onDelete={deleteChat} />

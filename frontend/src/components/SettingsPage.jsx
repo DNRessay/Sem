@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { copyToClipboard } from "../utils/clipboard";
 import ConnectorsPanel from "./ConnectorsPanel";
 import SkillsPanel from "./SkillsPanel";
+import AgentFeed from "./AgentFeed";
+import useAgentFeed from "../hooks/useAgentFeed";
 
 const API = import.meta.env.VITE_API_URL || "";
 
@@ -99,7 +101,8 @@ function McpServers({ headers }) {
     );
 }
 
-function ConnectApps({ headers }) {
+function ConnectApps({ headers, token }) {
+    const inbound = useAgentFeed("mcp:inbound", token);
     const [key, setKey] = useState(null);
     const create = async () => {
         if (!window.confirm("Create a key that lets an app (Claude Code, Cursor…) use SEMBLANCE for a year?")) return;
@@ -128,6 +131,8 @@ function ConnectApps({ headers }) {
                     <div style={{ color: "var(--text-muted)", marginTop: "6px" }}>Shown once. Valid {key.expires_in_days} days; changing SECRET_KEY revokes every key.</div>
                 </div>
             )}
+            <div style={{ ...label, marginTop: "14px" }}>RECENT CALLS FROM OTHER APPS</div>
+            <AgentFeed events={inbound.events.slice(0, 20)} />
         </div>
     );
 }
@@ -315,7 +320,7 @@ export default function SettingsPage({ token, onBack, onUnauthorized }) {
                         <div style={label}>ACCOUNTS</div>
                         <ConnectorsPanel token={token} />
                         <McpServers headers={headers} />
-                        <ConnectApps headers={headers} />
+                        <ConnectApps headers={headers} token={token} />
                     </>
                 )}
                 {tab === "memory" && <MemoryTab headers={headers} />}
