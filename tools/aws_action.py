@@ -49,8 +49,23 @@ def check(service: str, operation: str) -> str | None:
     return None
 
 
+async def over_limit() -> str | None:
+    """Why new AWS changes are paused, if this month's bill has reached AWS_SPEND_LIMIT_USD."""
+    from tools.aws_cost import month_to_date
+
+    bill = await month_to_date()
+    if bill.get("ok") and bill["usd"] >= settings.AWS_SPEND_LIMIT_USD:
+        return (f"AWS spend this month is ${bill['usd']:.2f}, at or over the ${settings.AWS_SPEND_LIMIT_USD:.2f} limit — "
+                "changes are paused (deletes/stops still allowed). Raise AWS_SPEND_LIMIT_USD to continue.")
+    return None
+
+
 async def run(service: str, operation: str, params: dict | None = None, region: str = "") -> dict:
     op = _to_pascal(operation)
+    if not op.startswith(_DELETE_WORDS):
+        stop = await over_limit()
+        if stop:
+            return {"ok": False, "error": stop}
     snake = re.sub(r"(?<!^)(?=[A-Z])", "_", op).lower()
     try:
         client = boto3.client(service, region_name=region or settings.AWS_REGION)
@@ -61,8 +76,8 @@ async def run(service: str, operation: str, params: dict | None = None, region: 
     except (ClientError, BotoCoreError, TypeError) as e:
         text = str(e)
         if "AccessDenied" in text or "not authorized" in text:
-            text += (" — Sem's AWS role (semblance-chat) is view-only, so approved changes can't run yet. "
-                     "Giving it write access is your decision; until then make the change in the AWS console.")
+            text += (" — Sem's AWS role (semblance-chat) may only change Lambda functions (config, code, versions, "
+                     "invoke) and S3 objects/buckets; anything else is done in the AWS console.")
         return {"ok": False, "error": text[:600]}
     result.pop("ResponseMetadata", None)
     out = json.dumps(_redact(result), default=str)
