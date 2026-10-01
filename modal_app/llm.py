@@ -32,6 +32,8 @@ Coding with MiniMax Code:
 """
 import os
 import subprocess
+import time
+import urllib.request
 
 import modal
 
@@ -74,8 +76,7 @@ image = (
         "ln -sf $(find /opt/llama -name llama-server -type f | head -1) /usr/local/bin/llama-server",
         "rm /tmp/llama.tar.gz",
     )
-    .pip_install("huggingface_hub[hf_transfer]>=0.24")
-    .env({"HF_HUB_ENABLE_HF_TRANSFER": "1"})
+    .pip_install("huggingface_hub>=0.24")
     .run_function(_download_weights)
 )
 
@@ -118,4 +119,18 @@ def serve():
         "--chat-template-kwargs", '{"reasoning_effort":"medium"}',
         "--reasoning-budget", "4096",
     ]
-    subprocess.Popen(cmd, env=env)
+    proc = subprocess.Popen(cmd, env=env)
+    # llama-server opens its port before the weights are on the GPU and
+    # answers 503 "Loading model" until then. Modal only waits for the port,
+    # so block here until /health is 200 — otherwise the request that woke
+    # the container gets the 503 instead of a reply.
+    while True:
+        if proc.poll() is not None:
+            raise RuntimeError(f"llama-server exited with code {proc.returncode}")
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{_PORT}/health", timeout=2) as r:
+                if r.status == 200:
+                    return
+        except OSError:
+            pass
+        time.sleep(1)
