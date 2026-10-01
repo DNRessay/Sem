@@ -39,6 +39,8 @@ function Features({ features }) {
     ));
 }
 
+const CLOUDFLARE_MCP = "https://mcp.cloudflare.com/mcp";
+
 function McpServers({ headers }) {
     const [servers, setServers] = useState([]);
     const [form, setForm] = useState({ name: "", url: "", auth: "", require_approval: false });
@@ -71,7 +73,12 @@ function McpServers({ headers }) {
             <div style={label}>MCP SERVERS SEM CAN USE</div>
             <div style={{ fontSize: "12px", color: "var(--text-muted)", marginBottom: "8px" }}>
                 Their tools show up in Co-work and Code automatically. Name C-Lab "clab" for the Finance tab and Vicinic "vicinic" for Design.
+                Cloudflare tools that change anything always ask you first.
             </div>
+            {!servers.some(s => s.name === "cloudflare") && (
+                <button disabled={busy} style={{ ...btn, marginBottom: "8px" }}
+                    onClick={() => { setForm({ name: "cloudflare", url: CLOUDFLARE_MCP, auth: "", require_approval: false }); setMsg("Paste a Cloudflare API token (dash.cloudflare.com → My Profile → API Tokens), then Add server."); }}>+ Cloudflare</button>
+            )}
             {servers.map(s => (
                 <div key={s.name} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
                     <div style={{ flex: 1, minWidth: 0 }}>

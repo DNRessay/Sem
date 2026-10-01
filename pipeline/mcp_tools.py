@@ -4,12 +4,20 @@ model as mcp__<server>__<tool>; calls go over the real protocol
 as approval cards in Co-work instead of running directly."""
 import asyncio
 import re
+from urllib.parse import urlparse
 
 from agents.tool_loop import fn_tool
 from storage.neon_store import get_store
 from tools.mcp_client import MCPClient
 
 _SAFE = re.compile(r"[^a-zA-Z0-9_-]")
+
+
+def _guarded(url: str) -> bool:
+    """Servers that can change real infrastructure (AWS, Cloudflare): any tool
+    not marked read-only waits for the user's approval, whatever the setting."""
+    host = urlparse(url).hostname or ""
+    return host.endswith(".api.aws") or host == "mcp.cloudflare.com" or host.endswith(".mcp.cloudflare.com")
 
 
 def tool_id(server: str, tool: str) -> str:
@@ -21,6 +29,7 @@ class MCPToolset:
         self.servers = {s["name"]: s for s in servers or []}
         self._defs: list[dict] = []
         self._routes: dict[str, tuple[str, str]] = {}
+        self._writes: set[str] = set()
         self.errors: dict[str, str] = {}
 
     @classmethod
@@ -42,6 +51,8 @@ class MCPToolset:
             for t in tools:
                 name = tool_id(server["name"], t["name"])
                 self._routes[name] = (server["name"], t["name"])
+                if _guarded(server["url"]) and not (t.get("annotations") or {}).get("readOnlyHint"):
+                    self._writes.add(name)
                 schema = t.get("inputSchema") or {"type": "object", "properties": {}}
                 desc = f"[{server['name']} via MCP] {t.get('description', '')}"[:1000]
                 self._defs.append(fn_tool(name, desc, schema.get("properties") or {}, schema.get("required") or []))
@@ -54,7 +65,7 @@ class MCPToolset:
 
     def needs_approval(self, name: str) -> bool:
         server, _ = self._routes.get(name, ("", ""))
-        return bool(self.servers.get(server, {}).get("require_approval"))
+        return name in self._writes or bool(self.servers.get(server, {}).get("require_approval"))
 
     def describe(self, name: str, args: dict) -> str:
         server, tool = self._routes[name]
