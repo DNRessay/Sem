@@ -275,7 +275,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                             Research
                         </button>
                         <span style={{ flex: 1 }} />
-                        <VoiceInput onTranscript={text => setInput(prev => (prev ? `${prev} ${text}` : text))} />
+                        <VoiceInput value={input} onChange={setInput} />
                         <button
                             onClick={streaming ? abort : () => submit()}
                             aria-label={streaming ? "Stop" : "Send"} className={streaming ? "" : "btn-gold"}

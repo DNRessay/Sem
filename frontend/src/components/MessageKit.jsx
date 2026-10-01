@@ -1,10 +1,10 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { copyToClipboard } from "../utils/clipboard";
 import { downloadAllAsZip, downloadText, extractCodeBlocks, filenameFor } from "../utils/codeBlocks";
 import ConnectorsPanel from "./ConnectorsPanel";
-import { FileIcon, MoreIcon, PaperclipIcon, PlugIcon, PlusIcon, SlashIcon } from "./Icons";
+import { CheckIcon as LineCheckIcon, FileIcon, MoreIcon, PaperclipIcon, PlugIcon, PlusIcon, SlashIcon } from "./Icons";
 
 const API = import.meta.env.VITE_API_URL || "";
 
@@ -397,4 +397,135 @@ export const CLEAR_COMMAND = { name: "clear", help: "Clear this chat's messages"
 
 export function helpText(commands) {
     return "**Commands**\n\n" + commands.map(c => `- \`/${c.name}${c.arg ? ` <${c.arg}>` : ""}\` — ${c.help}`).join("\n");
+}
+
+// ── Context budget: the ring by the send button, plus compaction ─────────────
+
+let modelsCache = null;
+function useModelContext(token, model) {
+    const [models, setModels] = useState(modelsCache || []);
+    useEffect(() => {
+        if (modelsCache) return;
+        fetch(`${API}/models`, { headers: { Authorization: `Bearer ${token}` } })
+            .then(r => (r.ok ? r.json() : { models: [] }))
+            .then(d => { modelsCache = d.models || []; setModels(modelsCache); }).catch(() => {});
+    }, [token]);
+    const m = models.find(x => x.id === model);
+    return m?.context || (model.startsWith("hf:") ? 32768 : 65536);
+}
+
+const SYSTEM_TOKENS = 2500; // system prompt + tool definitions, roughly
+
+export function estimateTokens(items) {
+    let chars = 0;
+    for (const i of items) chars += (i.text || "").length + (i.output || "").length + (i.args ? JSON.stringify(i.args).length : 0);
+    return SYSTEM_TOKENS + Math.round(chars / 4);
+}
+
+export function useContextBudget(items, model, token) {
+    const limit = useModelContext(token, model);
+    const used = estimateTokens(items);
+    return { used, limit, pct: Math.min(1, used / limit) };
+}
+
+export const AUTO_COMPACT_AT = 0.8;
+const KEEP_RECENT = 4;
+
+// Squash everything but the last few messages into one summary item (POST /compact).
+export async function compactItems(items, model, headers) {
+    const talk = items.map((x, idx) => ({ ...x, idx })).filter(x => x.kind === "user" || x.kind === "text");
+    if (talk.length <= KEEP_RECENT) return null;
+    const cut = talk[talk.length - KEEP_RECENT].idx;
+    const older = items.slice(0, cut).filter(x => x.kind === "user" || x.kind === "text")
+        .map(x => ({ role: x.kind === "user" ? "user" : "assistant", content: x.text }));
+    const r = await fetch(`${API}/compact`, { method: "POST", headers, body: JSON.stringify({ messages: older, model }) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.summary) throw new Error(d.detail || `Compact failed (${r.status})`);
+    return [{ kind: "text", summary: true, text: `**Summary of the earlier conversation**\n\n${d.summary}` }, ...items.slice(cut)];
+}
+
+function fmtK(n) {
+    return n >= 1000 ? `${(n / 1000).toFixed(n >= 100000 ? 0 : 1)}k` : String(n);
+}
+
+export function ContextRing({ budget, onCompact, busy }) {
+    const [open, setOpen] = useState(false);
+    const r = 8, c = 2 * Math.PI * r;
+    const color = budget.pct >= AUTO_COMPACT_AT ? "var(--warning)" : "var(--gold)";
+    return (
+        <span style={{ position: "relative", display: "inline-flex" }}>
+            <button onClick={() => setOpen(o => !o)} aria-label={`Context ${Math.round(budget.pct * 100)}% used`}
+                title={`Context ${Math.round(budget.pct * 100)}% used`}
+                style={{ background: "none", border: "none", cursor: "pointer", padding: "4px", display: "inline-flex" }}>
+                <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+                    <circle cx="10" cy="10" r={r} fill="none" stroke="var(--border)" strokeWidth="2.5" />
+                    <circle cx="10" cy="10" r={r} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round"
+                        strokeDasharray={`${c * Math.max(0.02, budget.pct)} ${c}`} transform="rotate(-90 10 10)" />
+                </svg>
+            </button>
+            {open && (
+                <>
+                    <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.25)", zIndex: 44 }} />
+                    <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 45, background: "var(--bg)", borderTop: "1px solid var(--border)", borderRadius: "16px 16px 0 0", padding: "14px 16px 24px" }}>
+                        <div style={{ display: "flex", fontSize: "13px", color: "var(--text-muted)" }}>
+                            <span style={{ flex: 1 }}>Context window</span>
+                            <span>{fmtK(budget.used)} / {fmtK(budget.limit)} ({Math.round(budget.pct * 100)}%)</span>
+                        </div>
+                        <div style={{ height: "6px", borderRadius: "3px", background: "var(--surface-2)", margin: "8px 0" }}>
+                            <div style={{ width: `${Math.round(budget.pct * 100)}%`, height: "100%", borderRadius: "3px", background: color }} />
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: "var(--text-muted)" }}>
+                            <span style={{ flex: 1 }}>
+                                {budget.pct >= AUTO_COMPACT_AT ? "Compacts before your next message" : `${fmtK(Math.max(0, Math.round(budget.limit * AUTO_COMPACT_AT) - budget.used))} until auto-compact`}
+                            </span>
+                            <button className="btn-primary" disabled={busy} onClick={() => { setOpen(false); onCompact(); }}
+                                style={{ ...pill, color: "var(--accent-contrast)", padding: "6px 12px", fontSize: "12px" }}>Compact chat</button>
+                        </div>
+                        <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "8px" }}>
+                            Compacting replaces older messages with a summary so long chats keep working. An estimate, measured against the picked model.
+                        </div>
+                    </div>
+                </>
+            )}
+        </span>
+    );
+}
+
+// Code's mode picker: a pill that opens a sheet, like Claude's Auto / Accept edits / Plan.
+export const CODE_MODES = [
+    { id: "auto", label: "Auto", help: "Edits files, and pushes to this chat's branch, updates its PR and re-runs CI itself. Still asks before merges, secrets, workflows and AWS." },
+    { id: "act", label: "Accept edits", help: "Edits files and runs commands freely; anything outside the workspace waits for your approval." },
+    { id: "plan", label: "Plan", help: "Looks around and proposes a plan; changes nothing until you approve it." },
+];
+
+export function ModeMenu({ mode, onChange }) {
+    const [open, setOpen] = useState(false);
+    const current = CODE_MODES.find(m => m.id === mode) || CODE_MODES[1];
+    return (
+        <>
+            <button onClick={() => setOpen(true)} aria-label="Mode"
+                style={{ border: "1px solid var(--border)", borderRadius: "999px", padding: "5px 10px", fontSize: "12px", background: "transparent",
+                         color: mode === "act" ? "var(--text-muted)" : "var(--gold-text)", cursor: "pointer", whiteSpace: "nowrap" }}>
+                {current.label}
+            </button>
+            {open && (
+                <>
+                    <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.25)", zIndex: 44 }} />
+                    <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 45, background: "var(--bg)", borderTop: "1px solid var(--border)", borderRadius: "16px 16px 0 0", padding: "8px 0 20px" }}>
+                        <div style={{ fontSize: "12px", color: "var(--text-muted)", padding: "6px 16px" }}>Mode</div>
+                        {CODE_MODES.map(m => (
+                            <button key={m.id} onClick={() => { onChange(m.id); setOpen(false); }}
+                                style={{ display: "flex", width: "100%", textAlign: "left", gap: "10px", padding: "10px 16px", background: "none", border: "none", cursor: "pointer", color: "var(--text)" }}>
+                                <span style={{ flex: 1 }}>
+                                    <span style={{ display: "block", fontSize: "14px" }}>{m.label}</span>
+                                    <span style={{ display: "block", fontSize: "12px", color: "var(--text-muted)" }}>{m.help}</span>
+                                </span>
+                                {m.id === mode && <span style={{ color: "var(--gold-text)" }}><LineCheckIcon size={16} /></span>}
+                            </button>
+                        ))}
+                    </div>
+                </>
+            )}
+        </>
+    );
 }

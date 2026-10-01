@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from cache.sys_cache import SysCache
 from gateway.code_router import router as code_router
+from gateway.compact_router import router as compact_router
 from gateway.connectors import router as connectors_router
 from gateway.cowork_router import router as cowork_router
 from gateway.design_router import router as design_router
@@ -77,3 +78,4 @@ app.include_router(design_router)
 app.include_router(mcp_router)
 app.include_router(settings_router)
 app.include_router(finance_router)
+app.include_router(compact_router)

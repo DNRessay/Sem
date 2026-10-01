@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useRef, useState } from "react";
 
 function MicIcon() {
     return (
@@ -11,28 +11,29 @@ function MicIcon() {
     );
 }
 
-export default function VoiceInput({ onTranscript }) {
+// Dictation into the message box: words appear while you speak (interim
+// results), and it keeps listening until you tap the mic again.
+export default function VoiceInput({ value = "", onChange }) {
     const [listening, setListening] = useState(false);
     const recogRef = useRef(null);
+    const baseRef = useRef("");
+
+    const stop = () => { recogRef.current?.stop(); setListening(false); };
 
     const toggle = () => {
-        if (!("webkitSpeechRecognition" in window || "SpeechRecognition" in window)) {
-            alert("Speech recognition not supported in this browser.");
-            return;
-        }
-        if (listening) {
-            recogRef.current?.stop();
-            setListening(false);
-            return;
-        }
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SR) { alert("Voice input isn't supported in this browser."); return; }
+        if (listening) { stop(); return; }
+        baseRef.current = value.trim();
         const r = new SR();
-        r.continuous = false;
-        r.interimResults = false;
-        r.lang = "en-US";
-        r.onresult = e => {
-            onTranscript?.(e.results[0][0].transcript);
-            setListening(false);
+        r.continuous = true;
+        r.interimResults = true;
+        r.lang = "en-ZA";
+        r.onresult = (e) => {
+            let heard = "";
+            for (let i = 0; i < e.results.length; i++) heard += e.results[i][0].transcript;
+            const text = heard.trim();
+            onChange?.(baseRef.current && text ? `${baseRef.current} ${text}` : baseRef.current || text);
         };
         r.onerror = () => setListening(false);
         r.onend = () => setListening(false);
@@ -44,12 +45,13 @@ export default function VoiceInput({ onTranscript }) {
     return (
         <button
             onClick={toggle}
-            title="Voice input"
-            aria-label="Voice input"
+            title={listening ? "Listening — tap to stop" : "Voice input"}
+            aria-label={listening ? "Stop voice input" : "Voice input"}
             style={{
                 width: "32px", height: "32px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
-                background: "none", border: "none", borderRadius: "50%",
+                background: listening ? "var(--danger-bg)" : "none", border: "none", borderRadius: "50%",
                 color: listening ? "var(--danger)" : "var(--text-muted)", cursor: "pointer",
+                animation: listening ? "sem-pulse 1.2s ease-in-out infinite" : "none",
             }}
         >
             <MicIcon />

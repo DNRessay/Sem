@@ -208,3 +208,8 @@ body {
     margin: 0;
     border-radius: 0;
 }
+
+@keyframes sem-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 var(--danger-bg); }
+    50% { box-shadow: 0 0 0 6px var(--danger-bg); }
+}

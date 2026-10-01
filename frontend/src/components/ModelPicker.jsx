@@ -37,7 +37,7 @@ export default function ModelPicker({ token, value, onChange, storageKey }) {
         <select
             value={value} onChange={e => pick(e.target.value)} aria-label="Model"
             style={{ border: "1px solid var(--border)", borderRadius: "999px", padding: "5px 8px", fontSize: "12px",
-                color: "var(--text-muted)", background: "transparent", maxWidth: "150px" }}
+                color: "var(--text-muted)", background: "transparent", maxWidth: "130px", minWidth: 0, flexShrink: 1 }}
         >
             <optgroup label="Free">{free.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</optgroup>
             {(paid.length > 0 || hasHf) && (

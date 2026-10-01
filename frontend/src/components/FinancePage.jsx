@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import ModelPicker, { loadModel } from "./ModelPicker";
 import { ToolStep, md } from "./CodePage";
 import { readEvents } from "../utils/sse";
-import { AssistantText, AttachedChips, CLEAR_COMMAND, ChatMenu, ConnectorsSheet, HELP_COMMAND, NEW_COMMAND, PlusMenu, SuggestModel, errorClass, helpText, parseSlash, readTextFiles, withAttachments } from "./MessageKit";
+import { AUTO_COMPACT_AT, ContextRing, compactItems, useContextBudget, AssistantText, AttachedChips, CLEAR_COMMAND, ChatMenu, ConnectorsSheet, HELP_COMMAND, NEW_COMMAND, PlusMenu, SuggestModel, errorClass, helpText, parseSlash, readTextFiles, withAttachments } from "./MessageKit";
 import { HeaderStatus } from "./StatusBar";
 import { SendIcon, StopIcon } from "./Icons";
 import AgentFeedPanel from "./AgentFeedPanel";
 import useAgentFeed from "../hooks/useAgentFeed";
+import VoiceInput from "./VoiceInput";
 import TabDrawer, { HandoffCard, MenuButton } from "./TabDrawer";
 import useTabChats from "../hooks/useTabChats";
 
@@ -92,6 +93,20 @@ export default function FinancePage({ token, onNavigate, onUnauthorized, handoff
     }, [handoff]); // eslint-disable-line react-hooks/exhaustive-deps
     const [busy, setBusy] = useState(false);
     const [model, setModel] = useState(() => loadModel("semblance_finance_model"));
+    const budget = useContextBudget(items, model, token);
+    const [compacting, setCompacting] = useState(false);
+    // Older messages become one summary; runs by itself before a message when the ring passes 80%.
+    const compactNow = async () => {
+        setCompacting(true);
+        try {
+            const next = await compactItems(items, model, headers);
+            if (next) updateChat(chat.id, () => ({ items: next }));
+            return next;
+        } catch (e) {
+            setItems(it => [...it, { kind: "error", text: e.message }]);
+            return null;
+        } finally { setCompacting(false); }
+    };
     const abortRef = useRef(null);
     const endRef = useRef(null);
     const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
@@ -127,7 +142,9 @@ export default function FinancePage({ token, onNavigate, onUnauthorized, handoff
         const chatId = chat.id;
         const add = fn => updateChat(chatId, x => ({ items: fn(x.items) }));
         if (!items.length) updateChat(chatId, () => ({ title: message.slice(0, 60) }));
-        const history = items.filter(i => i.kind === "user" || i.kind === "text")
+        let base = items;
+        if (budget.pct >= AUTO_COMPACT_AT && !compacting) base = (await compactNow()) || items;
+        const history = base.filter(i => i.kind === "user" || i.kind === "text")
             .map(i => ({ role: i.kind === "user" ? "user" : "assistant", content: i.text })).slice(-20);
         add(it => [...it, { kind: "user", text: attached.length ? `${message}\nAttached: ${attached.join(", ")}` : message }]);
         setInput(""); setBusy(true);
@@ -198,6 +215,7 @@ export default function FinancePage({ token, onNavigate, onUnauthorized, handoff
                     return <AssistantText key={i} text={item.text} token={token} />;
                 })}
                 {busy && <div style={{ color: "var(--text-muted)", fontSize: "13px", margin: "8px 0" }}>Looking at your numbers…</div>}
+                {compacting && <div style={{ color: "var(--text-muted)", fontSize: "13px", margin: "8px 0" }}>Compacting the conversation…</div>}
                 <div ref={endRef} />
             </div>
 
@@ -207,13 +225,15 @@ export default function FinancePage({ token, onNavigate, onUnauthorized, handoff
                         <AttachedChips files={files} setFiles={setFiles} />
                     <textarea value={input} rows={2} onChange={e => setInput(e.target.value)}
                             onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); run(input); } }}
-                            placeholder="Ask about your money…"
+                            placeholder="Type / for commands"
                             style={{ width: "100%", background: "transparent", border: "none", color: "var(--text)", fontSize: "15px", outline: "none", resize: "none", fontFamily: "inherit" }} />
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: 0 }}>
                         <PlusMenu commands={COMMANDS} onCommand={c => (c.arg ? setInput(`/${c.name} `) : runCommand(c.name))}
                             onFiles={addFiles} onConnectors={() => setConnectorsOpen(true)} disabled={!!busy} />
+                        <VoiceInput value={input} onChange={setInput} />
                             <ModelPicker token={token} value={model} onChange={setModel} storageKey="semblance_finance_model" />
                             <span style={{ flex: 1 }} />
+                        <ContextRing budget={budget} onCompact={compactNow} busy={!!busy || compacting} />
                             <button onClick={busy ? () => abortRef.current?.abort() : () => run(input)} aria-label={busy ? "Stop" : "Send"} className={busy ? "" : "btn-gold"}
                                 style={{ width: "32px", height: "32px", borderRadius: "50%", border: "none", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center",
                                     background: busy ? "var(--danger)" : "var(--accent)", color: "var(--accent-contrast)", fontSize: "15px" }}>

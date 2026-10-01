@@ -16,6 +16,11 @@ How to work:
 - Finish with a short summary: what you changed, and how you verified it (or why you couldn't).
 You are SEMBLANCE running on open-weight models; never claim to be Claude, GPT or any other vendor's model."""
 
+_AUTO_SUFFIX = """
+
+AUTO MODE: pushing to this chat's own branch, opening/updating its PR and re-running CI happen without asking. Merges,
+secrets, workflow runs and AWS changes still wait for the user's approval."""
+
 _PLAN_SUFFIX = """
 
 PLAN MODE: do not modify anything. Only explore (list_dir, read_file, grep, aws). Then reply with a numbered,
@@ -113,7 +118,7 @@ class CodeAgent(ToolLoopAgent):
                          deadline_seconds or settings.AGENT_TIMEOUT_SECONDS, mcp=None if mode == "plan" else mcp)
         self.tab = "code"
         self.ws = workspace
-        self.mode = "plan" if mode == "plan" else "act"
+        self.mode = mode if mode in ("plan", "auto") else "act"
         self.aws = aws or AwsReadTool()
         self.pending: dict[str, dict] = {}  # approval id -> real action, for /code/execute
         self.pr_token = pr_token
@@ -134,7 +139,7 @@ class CodeAgent(ToolLoopAgent):
             pr_line += (f" This chat's work branch is {self.branch}: open_pr commits there and reuses its PR, and "
                         "push_branch with no branch pushes there too.")
         system = _SYSTEM.format(repo=self.ws.repo, provider=self.ws.provider, pr_line=pr_line)
-        return system + _PLAN_SUFFIX if self.mode == "plan" else system
+        return system + {"plan": _PLAN_SUFFIX, "auto": _AUTO_SUFFIX}.get(self.mode, "")
 
     async def dispatch(self, name: str, args: dict) -> dict:
         if self.mode == "plan" and name not in _READ_ONLY:
@@ -159,6 +164,10 @@ class CodeAgent(ToolLoopAgent):
                 return {"ok": False, "error": problem}
             return {"ok": True, "status": "waiting for the user's approval",
                     "summary": describe_action(name, args, self.ws.repo)}
+        if name in APPROVAL_ACTIONS and self._auto_ok(name, args):
+            from pipeline.code_tasks import run_code_action
+            return await run_code_action(self.ws, self.pr_token, name,
+                                         {**args, "branch": self.branch} if name == "push_branch" else args)
         if name in APPROVAL_ACTIONS:
             if not self.pr_token:
                 return {"ok": False, "error": f"connect {self.ws.provider} in Connectors first"}
@@ -175,6 +184,14 @@ class CodeAgent(ToolLoopAgent):
             return await self.aws.call(args.get("service", ""), args.get("operation", ""),
                                        args.get("params") or {}, args.get("region", ""))
         return {"ok": False, "error": f"unknown tool {name}"}
+
+    def _auto_ok(self, name: str, args: dict) -> bool:
+        """Auto mode runs low-risk repo steps itself: re-running CI, and pushing to this chat's own branch."""
+        if self.mode != "auto" or not self.pr_token:
+            return False
+        if name == "rerun_ci":
+            return True
+        return name == "push_branch" and bool(self.branch) and args.get("branch", "") in ("", self.branch)
 
     async def _host_read(self, name: str, args: dict) -> dict:
         if not self.pr_token:

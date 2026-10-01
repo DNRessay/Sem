@@ -73,12 +73,20 @@ def cheapest_paid() -> dict | None:
     return None
 
 
+# Context window (tokens) per provider — what the chat's context ring measures against.
+CONTEXT = {"bonsai": 65536, "gemini": 1_000_000, "groq": 131072, "anthropic": 200000, "openai": 400000,
+           "qwen": 131072, "deepseek": 128000, "kimi": 256000, "huggingface": 32768}
+
+
 def available() -> list[dict]:
     """What the picker shows: "auto" plus every configured provider."""
-    items = [{"id": "auto", "label": "Auto (free models)", "free": True, "model": ""}]
+    free = [p for p in FREE_ORDER if PROVIDERS[p].configured]
+    # Auto can land on any free model, so it's measured against the smallest of them.
+    auto_ctx = min((CONTEXT[p] for p in free), default=CONTEXT["bonsai"])
+    items = [{"id": "auto", "label": "Auto (free models)", "free": True, "model": "", "context": auto_ctx}]
     for p in PROVIDERS.values():
         if p.configured:
-            items.append({"id": p.id, "label": p.label, "free": p.free, "model": p.model})
+            items.append({"id": p.id, "label": p.label, "free": p.free, "model": p.model, "context": CONTEXT.get(p.id, 32768)})
     return items
 
 

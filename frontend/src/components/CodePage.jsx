@@ -4,12 +4,13 @@ import DOMPurify from "dompurify";
 import ModelPicker, { loadModel } from "./ModelPicker";
 import { readEvents } from "../utils/sse";
 import { RepoPicker } from "./AttachMenu";
-import { AssistantText, AttachedChips, CLEAR_COMMAND, ChatMenu, ConnectorsSheet, HELP_COMMAND, NEW_COMMAND, PlusMenu, SuggestModel, errorClass, helpText, parseSlash, readTextFiles, withAttachments } from "./MessageKit";
+import { AUTO_COMPACT_AT, ContextRing, compactItems, useContextBudget, ModeMenu, AssistantText, AttachedChips, CLEAR_COMMAND, ChatMenu, ConnectorsSheet, HELP_COMMAND, NEW_COMMAND, PlusMenu, SuggestModel, errorClass, helpText, parseSlash, readTextFiles, withAttachments } from "./MessageKit";
 import { ApprovalCard } from "./CoworkPage";
 import { HeaderStatus, iconBtn } from "./StatusBar";
 import { PlusIcon, SendIcon, StopIcon } from "./Icons";
 import AgentFeedPanel from "./AgentFeedPanel";
 import useAgentFeed from "../hooks/useAgentFeed";
+import VoiceInput from "./VoiceInput";
 import TabDrawer, { HandoffCard, MenuButton } from "./TabDrawer";
 import useTabChats from "../hooks/useTabChats";
 
@@ -186,8 +187,23 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
         takenHandoff.current = handoff.at;
         newChat(); setInput(handoff.task);
     }, [handoff]); // eslint-disable-line react-hooks/exhaustive-deps
-    const [mode, setMode] = useState("act");
+    const [mode, setMode] = useState(() => { try { return localStorage.getItem("semblance_code_mode") || "act"; } catch { return "act"; } });
+    const pickMode = (m) => { setMode(m); try { localStorage.setItem("semblance_code_mode", m); } catch {} };
     const [model, setModel] = useState(() => loadModel("semblance_code_model"));
+    const budget = useContextBudget(items, model, token);
+    const [compacting, setCompacting] = useState(false);
+    // Older messages become one summary; runs by itself before a message when the ring passes 80%.
+    const compactNow = async () => {
+        setCompacting(true);
+        try {
+            const next = await compactItems(items, model, headers);
+            if (next) updateChat(chat.id, () => ({ items: next }));
+            return next;
+        } catch (e) {
+            setItems(it => [...it, { kind: "error", text: e.message }]);
+            return null;
+        } finally { setCompacting(false); }
+    };
     const [busy, setBusy] = useState("");
     const [notice, setNotice] = useState("");
     const [showAutomations, setShowAutomations] = useState(false);
@@ -246,7 +262,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
         if (name === "help") return setItems(it => [...it, { kind: "text", text: helpText(COMMANDS) }]);
         if (name === "new") return newChat();
         if (name === "clear") return setItems(() => []);
-        if (name === "plan") return rest ? run(rest, "plan") : setMode("plan");
+        if (name === "plan") return rest ? run(rest, "plan") : pickMode("plan");
         if (name === "pr") return run(rest ? `Open a PR titled "${rest}" with the current changes.` : "Open a PR with the current changes.", "act");
         if (name === "merge") return run(rest ? `Merge PR/MR #${rest.replace("#", "")}.` : "List the open PRs/MRs so I can pick one to merge.", "act");
         if (name === "ci") return run("Show the latest CI runs; for any failure read its logs and tell me why it failed.", "act");
@@ -269,7 +285,10 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
         setFiles([]);
         const chatId = chat.id;
         const add = (fn) => updateChat(chatId, c => ({ items: fn(c.items) }));
-        const prior = history();
+        let base = items;
+        if (budget.pct >= AUTO_COMPACT_AT && !compacting) base = (await compactNow()) || items;
+        const prior = base.filter(i => i.kind === "user" || i.kind === "text")
+            .map(i => ({ role: i.kind === "user" ? "user" : "assistant", content: i.text })).slice(-20);
         add(it => [...it, { kind: "user", text: attached.length ? `${message}\nAttached: ${attached.join(", ")}` : message, mode: runMode }]);
         if (!items.length) updateChat(chatId, () => ({ title: message.slice(0, 60), branch }));
         setInput("");
@@ -418,6 +437,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
                         Approve plan &amp; run
                     </button>
                 )}
+                {compacting && <div style={{ color: "var(--text-muted)", fontSize: "13px", margin: "8px 0" }}>Compacting the conversation…</div>}
                 <div ref={endRef} />
             </div>
 
@@ -428,23 +448,17 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
                         value={input} rows={2} disabled={!repo}
                         onChange={e => setInput(e.target.value)}
                         onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); run(input); } }}
-                        placeholder={repo ? "What should I build or fix?" : "Pick a repo first"}
+                        placeholder={repo ? "Type / for commands" : "Pick a repo first"}
                         style={{ width: "100%", background: "transparent", border: "none", color: "var(--text)", fontSize: "15px", outline: "none", resize: "none", fontFamily: "inherit" }}
                     />
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: 0 }}>
                         <PlusMenu commands={COMMANDS} onCommand={c => (c.arg ? setInput(`/${c.name} `) : runCommand(c.name))}
                             onFiles={addFiles} onConnectors={() => setConnectorsOpen(true)} disabled={!!busy} />
-                        <div style={{ display: "flex", border: "1px solid var(--border)", borderRadius: "999px", overflow: "hidden" }}>
-                            {["plan", "act"].map(m => (
-                                <button key={m} onClick={() => setMode(m)} style={{
-                                    padding: "5px 12px", border: "none", fontSize: "12px", cursor: "pointer",
-                                    background: mode === m ? "var(--accent)" : "transparent", boxShadow: mode === m ? "inset 0 0 0 1.5px var(--gold)" : "none",
-                                    color: mode === m ? "var(--accent-contrast)" : "var(--text-muted)",
-                                }}>{m === "plan" ? "Plan" : "Act"}</button>
-                            ))}
-                        </div>
+                        <VoiceInput value={input} onChange={setInput} />
+                        <ModeMenu mode={mode} onChange={pickMode} />
                         <ModelPicker token={token} value={model} onChange={setModel} storageKey="semblance_code_model" />
                         <span style={{ flex: 1 }} />
+                        <ContextRing budget={budget} onCompact={compactNow} busy={!!busy || compacting} />
                         <button
                             onClick={busy && abortRef.current ? () => abortRef.current.abort() : () => run(input)}
                             disabled={!repo}
