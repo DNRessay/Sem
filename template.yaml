@@ -284,7 +284,41 @@ Resources:
                 - logs:GetLogEvents
                 - cloudwatch:GetMetricStatistics   # AWS/Billing EstimatedCharges, for the bill in chat
               Resource: "*"
-
+        - Statement:
+            - Effect: Allow
+              Action:
+                - lambda:GetFunctionConfiguration
+                - lambda:GetFunction
+                - logs:FilterLogEvents
+                - logs:GetLogEvents
+                - logs:DescribeLogGroups
+                - logs:DescribeLogStreams
+                - logs:StartQuery
+                - logs:GetQueryResults
+                - cloudformation:DescribeStackEvents
+                - cloudformation:GetTemplate
+                - xray:GetTraceSummaries
+                - xray:BatchGetTraces
+                - cloudwatch:GetMetricStatistics   # AWS/Billing EstimatedCharges, for the bill in chat
+              Resource: "*"
+            # Owner-approved changes: each still waits for an Approve tap. No IAM, no billing.
+            - Effect: Allow
+              Action:
+                - lambda:UpdateFunctionConfiguration
+                - lambda:UpdateFunctionCode
+                - lambda:PublishVersion
+                - lambda:InvokeFunction
+              Resource: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:*"
+            - Effect: Allow
+              Action:
+                - s3:CreateBucket
+                - s3:PutObject
+                - s3:DeleteObject
+                - s3:PutBucketVersioning
+                - s3:PutBucketTagging
+              Resource:
+                - !Sub "arn:${AWS::Partition}:s3:::*"
+                - !Sub "arn:${AWS::Partition}:s3:::*/*"
   ChatFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
