@@ -16,6 +16,7 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 COHERE_URL = "https://api.cohere.com/v2/chat"
 LOCAL_BASE = "https://bonsai.example.modal.run"
 LOCAL_URL = LOCAL_BASE + "/v1/chat/completions"
+LOCAL_HEALTH = LOCAL_BASE + "/health"
 TPD_429 = b"...on tokens per day (TPD)... Please try again in 10m55.776s."
 
 
@@ -494,6 +495,7 @@ async def test_stream_llm_uses_the_local_model_before_cohere(moto_cache_table, l
 
     with respx.mock:
         respx.post(GROQ_URL).mock(return_value=Response(429, content=TPD_429))
+        respx.get(LOCAL_HEALTH).mock(return_value=Response(200, json={"status": "ok"}))
         local = respx.post(LOCAL_URL).mock(return_value=Response(200, content=_sse("hello ", "from bonsai")))
         cohere = respx.post(COHERE_URL).mock(return_value=Response(200, json={}))
         pieces = [p async for p in engine.stream_llm([{"role": "user", "content": "hi"}], session_id="s1")]
@@ -514,6 +516,7 @@ async def test_stream_llm_skips_groq_while_its_quota_wait_is_still_running(moto_
 
     with respx.mock:
         groq = respx.post(GROQ_URL).mock(return_value=Response(429, content=TPD_429))
+        respx.get(LOCAL_HEALTH).mock(return_value=Response(200, json={"status": "ok"}))
         respx.post(LOCAL_URL).mock(return_value=Response(200, content=_sse("one")))
         [p async for p in engine.stream_llm([{"role": "user", "content": "first"}], session_id="s1")]
         respx.post(LOCAL_URL).mock(return_value=Response(200, content=_sse("two")))
@@ -531,6 +534,7 @@ async def test_stream_llm_falls_through_to_cohere_when_the_local_model_is_down(m
 
     with respx.mock:
         respx.post(GROQ_URL).mock(return_value=Response(429, content=TPD_429))
+        respx.get(LOCAL_HEALTH).mock(return_value=Response(200, json={"status": "ok"}))
         respx.post(LOCAL_URL).mock(return_value=Response(503, text="no capacity"))
         respx.post(COHERE_URL).mock(return_value=Response(200, json={
             "message": {"content": [{"type": "text", "text": "the cohere answer"}]},
@@ -548,6 +552,7 @@ async def test_stream_llm_raises_when_every_backup_is_down(moto_cache_table, loc
 
     with respx.mock:
         respx.post(GROQ_URL).mock(return_value=Response(429, content=TPD_429))
+        respx.get(LOCAL_HEALTH).mock(return_value=Response(200, json={"status": "ok"}))
         respx.post(LOCAL_URL).mock(side_effect=httpx_mod.ReadTimeout("cold start too slow"))
         with pytest.raises(RateLimitError):
             async for _ in engine.stream_llm([{"role": "user", "content": "hi"}], session_id="s1"):
@@ -562,6 +567,7 @@ async def test_stream_llm_fails_fast_while_blocked_and_the_backup_is_down(moto_c
 
     with respx.mock:
         groq = respx.post(GROQ_URL).mock(return_value=Response(429, content=TPD_429))
+        respx.get(LOCAL_HEALTH).mock(return_value=Response(200, json={"status": "ok"}))
         respx.post(LOCAL_URL).mock(return_value=Response(503, text="no capacity"))
         with pytest.raises(RateLimitError) as exc_info:
             async for _ in engine.stream_llm([{"role": "user", "content": "hi"}], session_id="s1"):
@@ -569,3 +575,18 @@ async def test_stream_llm_fails_fast_while_blocked_and_the_backup_is_down(moto_c
 
     assert groq.call_count == 0
     assert 590 < exc_info.value.retry_after <= 600
+
+
+@pytest.mark.asyncio
+async def test_stream_llm_waits_out_the_local_model_still_loading(moto_cache_table, local_llm):
+    loading = Response(503, json={"error": {"message": "Loading model", "code": 503}})
+    engine = QueryEngine()
+
+    with respx.mock:
+        respx.post(GROQ_URL).mock(return_value=Response(429, content=TPD_429))
+        health = respx.get(LOCAL_HEALTH).mock(side_effect=[loading, loading, Response(200, json={"status": "ok"})])
+        respx.post(LOCAL_URL).mock(return_value=Response(200, content=_sse("warmed up")))
+        full = "".join([p async for p in engine.stream_llm([{"role": "user", "content": "hi"}], session_id="s1")])
+
+    assert health.call_count == 3
+    assert "warmed up" in full
