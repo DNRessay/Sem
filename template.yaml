@@ -37,84 +37,84 @@ Parameters:
     Type: String
     NoEcho: true
     Default: ""
-    Description: Must match the LLM_API_KEY value in the semblance-llm-secret Modal secret
+    Description: "Must match the LLM_API_KEY value in the semblance-llm-secret Modal secret"
   GeminiApiKey:
     Type: String
     NoEcho: true
     Default: ""
-    Description: Optional - Google AI Studio key: Gemini free tier, Nano Banana images, Gemini TTS
+    Description: "Optional - Google AI Studio key: Gemini free tier, Nano Banana images, Gemini TTS"
   AnthropicApiKey:
     Type: String
     NoEcho: true
     Default: ""
-    Description: Optional - Paid: Claude in the model picker
+    Description: "Optional - Paid: Claude in the model picker"
   OpenaiApiKey:
     Type: String
     NoEcho: true
     Default: ""
-    Description: Optional - Paid: GPT in the model picker
+    Description: "Optional - Paid: GPT in the model picker"
   QwenApiKey:
     Type: String
     NoEcho: true
     Default: ""
-    Description: Optional - Paid: Qwen via Alibaba Cloud Model Studio (DashScope)
+    Description: "Optional - Paid: Qwen via Alibaba Cloud Model Studio (DashScope)"
   DeepseekApiKey:
     Type: String
     NoEcho: true
     Default: ""
-    Description: Optional - Paid: DeepSeek in the model picker
+    Description: "Optional - Paid: DeepSeek in the model picker"
   KimiApiKey:
     Type: String
     NoEcho: true
     Default: ""
-    Description: Optional - Paid: Kimi (Moonshot) in the model picker
+    Description: "Optional - Paid: Kimi (Moonshot) in the model picker"
   HfToken:
     Type: String
     NoEcho: true
     Default: ""
-    Description: Optional - Hugging Face token: any model on HF's Inference Providers router
+    Description: "Optional - Hugging Face token: any model on HF's Inference Providers router"
   ModalVideoUrl:
     Type: String
     Default: ""
-    Description: Optional - URL of modal_app/video.py (Design tab video ads)
+    Description: "Optional - URL of modal_app/video.py (Design tab video ads)"
   ModalVideoSecret:
     Type: String
     NoEcho: true
     Default: ""
-    Description: Must match VIDEO_SECRET in the semblance-video-secret Modal secret
+    Description: "Must match VIDEO_SECRET in the semblance-video-secret Modal secret"
   SearxngUrl:
     Type: String
     Default: ""
-    Description: Optional - a SearXNG server for keyless web search
+    Description: "Optional - a SearXNG server for keyless web search"
   OwnerWhatsappNumber:
     Type: String
     Default: ""
-    Description: Optional - your WhatsApp number (international, no +) for reminders and the morning brief
+    Description: "Optional - your WhatsApp number (international, no +) for reminders and the morning brief"
   KairosBriefHour:
     Type: String
     Default: "7"
-    Description: Hour (South Africa time, 0-23) for the daily morning brief
+    Description: "Hour (South Africa time, 0-23) for the daily morning brief"
   NeonDatabaseUrl:
     Type: String
     NoEcho: true
-    Description: Neon Postgres connection string, e.g. postgresql://user:pass@host/db?sslmode=require
+    Description: "Neon Postgres connection string, e.g. postgresql://user:pass@host/db?sslmode=require"
   ModalEmbeddingsUrl:
     Type: String
     Default: ""
-    Description: URL of the deployed Modal embeddings endpoint (modal_app/embeddings.py)
+    Description: "URL of the deployed Modal embeddings endpoint (modal_app/embeddings.py)"
   ModalRepoUrl:
     Type: String
     Default: ""
-    Description: URL of the deployed Modal persistent repo clone/read/grep endpoint (modal_app/repo_tool.py)
+    Description: "URL of the deployed Modal persistent repo clone/read/grep endpoint (modal_app/repo_tool.py)"
   ModalRepoSecret:
     Type: String
     NoEcho: true
     Default: ""
-    Description: Shared secret sent as Bearer auth to ModalRepoUrl — must match the Modal secret's REPO_TOOL_SECRET value
+    Description: "Shared secret sent as Bearer auth to ModalRepoUrl — must match the Modal secret's REPO_TOOL_SECRET value"
   SecretKey:
     Type: String
     NoEcho: true
-    Description: Shared secret the frontend sends as x-api-key for BYPASS trust mode
+    Description: "Shared secret the frontend sends as x-api-key for BYPASS trust mode"
   SerpApiKey:
     Type: String
     NoEcho: true
@@ -123,20 +123,20 @@ Parameters:
     Type: String
     NoEcho: true
     Default: ""
-    Description: Meta Graph API access token for the WhatsApp Business Cloud API (outbound sends)
+    Description: "Meta Graph API access token for the WhatsApp Business Cloud API (outbound sends)"
   WhatsappPhoneId:
     Type: String
     Default: ""
-    Description: WhatsApp Business phone number ID, from the Meta App Dashboard
+    Description: "WhatsApp Business phone number ID, from the Meta App Dashboard"
   WhatsappVerifyToken:
     Type: String
     NoEcho: true
     Default: ""
-    Description: Arbitrary string also entered in the Meta App Dashboard's webhook Verify Token field
+    Description: "Arbitrary string also entered in the Meta App Dashboard's webhook Verify Token field"
   OpenclawUrl:
     Type: String
     Default: ""
-    Description: Optional self-hosted OpenClaw gateway URL (WhatsApp/Telegram bridge)
+    Description: "Optional self-hosted OpenClaw gateway URL (WhatsApp/Telegram bridge)"
   McpServers:
     Type: String
     Default: ""
@@ -146,7 +146,7 @@ Parameters:
   GithubClientId:
     Type: String
     Default: ""
-    Description: GitHub OAuth App client ID (github.com/settings/developers) — blank disables GitHub OAuth, manual PAT paste still works
+    Description: "GitHub OAuth App client ID (github.com/settings/developers) — blank disables GitHub OAuth, manual PAT paste still works"
   GithubClientSecret:
     Type: String
     NoEcho: true
@@ -154,7 +154,7 @@ Parameters:
   GitlabClientId:
     Type: String
     Default: ""
-    Description: GitLab OAuth App client ID (gitlab.com/-/user_settings/applications) — blank disables GitLab OAuth, manual PAT paste still works
+    Description: "GitLab OAuth App client ID (gitlab.com/-/user_settings/applications) — blank disables GitLab OAuth, manual PAT paste still works"
   GitlabClientSecret:
     Type: String
     NoEcho: true
@@ -247,7 +247,7 @@ Resources:
       # the Description field below, but AWS::Lambda::Function.Description
       # has a hard 256-char limit — CFN's early-validation hook was
       # correctly rejecting it at 622 chars, not a false positive.)
-      Description: Light tier — FastAPI (chat/status/webhooks) via uvicorn + AWS Lambda Web Adapter, RESPONSE_STREAM invoke mode
+      Description: "Light tier — FastAPI (chat/status/webhooks) via uvicorn + AWS Lambda Web Adapter, RESPONSE_STREAM invoke mode"
       # Lambda's 15-minute maximum: a Code tab run (agents/code_agent.py)
       # loops for up to 13 minutes, and a chat reply from the self-hosted
       # model can wait out its GPU cold start. Lambda bills per millisecond
@@ -279,7 +279,7 @@ Resources:
       FunctionName: semblance-tick
       CodeUri: ./
       Handler: tick_handler.handler
-      Description: Medium tier — one KAIROS tick + a DREAM gate check per schedule firing, replacing the Heavy-tier daemon loop
+      Description: "Medium tier — one KAIROS tick + a DREAM gate check per schedule firing, replacing the Heavy-tier daemon loop"
       # KAIROS alone needs only its old 20s — but when DREAM's gate passes
       # (rare: 24hr + 5 sessions), phase_index re-embeds up to 500 memories
       # one Modal HTTP call at a time, which can run well past 20s. 300s
@@ -323,7 +323,7 @@ Resources:
 
 Outputs:
   ChatFunctionUrl:
-    Description: Public HTTPS endpoint for the chat API — set as VITE_API_URL in the frontend
+    Description: "Public HTTPS endpoint for the chat API — set as VITE_API_URL in the frontend"
     Value: !GetAtt ChatFunctionUrl.FunctionUrl
   TickFunctionName:
     Value: !Ref TickFunction
