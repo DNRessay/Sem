@@ -5,7 +5,8 @@ behind one hard monthly spend cap.
 
 Deploy:
     modal secret create semblance-video-secret VIDEO_SECRET=<any random string> VIDEO_MONTHLY_CAP_USD=10
-    modal deploy modal_app/video.py      # first deploy downloads the ~15 GB model into the image
+    HF_TOKEN=<token> modal deploy modal_app/video.py   # first deploy downloads the models into the image;
+                                                        # accept FLUX.1-schnell's terms on Hugging Face first
 
 Set MODAL_VIDEO_URL to the printed URL and MODAL_VIDEO_SECRET to the same
 random string in the Lambda environment.
@@ -58,7 +59,9 @@ gpu_image = (
     .apt_install("ffmpeg")
     .pip_install("torch>=2.4", "diffusers>=0.33", "transformers>=4.46", "accelerate", "ftfy", "sentencepiece",
                  "protobuf", "imageio[ffmpeg]", "huggingface_hub", "fastapi>=0.115.0")
-    .run_function(_download)
+    # FLUX.1-schnell is gated on Hugging Face (accept its terms once): the HF_TOKEN in the deploying
+    # shell (e.g. Colab secrets) is passed to the build so the download can log in.
+    .run_function(_download, secrets=[modal.Secret.from_dict({"HF_TOKEN": os.environ.get("HF_TOKEN", "")})])
 )
 api_image = modal.Image.debian_slim(python_version="3.12").pip_install("fastapi>=0.115.0")
 spend = modal.Dict.from_name("semblance-video-spend", create_if_missing=True)
