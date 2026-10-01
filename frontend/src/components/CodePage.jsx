@@ -21,6 +21,18 @@ export function md(text) {
     return { __html: DOMPurify.sanitize(marked.parse(text || "", { breaks: true })) };
 }
 
+function blankChat(provider = "github", repo = "") {
+    return { id: `c${Date.now()}${Math.random().toString(36).slice(2, 6)}`, title: "", provider, repo, items: [], updated: Date.now() };
+}
+
+// Older saves held one chat as {provider, repo, items}; they become the first chat.
+function initialChats(saved) {
+    if (Array.isArray(saved.chats) && saved.chats.length) return saved.chats;
+    const c = blankChat(saved.provider || "github", saved.repo || "");
+    const items = saved.items || [];
+    return [{ ...c, id: "c0", items, title: items.find(i => i.kind === "user")?.text.slice(0, 60) || "" }];
+}
+
 function loadState() {
     try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch { return {}; }
 }
@@ -122,12 +134,14 @@ function Automations({ token, provider, repo, onUnauthorized }) {
 // Modal. Nothing reaches the repo until "Open PR" (or an automation) does.
 export default function CodePage({ token, onBack, onUnauthorized }) {
     const saved = loadState();
-    const [provider, setProvider] = useState(saved.provider || "github");
-    const [repo, setRepo] = useState(saved.repo || "");
+    const [chats, setChats] = useState(() => initialChats(saved));
+    const [activeId, setActiveId] = useState(saved.activeId || "");
+    const chat = chats.find(c => c.id === activeId) || chats[0];
+    const { provider, repo, items } = chat;
     const [repos, setRepos] = useState([]);
     const [reposError, setReposError] = useState("");
     const [opened, setOpened] = useState(null);
-    const [items, setItems] = useState(saved.items || []);
+    const [showChats, setShowChats] = useState(false);
     const [input, setInput] = useState("");
     const [mode, setMode] = useState("act");
     const [model, setModel] = useState(() => loadModel("semblance_code_model"));
@@ -138,7 +152,22 @@ export default function CodePage({ token, onBack, onUnauthorized }) {
     const endRef = useRef(null);
     const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
 
-    useEffect(() => { saveState({ provider, repo, items: items.slice(-200) }); }, [provider, repo, items]);
+    const updateChat = (id, fn) => setChats(cs => cs.map(c => (c.id === id ? { ...c, ...fn(c), updated: Date.now() } : c)));
+    const setItems = (fn) => updateChat(chat.id, c => ({ items: typeof fn === "function" ? fn(c.items) : fn }));
+    const newChat = (p = provider, r = repo) => {
+        const c = blankChat(p, r);
+        setChats(cs => [c, ...cs].slice(0, 50));
+        setActiveId(c.id); setShowChats(false); setNotice("");
+        return c;
+    };
+    // A chat belongs to one repo: picking another repo starts a new chat unless this one is still empty.
+    const pickRepo = (p, r) => {
+        setOpened(null);
+        if (items.length) newChat(p, r);
+        else updateChat(chat.id, () => ({ provider: p, repo: r }));
+    };
+
+    useEffect(() => { saveState({ chats: chats.map(c => ({ ...c, items: c.items.slice(-200) })), activeId }); }, [chats, activeId]);
     useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [items, busy]);
     useEffect(() => {
         setReposError("");
@@ -166,9 +195,11 @@ export default function CodePage({ token, onBack, onUnauthorized }) {
             const data = await post("/code/open", {});
             setOpened({ repo, provider, canOpenPr: data.can_open_pr });
             setNotice(`${data.action === "pulled" ? "Updated" : "Cloned"} ${repo} — ${data.entries.length} entries at the root.`);
-        } catch (e) { setNotice(e.message); }
-        setBusy("");
+            return true;
+        } catch (e) { setNotice(e.message); return false; } finally { setBusy(""); }
     };
+
+    const ready = opened && opened.repo === repo && opened.provider === provider;
 
     const history = () => items
         .filter(i => i.kind === "user" || i.kind === "text")
@@ -176,10 +207,15 @@ export default function CodePage({ token, onBack, onUnauthorized }) {
         .slice(-20);
 
     const run = async (message, runMode = mode) => {
-        if (!message.trim() || busy) return;
+        if (!message.trim() || busy || !repo) return;
+        const chatId = chat.id;
+        const add = (fn) => updateChat(chatId, c => ({ items: fn(c.items) }));
         const prior = history();
-        setItems(it => [...it, { kind: "user", text: message, mode: runMode }]);
-        setInput(""); setBusy(runMode === "plan" ? "Planning…" : "Working…"); setNotice("");
+        add(it => [...it, { kind: "user", text: message, mode: runMode }]);
+        if (!items.length) updateChat(chatId, () => ({ title: message.slice(0, 60) }));
+        setInput("");
+        if (!ready && !(await openRepo())) return;
+        setBusy(runMode === "plan" ? "Planning…" : "Working…"); setNotice("");
         abortRef.current = new AbortController();
         try {
             const res = await fetch(`${API}/code/run`, {
@@ -189,13 +225,13 @@ export default function CodePage({ token, onBack, onUnauthorized }) {
             if (res.status === 401) { onUnauthorized(); return; }
             if (!res.ok || !res.body) throw new Error(`Request failed: ${res.status}`);
             await readEvents(res, (ev) => {
-                if (ev.type === "text") setItems(it => [...it, { kind: "text", text: ev.text, mode: runMode }]);
-                else if (ev.type === "tool") setItems(it => [...it, { kind: "tool", id: ev.id, name: ev.name, args: ev.args }]);
-                else if (ev.type === "result") setItems(it => it.map(i => (i.kind === "tool" && i.id === ev.id && i.ok === undefined ? { ...i, ok: ev.ok, output: ev.output } : i)));
-                else if (ev.type === "error") setItems(it => [...it, { kind: "error", text: ev.text }]);
+                if (ev.type === "text") add(it => [...it, { kind: "text", text: ev.text, mode: runMode }]);
+                else if (ev.type === "tool") add(it => [...it, { kind: "tool", id: ev.id, name: ev.name, args: ev.args }]);
+                else if (ev.type === "result") add(it => it.map(i => (i.kind === "tool" && i.id === ev.id && i.ok === undefined ? { ...i, ok: ev.ok, output: ev.output } : i)));
+                else if (ev.type === "error") add(it => [...it, { kind: "error", text: ev.text }]);
             });
         } catch (e) {
-            if (e.name !== "AbortError") setItems(it => [...it, { kind: "error", text: e.message }]);
+            if (e.name !== "AbortError") add(it => [...it, { kind: "error", text: e.message }]);
         }
         setBusy("");
     };
@@ -226,31 +262,50 @@ export default function CodePage({ token, onBack, onUnauthorized }) {
     };
 
     const lastIsPlan = !busy && items.length > 0 && items[items.length - 1].kind === "text" && items[items.length - 1].mode === "plan";
-    const ready = opened && opened.repo === repo && opened.provider === provider;
 
     return (
         <div style={{ position: "fixed", inset: 0, background: "var(--bg)", zIndex: 25, display: "flex", flexDirection: "column" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "12px 16px", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
                 <button onClick={onBack} aria-label="Back" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "18px", color: "var(--text)" }}>←</button>
                 <span style={{ fontWeight: 700, color: "var(--text)" }}>Code</span>
-                <select value={provider} onChange={e => { setProvider(e.target.value); setRepo(""); setOpened(null); }} style={field}>
+                <select value={provider} onChange={e => pickRepo(e.target.value, "")} style={field}>
                     <option value="github">GitHub</option>
                     <option value="gitlab">GitLab</option>
                 </select>
                 <div style={{ flex: 1, minWidth: "160px" }}>
                     <RepoPicker floating repos={repos} value={repo} placeholder="Select a repository"
-                        onChange={v => { setRepo(v); setOpened(null); }} />
+                        onChange={v => pickRepo(provider, v)} />
                 </div>
-                <button onClick={openRepo} disabled={!repo || !!busy} style={btn}>{ready ? "Pull" : "Open"}</button>
+                <button onClick={() => setShowChats(s => !s)} style={btn}>Chats ({chats.length})</button>
+                <button onClick={() => newChat()} disabled={!!busy} style={btn}>+ New</button>
             </div>
+            {showChats && (
+                <div style={{ maxHeight: "40vh", overflowY: "auto", borderBottom: "1px solid var(--border)", padding: "4px 16px" }}>
+                    {[...chats].sort((a, b) => b.updated - a.updated).map(c => (
+                        <div key={c.id} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
+                            <button onClick={() => { setActiveId(c.id); setShowChats(false); setOpened(null); setNotice(""); }}
+                                style={{ flex: 1, minWidth: 0, textAlign: "left", background: "none", border: "none", cursor: "pointer", color: "var(--text)", padding: 0 }}>
+                                <div style={{ fontSize: "14px", fontWeight: c.id === chat.id ? 700 : 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title || "New chat"}</div>
+                                <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>{c.repo || "no repo"} · {new Date(c.updated).toLocaleDateString()}</div>
+                            </button>
+                            <button onClick={() => {
+                                const rest = chats.filter(x => x.id !== c.id);
+                                const next = rest.length ? rest : [blankChat(provider, repo)];
+                                setChats(next);
+                                if (c.id === chat.id) setActiveId(next[0].id);
+                            }} disabled={!!busy && c.id === chat.id} aria-label="Delete chat" style={{ ...btn, padding: "4px 8px", color: "var(--danger)" }}>✕</button>
+                        </div>
+                    ))}
+                </div>
+            )}
 
             {ready && (
                 <div style={{ display: "flex", gap: "6px", padding: "8px 16px", borderBottom: "1px solid var(--border)", overflowX: "auto" }}>
+                    <button onClick={openRepo} disabled={!!busy} style={btn}>Pull</button>
                     <button onClick={showChanges} style={btn}>Changes</button>
                     <button onClick={openPr} disabled={!opened.canOpenPr || !!busy} title={opened.canOpenPr ? "" : `Connect ${provider} to open PRs`} style={btn}>Open PR</button>
                     <button onClick={discard} disabled={!!busy} style={btn}>Discard</button>
                     <button onClick={() => setShowAutomations(s => !s)} style={btn}>Automations</button>
-                    <button onClick={() => setItems([])} disabled={!!busy} style={btn}>Clear</button>
                 </div>
             )}
             {ready && showAutomations && <Automations token={token} provider={provider} repo={repo} onUnauthorized={onUnauthorized} />}
@@ -258,10 +313,10 @@ export default function CodePage({ token, onBack, onUnauthorized }) {
             {notice && <div style={{ padding: "8px 16px", fontSize: "12px", color: "var(--text-muted)", borderBottom: "1px solid var(--border)" }}>{notice}</div>}
 
             <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px" }}>
-                {!ready && (
+                {!items.length && (
                     <div style={{ color: "var(--text-muted)", fontSize: "14px", lineHeight: 1.5 }}>
-                        Pick a repo and press Open. Sem Code works in its own copy on Modal: it reads, edits and runs commands there,
-                        and nothing reaches your repo until you press Open PR. Use Plan first for bigger changes.
+                        Pick a repo and say what to build or fix — Sem Code opens it for you. It works in its own copy on Modal
+                        (shared by every chat on that repo) and nothing reaches your repo until it opens a PR. Use Plan first for bigger changes.
                     </div>
                 )}
                 {items.map((item, i) => {
@@ -288,10 +343,10 @@ export default function CodePage({ token, onBack, onUnauthorized }) {
             <div style={{ padding: "8px 8px 20px" }}>
                 <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "20px", padding: "10px 14px 8px" }}>
                     <textarea
-                        value={input} rows={2} disabled={!ready}
+                        value={input} rows={2} disabled={!repo}
                         onChange={e => setInput(e.target.value)}
                         onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); run(input); } }}
-                        placeholder={ready ? "What should I build or fix?" : "Open a repo first"}
+                        placeholder={repo ? "What should I build or fix?" : "Pick a repo first"}
                         style={{ width: "100%", background: "transparent", border: "none", color: "var(--text)", fontSize: "15px", outline: "none", resize: "none", fontFamily: "inherit" }}
                     />
                     <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -308,7 +363,7 @@ export default function CodePage({ token, onBack, onUnauthorized }) {
                         <span style={{ flex: 1 }} />
                         <button
                             onClick={busy && abortRef.current ? () => abortRef.current.abort() : () => run(input)}
-                            disabled={!ready}
+                            disabled={!repo}
                             aria-label={busy ? "Stop" : "Send"}
                             style={{ width: "32px", height: "32px", borderRadius: "50%", border: "none", cursor: "pointer",
                                 background: busy ? "var(--danger)" : "var(--accent)", color: "var(--accent-contrast)", fontSize: "15px" }}
