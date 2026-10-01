@@ -51,6 +51,10 @@ class TAUEngine:
                  "without asking the user to repeat it."]
         if name := user_model.get("name"):
             parts.append(f"User's name: {name}")
+        if call_me := user_model.get("call_me"):
+            parts.append(f"Call them: {call_me}")
+        if work := user_model.get("work"):
+            parts.append(f"Their work: {work}")
         if location := user_model.get("location"):
             parts.append(f"Location: {location}")
         if about := user_model.get("about"):

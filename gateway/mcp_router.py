@@ -1,3 +1,4 @@
+import asyncio
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -57,6 +58,22 @@ async def list_servers(account: dict = Depends(require_account)):
     servers = await db.list_mcp_servers(account["account_id"])
     # Never send stored credentials back to the browser.
     return {"servers": [{**s, "auth": bool(s["auth"])} for s in servers]}
+
+
+@router.get("/servers/check")
+async def check_servers(account: dict = Depends(require_account)):
+    """Asks every saved server for its tools, in parallel — the live status column in Settings → Connectors."""
+    db = await get_store()
+    servers = await db.list_mcp_servers(account["account_id"])
+
+    async def one(s):
+        try:
+            tools = await MCPClient(s["url"], s["auth"], timeout=15).list_tools(use_cache=False)
+            return {"name": s["name"], "ok": True, "tools": len(tools)}
+        except Exception as e:
+            return {"name": s["name"], "ok": False, "error": str(e)[:200]}
+
+    return {"servers": await asyncio.gather(*(one(s) for s in servers))}
 
 
 @router.post("/servers")

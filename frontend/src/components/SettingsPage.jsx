@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { copyToClipboard } from "../utils/clipboard";
+import ConnectorsPanel from "./ConnectorsPanel";
+import SkillsPanel from "./SkillsPanel";
 
 const API = import.meta.env.VITE_API_URL || "";
 
@@ -41,7 +43,12 @@ function McpServers({ headers }) {
     const [msg, setMsg] = useState("");
     const [busy, setBusy] = useState(false);
 
-    const refresh = () => fetch(`${API}/mcp/servers`, { headers }).then(r => r.json()).then(d => setServers(d.servers || [])).catch(() => {});
+    const [live, setLive] = useState({});
+    const refresh = () => {
+        fetch(`${API}/mcp/servers`, { headers }).then(r => r.json()).then(d => setServers(d.servers || [])).catch(() => {});
+        fetch(`${API}/mcp/servers/check`, { headers }).then(r => r.json())
+            .then(d => setLive(Object.fromEntries((d.servers || []).map(x => [x.name, x])))).catch(() => {});
+    };
     useEffect(() => { refresh(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     const add = async () => {
@@ -61,12 +68,17 @@ function McpServers({ headers }) {
         <div>
             <div style={label}>MCP SERVERS SEM CAN USE</div>
             <div style={{ fontSize: "12px", color: "var(--text-muted)", marginBottom: "8px" }}>
-                Their tools show up in Co-work and Code automatically.
+                Their tools show up in Co-work and Code automatically. Name C-Lab "clab" for the Finance tab and Vicinic "vicinic" for Design.
             </div>
             {servers.map(s => (
                 <div key={s.name} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: "14px" }}>{s.name}{s.require_approval ? " · asks first" : ""}</div>
+                        <div style={{ fontSize: "14px" }}>
+                            {s.name}{s.require_approval ? " · asks first" : ""}{" "}
+                            {live[s.name] && (live[s.name].ok
+                                ? <span style={{ color: "var(--ready)", fontSize: "12px" }}>✓ {live[s.name].tools} tools</span>
+                                : <span style={{ color: "var(--danger)", fontSize: "12px" }} title={live[s.name].error}>✗ not answering</span>)}
+                        </div>
                         <div style={{ fontSize: "11px", color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis" }}>{s.url}{s.auth ? " · token saved" : ""}</div>
                     </div>
                     <button onClick={() => remove(s.name)} style={{ ...btn, color: "var(--danger)" }}>Remove</button>
@@ -120,8 +132,162 @@ function ConnectApps({ headers }) {
     );
 }
 
+
+function useJson(url, headers, deps = []) {
+    const [data, setData] = useState(null);
+    const load = () => fetch(`${API}${url}`, { headers }).then(r => r.json()).then(setData).catch(() => setData({}));
+    useEffect(() => { load(); }, deps); // eslint-disable-line react-hooks/exhaustive-deps
+    return [data, load];
+}
+
+const PROFILE = [
+    ["name", "Full name", "input"],
+    ["call_me", "What should Sem call you?", "input"],
+    ["work", "What best describes your work?", "input"],
+    ["location", "Where are you?", "input"],
+    ["about", "About you", "textarea"],
+    ["preferences", "Instructions for Sem (every chat and tab follows these)", "textarea"],
+    ["coding_preferences", "Coding preferences (Sem Code)", "textarea"],
+];
+
+function AccountTab({ headers }) {
+    const [profile, setProfile] = useState(null);
+    const [msg, setMsg] = useState("");
+    useEffect(() => { fetch(`${API}/settings/profile`, { headers }).then(r => r.json()).then(setProfile).catch(() => setProfile({})); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!profile) return <div style={{ ...label, fontWeight: 400 }}>Loading…</div>;
+    const save = async () => {
+        setMsg("Saving…");
+        const r = await fetch(`${API}/settings/profile`, { method: "PUT", headers, body: JSON.stringify(profile) });
+        setMsg(r.ok ? "Saved — every chat uses it from the next message." : `Failed (${r.status})`);
+    };
+    return (
+        <div>
+            <div style={label}>PROFILE</div>
+            {PROFILE.map(([key, title, kind]) => (
+                <div key={key} style={{ marginBottom: "10px" }}>
+                    <div style={{ fontSize: "13px", marginBottom: "4px" }}>{title}</div>
+                    {kind === "input"
+                        ? <input value={profile[key] || ""} onChange={e => setProfile({ ...profile, [key]: e.target.value })} style={field} />
+                        : <textarea value={profile[key] || ""} rows={key === "preferences" ? 8 : 4} onChange={e => setProfile({ ...profile, [key]: e.target.value })} style={field} />}
+                </div>
+            ))}
+            <button className="btn-primary" onClick={save} style={btn}>Save</button>
+            {msg && <span style={{ fontSize: "12px", color: "var(--text-muted)", marginLeft: "8px" }}>{msg}</span>}
+        </div>
+    );
+}
+
+function MemoryTab({ headers }) {
+    const [q, setQ] = useState("");
+    const [data, load] = useJson(`/settings/memory?q=${encodeURIComponent(q)}`, headers, [q]);
+    const forget = async (id) => { await fetch(`${API}/settings/memory/${id}`, { method: "DELETE", headers }); load(); };
+    return (
+        <div>
+            <div style={label}>WHAT SEM REMEMBERS{data?.total != null ? ` (${data.total})` : ""}</div>
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search memories…" style={field} />
+            {(data?.memories || []).map(m => (
+                <div key={m.id} style={{ display: "flex", gap: "8px", alignItems: "flex-start", padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
+                    <div style={{ flex: 1, minWidth: 0, fontSize: "13px", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                        {m.content.slice(0, 400)}{m.content.length > 400 ? "…" : ""}
+                        <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>{new Date(m.created_at * 1000).toLocaleString()} · salience {Number(m.salience).toFixed(2)}</div>
+                    </div>
+                    <button onClick={() => forget(m.id)} style={{ ...btn, color: "var(--danger)" }}>Forget</button>
+                </div>
+            ))}
+            {data && !(data.memories || []).length && <div style={{ fontSize: "13px", color: "var(--text-muted)", marginTop: "8px" }}>Nothing found.</div>}
+        </div>
+    );
+}
+
+function RemindersTab({ headers }) {
+    const [data, load] = useJson("/settings/reminders", headers);
+    const remove = async (id) => { await fetch(`${API}/settings/reminders/${id}`, { method: "DELETE", headers }); load(); };
+    return (
+        <div>
+            <div style={label}>UPCOMING REMINDERS</div>
+            <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>Set them in chat or Co-work ("remind me to … at 9"). Delivered in the app, and on WhatsApp if set up.</div>
+            {(data?.reminders || []).map(r => (
+                <div key={r.id} style={{ display: "flex", gap: "8px", alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
+                    <div style={{ flex: 1, fontSize: "13px" }}>{r.message}
+                        <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>{new Date(r.due_at * 1000).toLocaleString()}</div>
+                    </div>
+                    <button onClick={() => remove(r.id)} style={{ ...btn, color: "var(--danger)" }}>Delete</button>
+                </div>
+            ))}
+            {data && !(data.reminders || []).length && <div style={{ fontSize: "13px", color: "var(--text-muted)", marginTop: "8px" }}>None scheduled.</div>}
+        </div>
+    );
+}
+
+function CodeTab({ headers }) {
+    const [data, load] = useJson("/code/automations", headers);
+    const toggle = async (a) => { await fetch(`${API}/code/automations/${a.id}`, { method: "PATCH", headers, body: JSON.stringify({ enabled: !a.enabled }) }); load(); };
+    const remove = async (a) => { if (window.confirm("Delete this automation?")) { await fetch(`${API}/code/automations/${a.id}`, { method: "DELETE", headers }); load(); } };
+    const list = data?.automations || [];
+    return (
+        <div>
+            <div style={label}>SCHEDULED CODE AUTOMATIONS</div>
+            <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>Create them from Sem Code → Automations. They run on the 15-minute AWS tick, not on GitHub.</div>
+            {list.map(a => (
+                <div key={a.id} style={{ display: "flex", gap: "8px", alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
+                    <div style={{ flex: 1, minWidth: 0, fontSize: "13px" }}>{a.prompt}
+                        <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>{a.provider}:{a.repo} · every {Math.round(a.every_seconds / 3600)}h{a.last_result ? ` · last: ${String(a.last_result).slice(0, 80)}` : ""}</div>
+                    </div>
+                    <button onClick={() => toggle(a)} style={btn}>{a.enabled ? "Pause" : "Resume"}</button>
+                    <button onClick={() => remove(a)} style={{ ...btn, color: "var(--danger)" }}>Delete</button>
+                </div>
+            ))}
+            {data && !list.length && <div style={{ fontSize: "13px", color: "var(--text-muted)", marginTop: "8px" }}>No automations yet.</div>}
+        </div>
+    );
+}
+
+function UsageTab({ headers, status }) {
+    const [u] = useJson("/settings/usage", headers);
+    const tile = (name, value) => (
+        <div key={name} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "12px", padding: "10px 12px" }}>
+            <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>{name}</div>
+            <div style={{ fontSize: "20px", fontWeight: 700 }}>{value ?? "–"}</div>
+        </div>
+    );
+    return (
+        <div>
+            <div style={label}>ACTIVITY</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: "8px" }}>
+                {tile("Chats, last 7 days", u?.chats_7d)}
+                {tile("Chats, last 30 days", u?.chats_30d)}
+                {tile("Memories", u?.memories)}
+                {tile("Reminders pending", u?.reminders)}
+                {tile("Code automations", u?.automations)}
+                {tile("MCP servers", u?.mcp_servers)}
+                {u?.video && tile("Video spend this month", `$${Number(u.video.used_usd).toFixed(2)} / $${u.video.cap_usd}`)}
+            </div>
+            {status && (
+                <>
+                    <div style={label}>LIMITS</div>
+                    <div style={{ fontSize: "13px", color: "var(--text-muted)" }}>
+                        Code {status.limits.code_max_steps} steps · Co-work {status.limits.cowork_max_steps} · Research {status.limits.research_max_steps} ·{" "}
+                        {Math.round(status.limits.agent_timeout_seconds / 60)} min per run. Change with the matching setting (e.g. CODE_MAX_STEPS).
+                    </div>
+                    <div style={label}>MODELS AVAILABLE</div>
+                    {status.models.map(m => (
+                        <div key={m.id} style={{ fontSize: "13px", padding: "4px 0" }}>{m.label} <span style={{ color: m.free ? "var(--ready)" : "var(--warning)", fontSize: "11px" }}>{m.free ? "free" : "paid"}</span></div>
+                    ))}
+                </>
+            )}
+        </div>
+    );
+}
+
+const TABS = [
+    ["account", "Account"], ["connectors", "Connectors"], ["memory", "Memory"], ["reminders", "Reminders"],
+    ["skills", "Skills"], ["code", "Code"], ["capabilities", "Capabilities"], ["usage", "Usage"],
+];
+
 export default function SettingsPage({ token, onBack, onUnauthorized }) {
     const [status, setStatus] = useState(null);
+    const [tab, setTab] = useState(() => { try { return localStorage.getItem("semblance_settings_tab") || "account"; } catch { return "account"; } });
+    const pickTab = (t) => { setTab(t); try { localStorage.setItem("semblance_settings_tab", t); } catch {} };
     const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
 
     useEffect(() => {
@@ -136,16 +302,28 @@ export default function SettingsPage({ token, onBack, onUnauthorized }) {
                 <button onClick={onBack} aria-label="Back" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "18px", color: "var(--text)" }}>←</button>
                 <span style={{ fontWeight: 700, color: "var(--text)" }}>Settings</span>
             </div>
+            <div style={{ display: "flex", gap: "4px", overflowX: "auto", padding: "8px 12px", borderBottom: "1px solid var(--border)" }}>
+                {TABS.map(([id, name]) => (
+                    <button key={id} onClick={() => pickTab(id)} className={tab === id ? "is-selected" : ""}
+                        style={{ ...btn, whiteSpace: "nowrap", border: "1px solid transparent", background: "none" }}>{name}</button>
+                ))}
+            </div>
             <div style={{ flex: 1, overflowY: "auto", padding: "0 16px 32px" }}>
-                <ConnectApps headers={headers} />
-                <McpServers headers={headers} />
-                {status ? <Features features={status.features} /> : <div style={{ ...label, fontWeight: 400 }}>Loading…</div>}
-                {status && (
-                    <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "14px" }}>
-                        Limits: code {status.limits.code_max_steps} steps · co-work {status.limits.cowork_max_steps} · research {status.limits.research_max_steps} ·
-                        {" "}{Math.round(status.limits.agent_timeout_seconds / 60)} min per run. Change with the matching setting (e.g. CODE_MAX_STEPS).
-                    </div>
+                {tab === "account" && <AccountTab headers={headers} />}
+                {tab === "connectors" && (
+                    <>
+                        <div style={label}>ACCOUNTS</div>
+                        <ConnectorsPanel token={token} />
+                        <McpServers headers={headers} />
+                        <ConnectApps headers={headers} />
+                    </>
                 )}
+                {tab === "memory" && <MemoryTab headers={headers} />}
+                {tab === "reminders" && <RemindersTab headers={headers} />}
+                {tab === "skills" && <><div style={label}>SKILLS</div><SkillsPanel token={token} /></>}
+                {tab === "code" && <CodeTab headers={headers} />}
+                {tab === "capabilities" && (status ? <Features features={status.features} /> : <div style={{ ...label, fontWeight: 400 }}>Loading…</div>)}
+                {tab === "usage" && <UsageTab headers={headers} status={status} />}
             </div>
         </div>
     );

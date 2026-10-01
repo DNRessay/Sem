@@ -1,8 +1,13 @@
-from fastapi import APIRouter, Depends
+import time
 
+from fastapi import APIRouter, Depends, HTTPException, Request
+
+from cache.tau_cache import TAUCache
 from config import settings
 from gateway.auth import require_account
 from pipeline import llm_providers
+from storage.neon_store import get_store
+from tools.video_tool import video_call
 
 router = APIRouter(prefix="/settings")
 
@@ -57,3 +62,79 @@ async def status(_account: dict = Depends(require_account)):
     }
     return {"features": features, "models": llm_providers.available(), "limits": limits,
             "mcp_url": (s.PUBLIC_API_URL or "").rstrip("/") + "/mcp" if s.PUBLIC_API_URL else ""}
+
+
+# ── Account: the owner profile every chat and agent reads (TAU) ──────────────
+
+PROFILE_FIELDS = {"name": 80, "call_me": 80, "work": 120, "location": 120, "about": 2000,
+                  "preferences": 4000, "coding_preferences": 2000}
+
+
+@router.get("/profile")
+async def get_profile(_account: dict = Depends(require_account)):
+    db = await get_store()
+    model = await db.get_user_model("owner") or {}
+    return {k: model.get(k, "") if isinstance(model.get(k, ""), str) else str(model.get(k)) for k in PROFILE_FIELDS}
+
+
+@router.put("/profile")
+async def save_profile(request: Request, _account: dict = Depends(require_account)):
+    body = await request.json()
+    db = await get_store()
+    model = await db.get_user_model("owner") or {}
+    for key, limit in PROFILE_FIELDS.items():
+        if key in body:
+            model[key] = str(body[key] or "").strip()[:limit]
+    await db.save_user_model("owner", model)
+    TAUCache().bump_version()  # every chat picks up the new profile on its next message
+    return {k: model.get(k, "") for k in PROFILE_FIELDS}
+
+
+# ── Memory ───────────────────────────────────────────────────────────────────
+
+@router.get("/memory")
+async def memories(q: str = "", _account: dict = Depends(require_account)):
+    db = await get_store()
+    return {"memories": await db.search_memories(q, limit=60), "total": await db.count_memories()}
+
+
+@router.delete("/memory/{memory_id}")
+async def forget(memory_id: int, _account: dict = Depends(require_account)):
+    db = await get_store()
+    if not await db.delete_memory(memory_id):
+        raise HTTPException(404, "memory not found")
+    return {"ok": True}
+
+
+# ── Reminders ────────────────────────────────────────────────────────────────
+
+@router.get("/reminders")
+async def reminders(account: dict = Depends(require_account)):
+    db = await get_store()
+    return {"reminders": await db.list_reminders(account["account_id"])}
+
+
+@router.delete("/reminders/{reminder_id}")
+async def delete_reminder(reminder_id: int, account: dict = Depends(require_account)):
+    db = await get_store()
+    if not await db.delete_reminder(account["account_id"], reminder_id):
+        raise HTTPException(404, "reminder not found")
+    return {"ok": True}
+
+
+# ── Usage ────────────────────────────────────────────────────────────────────
+
+@router.get("/usage")
+async def usage(account: dict = Depends(require_account)):
+    db = await get_store()
+    now = int(time.time())
+    video = await video_call("budget") if settings.MODAL_VIDEO_URL else {}
+    return {
+        "chats_7d": await db.count_sessions_since(now - 7 * 86400),
+        "chats_30d": await db.count_sessions_since(now - 30 * 86400),
+        "memories": await db.count_memories(),
+        "reminders": len(await db.list_reminders(account["account_id"])),
+        "automations": len(await db.list_code_automations(account["account_id"])),
+        "mcp_servers": len(await db.list_mcp_servers(account["account_id"])),
+        "video": {k: video.get(k) for k in ("used_usd", "cap_usd")} if video.get("ok") else None,
+    }

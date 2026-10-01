@@ -378,6 +378,24 @@ class NeonStore:
                 )
             return [dict(r) for r in rows]
 
+    async def search_memories(self, term: str = "", limit: int = 50) -> list[dict]:
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT id, session_id, content, salience, created_at FROM memories
+                   WHERE $1 = '' OR content ILIKE '%' || $1 || '%'
+                   ORDER BY created_at DESC LIMIT $2""",
+                term.strip(), limit,
+            )
+            return [dict(r) for r in rows]
+
+    async def delete_memory(self, memory_id: int) -> bool:
+        async with self._pool.acquire() as conn:
+            return (await conn.execute("DELETE FROM memories WHERE id=$1", memory_id)).endswith("1")
+
+    async def count_memories(self) -> int:
+        async with self._pool.acquire() as conn:
+            return (await conn.fetchrow("SELECT COUNT(*) AS n FROM memories"))["n"]
+
     async def semantic_search(self, embedding: list[float], top_k: int = 5) -> list[dict]:
         """Cosine-distance nearest neighbours via pgvector's <=> operator."""
         async with self._pool.acquire() as conn:
