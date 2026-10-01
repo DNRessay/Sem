@@ -1,10 +1,11 @@
 """Model picker: every LLM SEMBLANCE can use, behind one OpenAI-style call.
 
 Free options come first and "auto" walks them in order, moving on when one
-is rate-limited or down: self-hosted Bonsai -> Gemini free tier -> Groq.
+is rate-limited, down or misconfigured: self-hosted Bonsai -> Gemini free tier -> Groq.
 Paid options (Claude, GPT, Qwen, DeepSeek, Kimi, and any Hugging Face model
 via "hf:owner/model") are only used when picked explicitly. A provider appears in the picker once its key/URL is set.
 """
+import asyncio
 import time
 from dataclasses import dataclass
 
@@ -109,7 +110,7 @@ async def _complete_openai(p: Provider, client: httpx.AsyncClient, messages: lis
         data = {}
     if r.status_code != 200 or "choices" not in data:
         return {"error": f"{p.label} error {r.status_code}: {str(data or r.text)[:300]}",
-                "unavailable": r.status_code >= 500}
+                "unavailable": r.status_code not in (400, 422)}  # a bad key or outage: try the next model
     message = data["choices"][0]["message"]
     message.pop("reasoning_content", None)
     return message
@@ -128,23 +129,32 @@ async def complete(choice: str, messages: list[dict], tools: list[dict] | None =
         return {"error": "No model is configured — set GROQ_API_KEY, GEMINI_API_KEY or LOCAL_LLM_URL."}
     owns_client = client is None
     client = client or httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=180.0))
-    last = {"error": "no provider answered"}
+    last, errors = {"error": "no provider answered"}, []
     try:
         for p in chain:
-            try:
-                if p.id == "anthropic":
-                    result = await anthropic_provider.complete(messages, tools, max_tokens)
-                else:
-                    result = await _complete_openai(p, client, messages, tools, max_tokens, deadline, model_override)
-            except httpx.HTTPError as e:
-                result = {"error": f"{p.label} unreachable: {e}", "unavailable": True}
-            if "error" not in result:
-                result["_provider"] = p.id
-                return result
+            for attempt in range(2):
+                try:
+                    if p.id == "anthropic":
+                        result = await anthropic_provider.complete(messages, tools, max_tokens)
+                    else:
+                        result = await _complete_openai(p, client, messages, tools, max_tokens, deadline, model_override)
+                except httpx.HTTPError as e:
+                    result = {"error": f"{p.label} unreachable: {e}", "unavailable": True}
+                if "error" not in result:
+                    result["_provider"] = p.id
+                    return result
+                # A model picked on its own gets one retry on a brief overload; in "auto" the next model is the retry.
+                transient = result.get("rate_limited") or result.get("unavailable")
+                if attempt or not transient or len(chain) > 1 or time.monotonic() + 10 > deadline:
+                    break
+                await asyncio.sleep(4)
             last = result
+            errors.append(result["error"][:200])
             if not (result.get("rate_limited") or result.get("unavailable")):
-                break
+                break  # the request itself is bad; another model would reject it too
     finally:
         if owns_client:
             await client.aclose()
+    if len(errors) > 1:
+        return {**last, "error": "No free model answered — " + " · ".join(errors)}
     return last

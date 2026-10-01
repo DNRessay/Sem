@@ -115,3 +115,23 @@ async def test_any_hugging_face_model_by_repo_id(keys):
     assert msg["_provider"] == "huggingface"
     assert json.loads(route.calls[0].request.content)["model"] == "Qwen/Qwen3-Coder-480B-A35B-Instruct"
     assert route.calls[0].request.headers["authorization"] == "Bearer h"
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_key_falls_through_to_the_next_free_model(keys):
+    with respx.mock:
+        respx.post(GEMINI).mock(return_value=Response(401, json={"error": "Invalid API Key"}))
+        respx.post(GROQ).mock(return_value=_ok("from groq"))
+        msg = await llm_providers.complete("auto", [{"role": "user", "content": "hi"}])
+    assert msg["_provider"] == "groq"
+
+
+@pytest.mark.asyncio
+async def test_a_picked_model_retries_once_on_overload(keys, monkeypatch):
+    async def no_sleep(_):
+        return None
+    monkeypatch.setattr(llm_providers.asyncio, "sleep", no_sleep)
+    with respx.mock:
+        route = respx.post(GEMINI).mock(side_effect=[Response(503, json={"error": "high demand"}), _ok("ok")])
+        msg = await llm_providers.complete("gemini", [{"role": "user", "content": "hi"}])
+    assert msg["_provider"] == "gemini" and route.call_count == 2
