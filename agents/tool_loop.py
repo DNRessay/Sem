@@ -33,6 +33,29 @@ def preview(result) -> str:
     return json.dumps(result, default=str)[:_PREVIEW_CHARS]
 
 
+HANDOFF_TABS = {
+    "chat": "general questions, memory, reminders, quick lookups",
+    "code": "changes to a code repo: build, fix, commit, open a PR",
+    "cowork": "multi-step office work: research, email, calendar, Drive notes, images",
+    "design": "the user's business marketing: website brief, ad copy, ad images and videos",
+    "finance": "the user's money via C-Lab: net worth, portfolio, spending, markets",
+}
+HANDOFF_TOOL = fn_tool(
+    "handoff", "Offer to continue in another SEMBLANCE tab when that tab fits the request better (or the user asks): "
+    + "; ".join(f"{k} = {v}" for k, v in HANDOFF_TABS.items())
+    + ". `task` is a complete, self-contained instruction for that tab including any details from this conversation. "
+    "The user gets a button; don't do that tab's work yourself.",
+    {"tab": {"type": "string", "enum": list(HANDOFF_TABS)}, "task": {"type": "string"}}, ["tab", "task"],
+)
+
+
+def handoff_result(args: dict) -> dict:
+    tab, task = args.get("tab"), (args.get("task") or "").strip()
+    if tab not in HANDOFF_TABS or not task:
+        return {"ok": False, "error": f"tab must be one of {', '.join(HANDOFF_TABS)} and task must be set"}
+    return {"ok": True, "status": f"offered the user a button to continue in {tab}"}
+
+
 class ToolLoopAgent:
     """The shared agent loop behind the Code and Co-work tabs: ask the picked
     model, run the tools it calls, feed results back, repeat until it answers
@@ -51,6 +74,8 @@ class ToolLoopAgent:
         self.mcp = mcp
         self.allow_approvals = allow_approvals
         self.user_context = user_context  # the owner's profile (TAUEngine.owner_context)
+        self.tab = ""  # this agent's own tab; set allow_handoff False where no one sees the button
+        self.allow_handoff = True
 
     def system_prompt(self) -> str:
         raise NotImplementedError
@@ -85,9 +110,13 @@ class ToolLoopAgent:
 
     def all_tools(self) -> list[dict]:
         extra = self.mcp.tools(include_approval=self.allow_approvals) if self.mcp else []
-        return self.tools() + extra
+        return self.tools() + extra + ([HANDOFF_TOOL] if self.allow_handoff else [])
 
     async def _route(self, name: str, args: dict) -> dict:
+        if name == "handoff" and self.allow_handoff:
+            if args.get("tab") == self.tab:
+                return {"ok": False, "error": "you are already in that tab — do the work here"}
+            return handoff_result(args)
         if self.mcp and self.mcp.owns(name):
             if self.mcp.needs_approval(name):
                 if not self.allow_approvals:
@@ -148,6 +177,8 @@ class ToolLoopAgent:
                         result = {"result": result}
                     ok = bool(result.get("ok", "error" not in result))
                     yield {"type": "result", "id": call.get("id"), "name": name, "ok": ok, "output": preview(self.model_view(result))}
+                    if name == "handoff" and result.get("ok"):
+                        yield {"type": "handoff", "tab": args["tab"], "task": args["task"].strip()}
                     for event in self._mcp_events(call.get("id"), name, args or {}, result) + \
                             self.extra_events(call.get("id"), name, args or {}, result):
                         yield event

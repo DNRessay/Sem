@@ -127,7 +127,7 @@ function VideoStudio({ token, seedPrompt }) {
 // Design tab: digital-marketing assistant. Learns the business from its own
 // website, then writes ad copy and makes matching images per placement
 // (Nano Banana, free tier) and short video ads (Wan 2.1 on Modal, capped).
-export default function DesignPage({ token, onNavigate, onUnauthorized }) {
+export default function DesignPage({ token, onNavigate, onUnauthorized, handoff, onHandoff }) {
     // Each campaign is a saved "chat": the business brief, the campaign and its ad copy (images aren't stored).
     const { chats, chat, updateChat, newChat, selectChat, deleteChat } = useTabChats(STORE_KEY, {
         blank: () => ({ site: "", brief: "", campaign: "", placements: ["fb_ig_feed", "story_reel"], count: 2, ads: [] }),
@@ -143,6 +143,12 @@ export default function DesignPage({ token, onNavigate, onUnauthorized }) {
     const setPlacements = field$("placements");
     const setCount = field$("count");
     const [menuOpen, setMenuOpen] = useState(false);
+    const takenHandoff = useRef(0);
+    useEffect(() => {
+        if (handoff?.view !== "design" || takenHandoff.current === handoff.at) return;
+        takenHandoff.current = handoff.at;
+        newChat({ site, brief, placements, count, ads: [], campaign: handoff.task, title: handoff.task.slice(0, 60) });
+    }, [handoff]); // eslint-disable-line react-hooks/exhaustive-deps
     const [model, setModel] = useState(() => loadModel("semblance_design_model"));
     const ads = chat.ads || [];
     const setAds = v => updateChat(chat.id, c => ({ ads: typeof v === "function" ? v(c.ads || []) : v }));
@@ -236,6 +242,15 @@ export default function DesignPage({ token, onNavigate, onUnauthorized }) {
                 </div>
                 {(busy || notice) && <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "8px" }}>{busy || notice}</div>}
 
+                {ads.length > 0 && onHandoff && (
+                    <button onClick={() => onHandoff("code", [
+                        "Build this campaign into my website: a landing section (or page) that matches the site's existing style,",
+                        "linked from the navigation, using this copy. Then open a PR.",
+                        `Campaign: ${campaign}`,
+                        ...ads.slice(0, 3).map(a => `- ${a.headline}: ${a.primary_text} [${a.cta}]`),
+                        site ? `Website: ${site}` : "",
+                    ].filter(Boolean).join("\n"))} style={{ ...btn, marginTop: "12px" }}>Build it with Code →</button>
+                )}
                 {ads.length > 0 && (
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "12px", marginTop: "14px" }}>
                         {ads.map((ad, i) => <AdCard key={i} ad={ad} onRetry={() => retryImage(i)} />)}

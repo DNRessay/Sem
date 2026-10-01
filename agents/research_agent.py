@@ -26,6 +26,7 @@ class ResearchAgent(ToolLoopAgent):
     def __init__(self, provider: str = "auto", max_steps: int | None = None, deadline_seconds: float | None = None):
         super().__init__(provider, max_steps or settings.RESEARCH_MAX_STEPS,
                          deadline_seconds or settings.RESEARCH_TIMEOUT_SECONDS)
+        self.allow_handoff = False  # research answers in place; it has no tab to hand off from
 
     def system_prompt(self) -> str:
         return _SYSTEM.format(now=datetime.now(_SAST).strftime("%A %d %B %Y, %H:%M"))

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import ModelPicker, { loadModel } from "./ModelPicker";
 import { ToolStep, md } from "./CodePage";
 import { readEvents } from "../utils/sse";
-import TabDrawer, { MenuButton } from "./TabDrawer";
+import TabDrawer, { HandoffCard, MenuButton } from "./TabDrawer";
 import useTabChats from "../hooks/useTabChats";
 
 const API = import.meta.env.VITE_API_URL || "";
@@ -58,7 +58,7 @@ function ApprovalCard({ item, onDecide }) {
 // Full-screen Co-work tab: an assistant that does the work (research, email,
 // calendar, Drive notes, images) instead of only advising. Anything that
 // leaves SEMBLANCE — sending email, adding events — waits for Approve.
-export default function CoworkPage({ token, onNavigate, onUnauthorized }) {
+export default function CoworkPage({ token, onNavigate, onUnauthorized, handoff, onHandoff }) {
     const { chats, chat, updateChat, newChat, selectChat, deleteChat } = useTabChats(STORE_KEY, {
         blank: () => ({ items: [] }),
         legacy: () => { const items = loadItems(); return { items, title: items.find(i => i.kind === "user")?.text.slice(0, 60) || "" }; },
@@ -68,6 +68,12 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized }) {
     const setItems = fn => updateChat(chat.id, x => ({ items: fn(x.items) }));
     const [menuOpen, setMenuOpen] = useState(false);
     const [input, setInput] = useState("");
+    const takenHandoff = useRef(0);
+    useEffect(() => {
+        if (handoff?.view !== "cowork" || takenHandoff.current === handoff.at) return;
+        takenHandoff.current = handoff.at;
+        newChat(); setInput(handoff.task);
+    }, [handoff]); // eslint-disable-line react-hooks/exhaustive-deps
     const [busy, setBusy] = useState(false);
     const [model, setModel] = useState(() => loadModel("semblance_cowork_model"));
     const abortRef = useRef(null);
@@ -99,6 +105,7 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized }) {
                 else if (ev.type === "result") add(it => it.map(i => (i.kind === "tool" && i.id === ev.id && i.ok === undefined ? { ...i, ok: ev.ok, output: ev.output } : i)));
                 else if (ev.type === "approval") add(it => [...it, { kind: "approval", id: ev.id, name: ev.name, args: ev.args, summary: ev.summary, state: "pending" }]);
                 else if (ev.type === "image") add(it => [...it, { kind: "image", id: ev.id, mime: ev.mime, base64: ev.base64, prompt: ev.prompt }]);
+                else if (ev.type === "handoff") add(it => [...it, { kind: "handoff", tab: ev.tab, task: ev.task }]);
                 else if (ev.type === "error") add(it => [...it, { kind: "error", text: ev.text }]);
             });
         } catch (e) {
@@ -161,6 +168,7 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized }) {
                             <div style={{ background: "var(--surface-2)", borderRadius: "14px", padding: "8px 12px", fontSize: "14px", maxWidth: "85%", whiteSpace: "pre-wrap" }}>{item.text}</div>
                         </div>
                     );
+                    if (item.kind === "handoff") return <HandoffCard key={i} tab={item.tab} task={item.task} onHandoff={onHandoff} />;
                     if (item.kind === "error") return <div key={i} style={{ color: "var(--danger)", fontSize: "13px", margin: "6px 0" }}>{item.text}</div>;
                     return <div key={i} className="md-content" style={{ fontSize: "14px", color: "var(--text)", margin: "6px 0" }} dangerouslySetInnerHTML={md(item.text)} />;
                 })}

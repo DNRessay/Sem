@@ -79,6 +79,7 @@ async def run_due_automation() -> dict | None:
 
     texts, error = [], None
     agent = CodeAgent(ws, max_steps=settings.AUTOMATION_MAX_STEPS, deadline_seconds=settings.AUTOMATION_TIMEOUT_SECONDS)
+    agent.allow_handoff = False  # nobody is watching a scheduled run
     async for event in agent.run(job["prompt"]):
         if event["type"] == "text":
             texts.append(event["text"])

@@ -22,6 +22,22 @@ function timeAgo(ms) {
     return `${Math.floor(diff / 86400)}d ago`;
 }
 
+const TAB_NAMES = { chat: "Chat", code: "Code", cowork: "Co-work", design: "Design & ads", finance: "Finance" };
+
+// "Continue in another tab" button, shown when an agent hands work off.
+export function HandoffCard({ tab, task, onHandoff }) {
+    if (!onHandoff || !TAB_NAMES[tab]) return null;
+    return (
+        <div style={{ margin: "8px 0", padding: "10px 12px", border: "1px solid var(--border)", borderRadius: "12px", background: "var(--surface)" }}>
+            <div style={{ fontSize: "12px", color: "var(--text-muted)", marginBottom: "6px", whiteSpace: "pre-wrap", maxHeight: "6em", overflow: "hidden" }}>{task}</div>
+            <button onClick={() => onHandoff(tab, task)} style={{
+                padding: "7px 12px", borderRadius: "10px", border: "none", background: "var(--accent)",
+                color: "var(--accent-contrast)", fontSize: "13px", fontWeight: 600, cursor: "pointer",
+            }}>Open in {TAB_NAMES[tab]} →</button>
+        </div>
+    );
+}
+
 export function MenuButton({ onClick }) {
     return (
         <button onClick={onClick} aria-label="Menu" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "20px", color: "var(--text)", padding: "0 4px" }}>☰</button>

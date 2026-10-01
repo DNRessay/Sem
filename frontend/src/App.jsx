@@ -35,7 +35,14 @@ export default function App() {
     const [sessionTitle, setSessionTitle] = useState("");
     const [menuOpen, setMenuOpen] = useState(false);
     const [agentFeedOpen, setAgentFeedOpen] = useState(false);
-    const [view, setView] = useState("chat"); // "chat" | "allChats" | "code" | "cowork" | "design" | "settings" | "finance"
+    const [view, setView] = useState("chat");
+    // Work passed between tabs ("Open in Code →"): the target tab starts a new chat with this task filled in.
+    const [handoff, setHandoff] = useState(null);
+    const handOff = (tab, task) => {
+        if (tab === "chat") startNewChat();
+        setHandoff({ view: tab, task, at: Date.now() });
+        setView(tab);
+    }; // "chat" | "allChats" | "code" | "cowork" | "design" | "settings" | "finance"
     const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || "");
     const [restoring, setRestoring] = useState(true);
     const sessionIdRef = useRef(sessionId);
@@ -145,6 +152,8 @@ export default function App() {
                             onTitle={handleTitle}
                             token={token}
                             onUnauthorized={logout}
+                            onHandoff={handOff}
+                            draft={handoff?.view === "chat" ? handoff : null}
                         />
                     </ErrorBoundary>
                 )}
@@ -173,7 +182,7 @@ export default function App() {
             />
             {view === "finance" && (
                 <ErrorBoundary>
-                    <FinancePage token={token} onNavigate={setView} onUnauthorized={logout} />
+                    <FinancePage token={token} onNavigate={setView} onUnauthorized={logout} handoff={handoff} onHandoff={handOff} />
                 </ErrorBoundary>
             )}
             {view === "settings" && (
@@ -183,17 +192,17 @@ export default function App() {
             )}
             {view === "design" && (
                 <ErrorBoundary>
-                    <DesignPage token={token} onNavigate={setView} onUnauthorized={logout} />
+                    <DesignPage token={token} onNavigate={setView} onUnauthorized={logout} handoff={handoff} onHandoff={handOff} />
                 </ErrorBoundary>
             )}
             {view === "cowork" && (
                 <ErrorBoundary>
-                    <CoworkPage token={token} onNavigate={setView} onUnauthorized={logout} />
+                    <CoworkPage token={token} onNavigate={setView} onUnauthorized={logout} handoff={handoff} onHandoff={handOff} />
                 </ErrorBoundary>
             )}
             {view === "code" && (
                 <ErrorBoundary>
-                    <CodePage token={token} onNavigate={setView} onUnauthorized={logout} />
+                    <CodePage token={token} onNavigate={setView} onUnauthorized={logout} handoff={handoff} onHandoff={handOff} />
                 </ErrorBoundary>
             )}
             {view === "allChats" && (

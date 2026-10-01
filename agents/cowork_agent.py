@@ -81,6 +81,7 @@ class CoworkAgent(ToolLoopAgent):
                  deadline_seconds: float | None = None, mcp=None):
         super().__init__(provider, max_steps or settings.COWORK_MAX_STEPS,
                          deadline_seconds or settings.AGENT_TIMEOUT_SECONDS, mcp=mcp, allow_approvals=True)
+        self.tab = "cowork"
         self.account_id = account_id
 
     def system_prompt(self) -> str:

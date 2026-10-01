@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { useStream } from "../hooks/useStream";
+import { HandoffCard } from "./TabDrawer";
 import { useTypewriter } from "../hooks/useTypewriter";
 import VoiceInput from "./VoiceInput";
 import ModelPicker, { loadModel } from "./ModelPicker";
@@ -248,8 +249,9 @@ function ToolChip({ tool }) {
     );
 }
 
-export default function ChatWindow({ sessionId = "default", initialHistory = [], onStreamChange, onTitle, token, onUnauthorized }) {
+export default function ChatWindow({ sessionId = "default", initialHistory = [], onStreamChange, onTitle, token, onUnauthorized, onHandoff, draft }) {
     const [input, setInput] = useState("");
+    useEffect(() => { if (draft?.task) setInput(draft.task); }, [draft?.at]); // eslint-disable-line react-hooks/exhaustive-deps
     const [history, setHistory] = useState(initialHistory);
     const [attachments, setAttachments] = useState([]);
     const [webSearchEnabled, setWebSearchEnabled] = useState(true);
@@ -281,7 +283,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
     // (and animating) the same content instead of a hard cut.
     useEffect(() => {
         if (!pendingReply || revealed.length < fullResponse.length) return;
-        setHistory(h => [...h, { role: "assistant", content: pendingReply.reply, tool: pendingReply.tool }]);
+        setHistory(h => [...h, { role: "assistant", content: pendingReply.reply, tool: pendingReply.tool, handoff: pendingReply.handoff }]);
         if (pendingReply.title) onTitle?.(sessionId, pendingReply.title);
         setPendingReply(null);
     }, [pendingReply, revealed, fullResponse, sessionId, onTitle]);
@@ -293,8 +295,8 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
         setInput("");
         setAttachments([]);
         setHistory(h => [...h, { role: "user", content: msg, files: files.map(f => ({ name: f.name, source: f.source, mime: f.mime })) }]);
-        const { reply, tool: toolResult, title } = await send(msg, sessionId, history, files, webSearchEnabled, model, research);
-        if (reply) setPendingReply({ reply, tool: toolResult, title });
+        const { reply, tool: toolResult, title, handoff } = await send(msg, sessionId, history, files, webSearchEnabled, model, research);
+        if (reply || handoff) setPendingReply({ reply, tool: toolResult, title, handoff });
         else if (title) onTitle?.(sessionId, title);
     };
 
@@ -334,6 +336,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                                 onClick={handleCodeCardClick}
                                 dangerouslySetInnerHTML={renderMarkdown(m.content)}
                             />
+                            {m.handoff && <HandoffCard tab={m.handoff.tab} task={m.handoff.task} onHandoff={onHandoff} />}
                             <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                                 <CopyButton text={m.content} />
                                 <SpeakButton text={m.content} token={token} />

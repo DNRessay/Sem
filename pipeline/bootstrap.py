@@ -120,7 +120,7 @@ class Bootstrap:
                 async for piece in self._tool_reply(messages, session_id, provider):
                     if isinstance(piece, str):
                         reply_parts.append(piece)
-                    elif not assistant_prefix:
+                    elif "tool" in piece and not assistant_prefix:
                         tool_marker = piece["tool"]
                     yield piece
             elif provider != "groq" and (provider in llm_providers.PROVIDERS or provider.startswith(llm_providers.HF_PREFIX)):
@@ -215,6 +215,9 @@ class Bootstrap:
                     args = {}
                 output = await chat_tools.run(name, args if isinstance(args, dict) else {}, session_id, active)
                 messages.append(chat_tools.as_message(call.get("id"), output))
+                if name == "handoff" and output.get("ok"):
+                    yield {"handoff": {"tab": args["tab"], "task": args["task"].strip()}}
+                    continue
                 used.append(f"$ {chat_tools.label(name, args)}\n{preview(output)}")
                 yield {"tool": {"kind": chat_tools.KIND.get(name, "tool"), "label": chat_tools.label(name, args),
                                 "detail": "\n\n".join(used)[-6000:]}}

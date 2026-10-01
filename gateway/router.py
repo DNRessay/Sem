@@ -556,6 +556,8 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
         ):
             if isinstance(chunk, dict):
                 yield f"data: {json.dumps(chunk)}\n\n"
+                if "tool" not in chunk:
+                    continue
                 db = await get_store()
                 await db.save_agent_event(session_id, chunk["tool"]["kind"], f"ok:{chunk['tool']['label']}")
                 continue

@@ -4,7 +4,7 @@ import DOMPurify from "dompurify";
 import ModelPicker, { loadModel } from "./ModelPicker";
 import { readEvents } from "../utils/sse";
 import { RepoPicker } from "./AttachMenu";
-import TabDrawer, { MenuButton } from "./TabDrawer";
+import TabDrawer, { HandoffCard, MenuButton } from "./TabDrawer";
 import useTabChats from "../hooks/useTabChats";
 
 const API = import.meta.env.VITE_API_URL || "";
@@ -118,7 +118,7 @@ function Automations({ token, provider, repo, onUnauthorized }) {
 
 // Full-screen Code tab: a coding agent working in a clone of one repo on
 // Modal. Nothing reaches the repo until "Open PR" (or an automation) does.
-export default function CodePage({ token, onNavigate, onUnauthorized }) {
+export default function CodePage({ token, onNavigate, onUnauthorized, handoff, onHandoff }) {
     const { chats, chat, updateChat, newChat: addChat, selectChat, deleteChat } = useTabChats(STORE_KEY, {
         blank: () => ({ provider: "github", repo: "", items: [] }),
         legacy: () => {
@@ -135,6 +135,12 @@ export default function CodePage({ token, onNavigate, onUnauthorized }) {
     const [reposError, setReposError] = useState("");
     const [opened, setOpened] = useState(null);
     const [input, setInput] = useState("");
+    const takenHandoff = useRef(0);
+    useEffect(() => {
+        if (handoff?.view !== "code" || takenHandoff.current === handoff.at) return;
+        takenHandoff.current = handoff.at;
+        newChat(); setInput(handoff.task);
+    }, [handoff]); // eslint-disable-line react-hooks/exhaustive-deps
     const [mode, setMode] = useState("act");
     const [model, setModel] = useState(() => loadModel("semblance_code_model"));
     const [busy, setBusy] = useState("");
@@ -213,6 +219,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized }) {
                 if (ev.type === "text") add(it => [...it, { kind: "text", text: ev.text, mode: runMode }]);
                 else if (ev.type === "tool") add(it => [...it, { kind: "tool", id: ev.id, name: ev.name, args: ev.args }]);
                 else if (ev.type === "result") add(it => it.map(i => (i.kind === "tool" && i.id === ev.id && i.ok === undefined ? { ...i, ok: ev.ok, output: ev.output } : i)));
+                else if (ev.type === "handoff") add(it => [...it, { kind: "handoff", tab: ev.tab, task: ev.task }]);
                 else if (ev.type === "error") add(it => [...it, { kind: "error", text: ev.text }]);
             });
         } catch (e) {
@@ -267,16 +274,20 @@ export default function CodePage({ token, onNavigate, onUnauthorized }) {
                 onSelect={id => { selectChat(id); setOpened(null); setNotice(""); }} onDelete={deleteChat}
                 subtitle={c => c.repo || "no repo"} />
 
-            {ready && (
+            {repo && (ready || items.length > 0) && (
                 <div style={{ display: "flex", gap: "6px", padding: "8px 16px", borderBottom: "1px solid var(--border)", overflowX: "auto" }}>
                     <button onClick={openRepo} disabled={!!busy} style={btn}>Pull</button>
                     <button onClick={showChanges} style={btn}>Changes</button>
-                    <button onClick={openPr} disabled={!opened.canOpenPr || !!busy} title={opened.canOpenPr ? "" : `Connect ${provider} to open PRs`} style={btn}>Open PR</button>
+                    <button onClick={openPr} disabled={opened?.canOpenPr === false || !!busy} title={opened?.canOpenPr === false ? `Connect ${provider} to open PRs` : ""} style={btn}>Open PR</button>
                     <button onClick={discard} disabled={!!busy} style={btn}>Discard</button>
                     <button onClick={() => setShowAutomations(s => !s)} style={btn}>Automations</button>
+                    {onHandoff && <button onClick={() => {
+                        const done = items.filter(i => i.kind === "text").slice(-1)[0]?.text || items.filter(i => i.kind === "user").slice(-1)[0]?.text || "";
+                        onHandoff("design", `Make ads announcing this from ${repo}:\n${done.slice(0, 1200)}`);
+                    }} disabled={!items.length} style={btn}>Make ads →</button>}
                 </div>
             )}
-            {ready && showAutomations && <Automations token={token} provider={provider} repo={repo} onUnauthorized={onUnauthorized} />}
+            {repo && showAutomations && <Automations token={token} provider={provider} repo={repo} onUnauthorized={onUnauthorized} />}
             {reposError && <div style={{ padding: "8px 16px", fontSize: "12px", color: "var(--danger)", borderBottom: "1px solid var(--border)" }}>{reposError}</div>}
             {notice && <div style={{ padding: "8px 16px", fontSize: "12px", color: "var(--text-muted)", borderBottom: "1px solid var(--border)" }}>{notice}</div>}
 
@@ -296,6 +307,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized }) {
                             </div>
                         </div>
                     );
+                    if (item.kind === "handoff") return <HandoffCard key={i} tab={item.tab} task={item.task} onHandoff={onHandoff} />;
                     if (item.kind === "error") return <div key={i} style={{ color: "var(--danger)", fontSize: "13px", margin: "6px 0" }}>{item.text}</div>;
                     return <div key={i} className="md-content" style={{ fontSize: "14px", color: "var(--text)", margin: "6px 0" }} dangerouslySetInnerHTML={md(item.text)} />;
                 })}

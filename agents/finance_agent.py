@@ -25,6 +25,7 @@ class FinanceAgent(ToolLoopAgent):
 
     def __init__(self, provider: str = "auto", mcp=None):
         super().__init__(provider, settings.COWORK_MAX_STEPS, settings.AGENT_TIMEOUT_SECONDS, mcp=mcp)
+        self.tab = "finance"
 
     def system_prompt(self) -> str:
         return _SYSTEM.format(now=datetime.now(_SAST).strftime("%A %d %B %Y, %H:%M"))

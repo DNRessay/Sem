@@ -80,7 +80,7 @@ async def test_plan_mode_only_offers_and_allows_read_only_tools():
         events = [e async for e in CodeAgent(ws, mode="plan").run("plan it")]
 
     offered = {t["function"]["name"] for t in json.loads(route.calls[0].request.content)["tools"]}
-    assert offered == {"list_dir", "read_file", "grep", "aws"}
+    assert offered == {"list_dir", "read_file", "grep", "aws", "handoff"}
     assert ws.calls == []
     assert events[1] == {"type": "result", "id": "c1", "name": "write_file", "ok": False, "output": "plan mode is read-only"}
 
@@ -153,3 +153,16 @@ async def test_aws_tool_redacts_environment_variables(monkeypatch):
     monkeypatch.setattr("tools.aws_read_tool.boto3.client", lambda *a, **k: FakeClient())
     result = await AwsReadTool().call("lambda", "ListFunctions")
     assert result["ok"] and "secret" not in result["result"] and "[redacted]" in result["result"]
+
+
+@pytest.mark.asyncio
+async def test_handoff_emits_a_button_event_and_refuses_its_own_tab():
+    ws = FakeWorkspace()
+    with respx.mock:
+        respx.post(GROQ_URL).mock(side_effect=[
+            _reply("", [_tool_call("h1", "handoff", {"tab": "design", "task": "Make ads for the new pricing page"})]),
+            _reply("Offered Design."),
+        ])
+        events = [e async for e in CodeAgent(ws).run("make ads for this")]
+    assert {"type": "handoff", "tab": "design", "task": "Make ads for the new pricing page"} in events
+    assert (await CodeAgent(ws)._route("handoff", {"tab": "code", "task": "x"}))["ok"] is False

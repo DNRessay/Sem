@@ -70,6 +70,7 @@ def _text(text: str, is_error: bool = False) -> dict:
 
 
 async def _drain(agent, task: str) -> dict:
+    agent.allow_handoff = False  # an outside MCP client has no Sem tabs to switch to
     texts, steps, pending, images, error = [], 0, [], [], None
     async for ev in agent.run(task):
         if ev["type"] == "text":

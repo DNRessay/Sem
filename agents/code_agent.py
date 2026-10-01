@@ -58,6 +58,7 @@ class CodeAgent(ToolLoopAgent):
         # MCP tools have unknown side effects, so plan mode never gets them.
         super().__init__(provider, max_steps or settings.CODE_MAX_STEPS,
                          deadline_seconds or settings.AGENT_TIMEOUT_SECONDS, mcp=None if mode == "plan" else mcp)
+        self.tab = "code"
         self.ws = workspace
         self.mode = "plan" if mode == "plan" else "act"
         self.aws = aws or AwsReadTool()

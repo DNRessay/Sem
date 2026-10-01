@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import ModelPicker, { loadModel } from "./ModelPicker";
 import { ToolStep, md } from "./CodePage";
 import { readEvents } from "../utils/sse";
-import TabDrawer, { MenuButton } from "./TabDrawer";
+import TabDrawer, { HandoffCard, MenuButton } from "./TabDrawer";
 import useTabChats from "../hooks/useTabChats";
 
 const API = import.meta.env.VITE_API_URL || "";
@@ -58,7 +58,7 @@ function Connect({ headers, onConnected }) {
 
 // Finance tab: ask about your own money. Answers come from C-Lab over MCP
 // (read-only), with web search for outside context.
-export default function FinancePage({ token, onNavigate, onUnauthorized }) {
+export default function FinancePage({ token, onNavigate, onUnauthorized, handoff, onHandoff }) {
     const [status, setStatus] = useState(null);
     const { chats, chat, updateChat, newChat, selectChat, deleteChat } = useTabChats(STORE_KEY, {
         blank: () => ({ items: [] }),
@@ -69,6 +69,12 @@ export default function FinancePage({ token, onNavigate, onUnauthorized }) {
     const setItems = fn => updateChat(chat.id, x => ({ items: fn(x.items) }));
     const [menuOpen, setMenuOpen] = useState(false);
     const [input, setInput] = useState("");
+    const takenHandoff = useRef(0);
+    useEffect(() => {
+        if (handoff?.view !== "finance" || takenHandoff.current === handoff.at) return;
+        takenHandoff.current = handoff.at;
+        newChat(); setInput(handoff.task);
+    }, [handoff]); // eslint-disable-line react-hooks/exhaustive-deps
     const [busy, setBusy] = useState(false);
     const [model, setModel] = useState(() => loadModel("semblance_finance_model"));
     const abortRef = useRef(null);
@@ -101,6 +107,7 @@ export default function FinancePage({ token, onNavigate, onUnauthorized }) {
                 if (ev.type === "text") add(it => [...it, { kind: "text", text: ev.text }]);
                 else if (ev.type === "tool") add(it => [...it, { kind: "tool", id: ev.id, name: ev.name.replace("mcp__clab__", "c-lab: "), args: ev.args }]);
                 else if (ev.type === "result") add(it => it.map(i => (i.kind === "tool" && i.id === ev.id && i.ok === undefined ? { ...i, ok: ev.ok, output: ev.output } : i)));
+                else if (ev.type === "handoff") add(it => [...it, { kind: "handoff", tab: ev.tab, task: ev.task }]);
                 else if (ev.type === "error") add(it => [...it, { kind: "error", text: ev.text }]);
             });
         } catch (e) {
@@ -142,6 +149,7 @@ export default function FinancePage({ token, onNavigate, onUnauthorized }) {
                             <div style={{ background: "var(--surface-2)", borderRadius: "14px", padding: "8px 12px", fontSize: "14px", maxWidth: "85%", whiteSpace: "pre-wrap" }}>{item.text}</div>
                         </div>
                     );
+                    if (item.kind === "handoff") return <HandoffCard key={i} tab={item.tab} task={item.task} onHandoff={onHandoff} />;
                     if (item.kind === "error") return <div key={i} style={{ color: "var(--danger)", fontSize: "13px", margin: "6px 0" }}>{item.text}</div>;
                     return <div key={i} className="md-content" style={{ fontSize: "14px", color: "var(--text)", margin: "6px 0" }} dangerouslySetInnerHTML={md(item.text)} />;
                 })}

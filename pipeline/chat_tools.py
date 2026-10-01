@@ -3,7 +3,7 @@ requests ("ping google", "what's in the readme", "did I mention ams before")
 instead of telling the user a trigger phrase."""
 import json
 
-from agents.tool_loop import fn_tool
+from agents.tool_loop import HANDOFF_TOOL, fn_tool, handoff_result
 from pipeline.bash_intent import run_bash_intent
 from storage.neon_store import get_store
 from tools.repo_tool import RepoTool
@@ -20,6 +20,7 @@ BASE = [
             "It is not the user's own machine and can't see their files or repos.", {"command": _S}, ["command"]),
     fn_tool("search_memory", "Search every past SEMBLANCE conversation for a word or phrase (names, projects, "
             "anything the user told you before).", {"term": _S}, ["term"]),
+    HANDOFF_TOOL,
 ]
 REPO = [
     fn_tool("repo_list", "List a folder in the repo attached to this chat ('' for the root).", {"path": _S}, []),
@@ -27,7 +28,7 @@ REPO = [
     fn_tool("repo_grep", "Search the repo attached to this chat for a term.", {"term": _S}, ["term"]),
 ]
 KIND = {"web_search": "search", "fetch_url": "fetch", "bash": "bash", "search_memory": "memory",
-        "repo_list": "read", "repo_read": "read", "repo_grep": "read"}
+        "repo_list": "read", "repo_read": "read", "repo_grep": "read", "handoff": "handoff"}
 
 
 async def available(session_id: str) -> tuple[list[dict], dict | None]:
@@ -43,6 +44,10 @@ def label(name: str, args: dict) -> str:
 
 async def run(name: str, args: dict, session_id: str, active: dict | None) -> dict:
     try:
+        if name == "handoff":
+            if args.get("tab") == "chat":
+                return {"ok": False, "error": "you are already in the main chat — answer here"}
+            return handoff_result(args)
         if name == "web_search":
             return await web_search(args.get("query", ""))
         if name == "fetch_url":

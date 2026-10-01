@@ -23,6 +23,7 @@ export function useStream(baseUrl = "", token = "", onUnauthorized) {
         let full = "";
         let toolLocal = null;
         let titleLocal = null;
+        let handoffLocal = null;
 
         try {
             const res = await fetch(`${baseUrl}/chat`, {
@@ -64,6 +65,8 @@ export function useStream(baseUrl = "", token = "", onUnauthorized) {
                         toolLocal = parsed.tool;
                         setTool(parsed.tool);
                         setStatus(null); // the search/fetch is done — the chip replaces the breadcrumb
+                    } else if (parsed.handoff) {
+                        handoffLocal = parsed.handoff;
                     } else if (parsed.title) {
                         titleLocal = parsed.title;
                     } else if (parsed.status) {
@@ -95,7 +98,7 @@ export function useStream(baseUrl = "", token = "", onUnauthorized) {
             setStreaming(false);
         }
 
-        return { reply: full, tool: toolLocal, title: titleLocal };
+        return { reply: full, tool: toolLocal, title: titleLocal, handoff: handoffLocal };
     }, [baseUrl, token, onUnauthorized]);
 
     const abort = useCallback(() => abortRef.current?.abort(), []);
