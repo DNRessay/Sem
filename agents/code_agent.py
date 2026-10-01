@@ -100,6 +100,7 @@ TOOLS = {
         {"service": _S, "operation": _S, "params": {"type": "object"}, "region": _S}, ["service", "operation"],
     ),
 }
+_NOT_REPO_SCOPED = {"aws", "aws_action"}
 _READ_ONLY = ("list_dir", "read_file", "grep", "aws", "list_prs", "pr_status", "list_workflows", "list_ci_runs",
               "ci_logs", "list_secrets")
 _HOST_TOOLS = {"open_pr", "list_prs", "pr_status", "list_workflows", "list_ci_runs", "ci_logs", "list_secrets",
@@ -112,7 +113,8 @@ class CodeAgent(ToolLoopAgent):
 
     def __init__(self, workspace: CodeWorkspace, mode: str = "act", max_steps: int | None = None,
                  deadline_seconds: float | None = None, aws: AwsReadTool | None = None, provider: str = "auto",
-                 mcp=None, pr_token: str | None = None, branch: str = ""):
+                 mcp=None, pr_token: str | None = None, branch: str = "",
+                 others: list[CodeWorkspace] | None = None, tokens: dict | None = None):
         # MCP tools have unknown side effects, so plan mode never gets them.
         super().__init__(provider, max_steps or settings.CODE_MAX_STEPS,
                          deadline_seconds or settings.AGENT_TIMEOUT_SECONDS, mcp=None if mode == "plan" else mcp)
@@ -121,12 +123,26 @@ class CodeAgent(ToolLoopAgent):
         self.mode = mode if mode in ("plan", "auto") else "act"
         self.aws = aws or AwsReadTool()
         self.pending: dict[str, dict] = {}  # approval id -> real action, for /code/execute
-        self.pr_token = pr_token
-        self.branch = branch  # this chat's working branch: every PR/push from it goes here  # the connected GitHub/GitLab token; open_pr is only offered when set
+        # More repos in the same chat: tools take repo="owner/name"; the first one is the default.
+        self.workspaces = {w.repo: w for w in [workspace, *(others or [])]}
+        # Connected GitHub/GitLab token per provider; repo-host tools are only offered when set.
+        self.tokens = {k: v for k, v in (tokens or {workspace.provider: pr_token}).items() if v}
+        self.branch = branch  # this chat's working branch: every PR/push from it goes here
+
+    @property
+    def pr_token(self) -> str | None:
+        return self.tokens.get(self.ws.provider)
 
     def tools(self) -> list[dict]:
         names = _READ_ONLY if self.mode == "plan" else tuple(TOOLS)
-        return [TOOLS[n] for n in names if n not in _HOST_TOOLS or self.pr_token]
+        picked = [TOOLS[n] for n in names if n not in _HOST_TOOLS or self.tokens]
+        if len(self.workspaces) == 1:
+            return picked
+        repo_prop = {"type": "string", "enum": list(self.workspaces),
+                     "description": f"Which repo (default {self.ws.repo})"}
+        return [t if t["function"]["name"] in _NOT_REPO_SCOPED else {**t, "function": {**t["function"], "parameters": {
+            **t["function"]["parameters"], "properties": {**t["function"]["parameters"]["properties"], "repo": repo_prop}}}}
+            for t in picked]
 
     def system_prompt(self) -> str:
         pr_line = ("When the user asks for a PR or commit, call open_pr: it commits everything you changed to a new branch "
@@ -138,10 +154,28 @@ class CodeAgent(ToolLoopAgent):
         if self.branch:
             pr_line += (f" This chat's work branch is {self.branch}: open_pr commits there and reuses its PR, and "
                         "push_branch with no branch pushes there too.")
+        if len(self.workspaces) > 1:
+            pr_line += (" This chat has several repos: " + ", ".join(f"{w.repo} ({w.provider})" for w in self.workspaces.values())
+                        + f". Pass repo=\"owner/name\" to any file, bash, PR or CI tool to work in one other than {self.ws.repo}; "
+                        "each repo gets its own PR on this chat's branch.")
         system = _SYSTEM.format(repo=self.ws.repo, provider=self.ws.provider, pr_line=pr_line)
         return system + {"plan": _PLAN_SUFFIX, "auto": _AUTO_SUFFIX}.get(self.mode, "")
 
+    def _target(self, args: dict) -> CodeWorkspace:
+        return self.workspaces.get((args or {}).get("repo") or "", self.ws)
+
     async def dispatch(self, name: str, args: dict) -> dict:
+        target = self._target(args)
+        args = {k: v for k, v in args.items() if k != "repo"}
+        if target is self.ws:
+            return await self._dispatch(name, args)
+        primary, self.ws = self.ws, target  # tool calls run one at a time, so switching the default is safe
+        try:
+            return await self._dispatch(name, args)
+        finally:
+            self.ws = primary
+
+    async def _dispatch(self, name: str, args: dict) -> dict:
         if self.mode == "plan" and name not in _READ_ONLY:
             return {"ok": False, "error": "plan mode is read-only"}
         if name == "list_dir":
@@ -217,9 +251,12 @@ class CodeAgent(ToolLoopAgent):
 
     def extra_events(self, call_id: str, name: str, args: dict, result: dict) -> list[dict]:
         if name in APPROVAL_ACTIONS and result.get("status") == "waiting for the user's approval":
+            target = self._target(args)
+            args = {k: v for k, v in args.items() if k != "repo"}
             if name == "push_branch" and not args.get("branch") and self.branch:
                 args = {**args, "branch": self.branch}
-            self.pending[call_id] = {"name": name, "args": args}  # the real args stay server-side
+            # The real args stay server-side, with the repo they're for.
+            self.pending[call_id] = {"name": name, "args": args, "provider": target.provider, "repo": target.repo}
             shown = {**args, "value": "••••••"} if name == "set_secret" else args
             return [{"type": "approval", "id": call_id, "name": name, "args": shown, "summary": result["summary"]}]
         return []

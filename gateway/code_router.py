@@ -49,9 +49,14 @@ async def run(request: Request, account: dict = Depends(require_account)):
     if not message:
         raise HTTPException(400, "message required")
     mcp = await MCPToolset.for_account(account["account_id"])
-    token = await connector_token(account["account_id"], ws.provider)
-    agent = CodeAgent(ws, mode=body.get("mode") or "act", provider=body.get("model") or "auto", mcp=mcp, pr_token=token,
-                      branch=_branch(body))
+    others = []
+    for ref in (body.get("extra_repos") or [])[:6]:
+        provider, _, repo = str(ref).partition(":")
+        if valid_target(provider, repo) and repo != ws.repo:
+            others.append(CodeWorkspace(provider, repo))
+    tokens = {p: await connector_token(account["account_id"], p) for p in {ws.provider, *(o.provider for o in others)}}
+    agent = CodeAgent(ws, mode=body.get("mode") or "act", provider=body.get("model") or "auto", mcp=mcp,
+                      branch=_branch(body), others=others, tokens=tokens)
     agent.user_context = await TAUEngine().owner_context()
 
     runlog = RunLog(session_for("code", body), "code")
@@ -65,7 +70,7 @@ async def run(request: Request, account: dict = Depends(require_account)):
                     # Kept server-side (an hour): Approve can only run exactly what was shown, and a secret's
                     # value never goes back to the browser.
                     ddb_backend.set(_APPROVALS, f"{account['account_id']}:{event['id']}",
-                                    json.dumps({**agent.pending[event["id"]], "provider": ws.provider, "repo": ws.repo}),
+                                    json.dumps({"provider": ws.provider, "repo": ws.repo, **agent.pending[event["id"]]}),
                                     ttl=3600)
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as e:  # surface it in the UI instead of a silently dead stream

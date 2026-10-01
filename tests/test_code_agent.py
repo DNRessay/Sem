@@ -166,3 +166,20 @@ async def test_handoff_emits_a_button_event_and_refuses_its_own_tab():
         events = [e async for e in CodeAgent(ws).run("make ads for this")]
     assert {"type": "handoff", "tab": "design", "task": "Make ads for the new pricing page"} in events
     assert (await CodeAgent(ws)._route("handoff", {"tab": "code", "task": "x"}))["ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_one_chat_can_work_across_several_repos():
+    a, b = FakeWorkspace(), FakeWorkspace()
+    a.provider, a.repo = "github", "me/api"
+    b.provider, b.repo = "gitlab", "me/site"
+    agent = CodeAgent(a, others=[b], tokens={"github": "t1", "gitlab": "t2"}, branch="sem/x")
+    read = next(t for t in agent.tools() if t["function"]["name"] == "read_file")
+    assert read["function"]["parameters"]["properties"]["repo"]["enum"] == ["me/api", "me/site"]
+    assert "repo" not in next(t for t in agent.tools() if t["function"]["name"] == "aws")["function"]["parameters"]["properties"]
+    await agent.dispatch("read_file", {"path": "index.html", "repo": "me/site"})
+    assert b.calls and not a.calls and agent.ws is a
+    result = await agent.dispatch("merge_pr", {"number": 2, "repo": "me/site"})
+    agent.extra_events("c1", "merge_pr", {"number": 2, "repo": "me/site"}, result)
+    assert agent.pending["c1"] == {"name": "merge_pr", "args": {"number": 2}, "provider": "gitlab", "repo": "me/site"}
+    assert "me/site" in agent.system_prompt()

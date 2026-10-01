@@ -7,7 +7,7 @@ import { RepoPicker } from "./AttachMenu";
 import { AUTO_COMPACT_AT, ContextRing, compactItems, useContextBudget, ModeMenu, AssistantText, AttachedChips, CLEAR_COMMAND, ChatMenu, ConnectorsSheet, HELP_COMMAND, NEW_COMMAND, PlusMenu, SuggestModel, errorClass, helpText, parseSlash, readTextFiles, withAttachments } from "./MessageKit";
 import { ApprovalCard } from "./CoworkPage";
 import { HeaderStatus, iconBtn } from "./StatusBar";
-import { PlusIcon, SendIcon, StopIcon } from "./Icons";
+import { CloseIcon, CodeIcon, PlusIcon, SendIcon, StopIcon } from "./Icons";
 import AgentFeedPanel from "./AgentFeedPanel";
 import useAgentFeed from "../hooks/useAgentFeed";
 import VoiceInput from "./VoiceInput";
@@ -149,6 +149,31 @@ function Automations({ token, provider, repo, onUnauthorized }) {
 
 // Full-screen Code tab: a coding agent working in a clone of one repo on
 // Modal. Nothing reaches the repo until "Open PR" (or an automation) does.
+// Pick another repo (GitHub or GitLab) to add to this chat.
+function AddRepoSheet({ token, defaultProvider, onPick, onClose }) {
+    const [p, setP] = useState(defaultProvider);
+    const [repos, setRepos] = useState([]);
+    useEffect(() => {
+        fetch(`${API}/connectors/${p}/repos`, { headers: { Authorization: `Bearer ${token}` } })
+            .then(r => (r.ok ? r.json() : { repos: [] })).then(d => setRepos(d.repos || [])).catch(() => setRepos([]));
+    }, [p, token]);
+    return (
+        <>
+            <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.25)", zIndex: 44 }} />
+            <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 45, background: "var(--bg)", borderTop: "1px solid var(--border)", borderRadius: "16px 16px 0 0", padding: "12px 16px 24px", minHeight: "50vh" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px" }}>
+                    <span style={{ fontWeight: 700, flex: 1, color: "var(--text)" }}>Add a repo to this chat</span>
+                    <select value={p} onChange={e => setP(e.target.value)} style={field}>
+                        <option value="github">GitHub</option>
+                        <option value="gitlab">GitLab</option>
+                    </select>
+                </div>
+                <RepoPicker floating repos={repos} value="" placeholder="Search your repositories" onChange={r => onPick(p, r)} />
+            </div>
+        </>
+    );
+}
+
 export default function CodePage({ token, onNavigate, onUnauthorized, handoff, onHandoff }) {
     const { chats, chat, updateChat, newChat: addChat, selectChat, deleteChat } = useTabChats(STORE_KEY, {
         blank: () => ({ provider: "github", repo: "", items: [] }),
@@ -162,6 +187,24 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
     });
     const { provider, repo, items } = chat;
     // One working branch per chat: every run, PR and push from this chat goes to it.
+    const extraRepos = chat.extraRepos || [];
+    const [addingRepo, setAddingRepo] = useState(false);
+    const addRepo = async (p, r) => {
+        setAddingRepo(false);
+        if (!r || (p === provider && r === repo) || extraRepos.some(x => x.provider === p && x.repo === r)) return;
+        setBusy(`Cloning ${r}…`);
+        try {
+            const res = await fetch(`${API}/code/open`, { method: "POST", headers, body: JSON.stringify({ provider: p, repo: r }) });
+            const d = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(d.detail || `Couldn't open ${r} (${res.status})`);
+            updateChat(chat.id, c => ({ extraRepos: [...(c.extraRepos || []), { provider: p, repo: r }] }));
+            setNotice(`Added ${r} to this chat — Sem Code can read, edit and open a PR in it too.`);
+        } catch (e) { setNotice(e.message); }
+        setBusy("");
+    };
+    const removeRepo = (r) => updateChat(chat.id, c => ({ extraRepos: (c.extraRepos || []).filter(x => x.repo !== r) }));
+    const owner = repo.split("/")[0];
+    const repoLine = [repo, ...extraRepos.map(x => (x.repo.split("/")[0] === owner ? x.repo.split("/")[1] : x.repo))].filter(Boolean).join(", ");
     const branch = chat.branch || `sem/${(repo.split("/")[1] || "work").toLowerCase().replace(/[^a-z0-9-]/g, "-")}-${chat.id.slice(-6)}`;
     const [menuOpen, setMenuOpen] = useState(false);
     // The activity icon shows this chat's own log (tools, MCP calls, models, errors).
@@ -298,7 +341,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
         try {
             const res = await fetch(`${API}/code/run`, {
                 method: "POST", headers, signal: abortRef.current.signal,
-                body: JSON.stringify({ provider, repo, branch, chat_id: chatId, message: sent, history: prior, mode: runMode, model: useModel }),
+                body: JSON.stringify({ provider, repo, branch, chat_id: chatId, extra_repos: extraRepos.map(x => `${x.provider}:${x.repo}`), message: sent, history: prior, mode: runMode, model: useModel }),
             });
             if (res.status === 401) { onUnauthorized(); return; }
             if (!res.ok || !res.body) throw new Error(`Request failed: ${res.status}`);
@@ -360,6 +403,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
     const codeActions = [
         { label: "New chat, same repo", onClick: () => newChat(), disabled: !!busy },
         { label: "New chat, another repo", onClick: () => newChat(provider, ""), disabled: !!busy },
+        { label: "Add another repo to this chat", onClick: () => setAddingRepo(true), disabled: !repo || !!busy },
         { label: "Pull latest", onClick: openRepo, disabled: !repo || !!busy },
         { label: "Changes", onClick: showChanges, disabled: !hasRepoWork },
         { label: `Open PR on ${branch}`, onClick: openPr, disabled: !hasRepoWork || opened?.canOpenPr === false || !!busy },
@@ -376,8 +420,10 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
         <div style={{ position: "fixed", inset: 0, background: "var(--bg)", zIndex: 25, display: "flex", flexDirection: "column" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 8px 6px" }}>
                 <MenuButton onClick={() => setMenuOpen(true)} />
-                <span style={{ fontWeight: 700, color: "var(--text)", fontSize: "15px" }}>Sem Code</span>
-                <span style={{ flex: 1 }} />
+                <span style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
+                    <span style={{ fontWeight: 700, color: "var(--text)", fontSize: "15px" }}>Sem Code</span>
+                    {repoLine && <span style={{ fontSize: "11px", color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repoLine}</span>}
+                </span>
                 <HeaderStatus token={token} onFeed={() => { setFeedOpen(true); feed.acknowledgeErrors(); }} hasError={feed.hasError} busy={!!busy} />
                 <button onClick={() => newChat(provider, "")} disabled={!!busy} aria-label="New chat with another repo" title="New chat with another repo" style={iconBtn}>
                     <PlusIcon size={18} />
@@ -396,10 +442,21 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
             </div>
             <AgentFeedPanel open={feedOpen} onClose={() => setFeedOpen(false)} events={feed.events}
                 title={`Activity · ${chat.title || "New chat"}`} />
+            {extraRepos.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", padding: "0 12px 8px", borderBottom: "1px solid var(--border)" }}>
+                    {extraRepos.map(x => (
+                        <span key={x.repo} style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "12px", border: "1px solid var(--border)", borderRadius: "999px", padding: "3px 4px 3px 10px", color: "var(--text-muted)" }}>
+                            {x.repo}
+                            <button onClick={() => removeRepo(x.repo)} aria-label={`Remove ${x.repo}`} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", display: "inline-flex", padding: "2px" }}><CloseIcon size={12} /></button>
+                        </span>
+                    ))}
+                </div>
+            )}
+            {addingRepo && <AddRepoSheet token={token} defaultProvider={provider} onPick={addRepo} onClose={() => setAddingRepo(false)} />}
             <TabDrawer open={menuOpen} onClose={() => setMenuOpen(false)} title="Sem Code" current="code"
                 onNavigate={onNavigate} onNew={() => newChat()} chats={chats} activeId={chat.id} disabled={!!busy}
                 onSelect={id => { selectChat(id); setOpened(null); setNotice(""); }} onDelete={deleteChat}
-                subtitle={c => [c.repo || "no repo", c.branch].filter(Boolean).join(" · ")} />
+                subtitle={c => [[c.repo, ...(c.extraRepos || []).map(x => x.repo.split("/")[1])].filter(Boolean).join(", ") || "no repo", c.branch].filter(Boolean).join(" · ")} />
 
             {repo && showAutomations && <Automations token={token} provider={provider} repo={repo} onUnauthorized={onUnauthorized} />}
             {reposError && <div style={{ padding: "8px 16px", fontSize: "12px", color: "var(--danger)", borderBottom: "1px solid var(--border)" }}>{reposError}</div>}
@@ -453,7 +510,8 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
                     />
                     <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: 0 }}>
                         <PlusMenu commands={COMMANDS} onCommand={c => (c.arg ? setInput(`/${c.name} `) : runCommand(c.name))}
-                            onFiles={addFiles} onConnectors={() => setConnectorsOpen(true)} disabled={!!busy} />
+                            onFiles={addFiles} onConnectors={() => setConnectorsOpen(true)} disabled={!!busy}
+                            extraItems={[{ label: "Add repo", icon: <CodeIcon size={18} />, onClick: () => setAddingRepo(true) }]} />
                         <VoiceInput value={input} onChange={setInput} />
                         <ModeMenu mode={mode} onChange={pickMode} />
                         <ModelPicker token={token} value={model} onChange={setModel} storageKey="semblance_code_model" />

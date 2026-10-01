@@ -327,7 +327,7 @@ export function withAttachments(message, files) {
 }
 
 // The composer's "+": add files, pick a slash command, or open connectors.
-export function PlusMenu({ commands = [], onCommand, onFiles, onConnectors, disabled }) {
+export function PlusMenu({ commands = [], onCommand, onFiles, onConnectors, disabled, extraItems = [] }) {
     const [open, setOpen] = useState(false);
     const [showCommands, setShowCommands] = useState(false);
     const fileRef = useRef(null);
@@ -345,6 +345,9 @@ export function PlusMenu({ commands = [], onCommand, onFiles, onConnectors, disa
                         {!showCommands ? (
                             <>
                                 <button style={row} onClick={() => { setOpen(false); fileRef.current?.click(); }}><PaperclipIcon size={18} /> Add files</button>
+                                {extraItems.map(x => (
+                                    <button key={x.label} style={row} onClick={() => { setOpen(false); x.onClick(); }}>{x.icon} {x.label}</button>
+                                ))}
                                 {commands.length > 0 && <button style={row} onClick={() => setShowCommands(true)}><SlashIcon size={18} /> Slash commands</button>}
                                 {onConnectors && <button style={row} onClick={() => { setOpen(false); onConnectors(); }}><PlugIcon size={18} /> Connectors <span style={{ marginLeft: "auto", color: "var(--text-muted)" }}>›</span></button>}
                             </>
