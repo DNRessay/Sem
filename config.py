@@ -92,6 +92,9 @@ class Settings(BaseSettings):
     AWS_REGION: str = "us-east-1"
 
     # Optional tools
+    # Self-hosted SearXNG (modal_app/searxng.py): open-source metasearch, no
+    # quota. Used first when set; SerpAPI (100 searches/month free) otherwise.
+    SEARXNG_URL: str = ""
     SERP_API_KEY: str = ""
     WHATSAPP_TOKEN: str = ""
     WHATSAPP_PHONE_ID: str = ""

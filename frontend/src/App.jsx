@@ -5,6 +5,7 @@ import Drawer from "./components/Drawer";
 import AgentFeedPanel from "./components/AgentFeedPanel";
 import AllChatsPage from "./components/AllChatsPage";
 import CodePage from "./components/CodePage";
+import CoworkPage from "./components/CoworkPage";
 import Login from "./components/Login";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { turnsToHistory } from "./utils/toolMarker";
@@ -31,7 +32,7 @@ export default function App() {
     const [sessionTitle, setSessionTitle] = useState("");
     const [menuOpen, setMenuOpen] = useState(false);
     const [agentFeedOpen, setAgentFeedOpen] = useState(false);
-    const [view, setView] = useState("chat"); // "chat" | "allChats" | "code"
+    const [view, setView] = useState("chat"); // "chat" | "allChats" | "code" | "cowork"
     const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || "");
     const [restoring, setRestoring] = useState(true);
     const sessionIdRef = useRef(sessionId);
@@ -155,6 +156,7 @@ export default function App() {
                 onLogout={logout}
                 onViewAllChats={() => { setMenuOpen(false); setView("allChats"); }}
                 onOpenCode={() => { setMenuOpen(false); setView("code"); }}
+                onOpenCowork={() => { setMenuOpen(false); setView("cowork"); }}
                 onSessionRenamed={handleSessionRenamed}
                 onSessionDeleted={handleSessionDeleted}
             />
@@ -163,6 +165,11 @@ export default function App() {
                 onClose={() => setAgentFeedOpen(false)}
                 events={agentEvents}
             />
+            {view === "cowork" && (
+                <ErrorBoundary>
+                    <CoworkPage token={token} onBack={() => setView("chat")} onUnauthorized={logout} />
+                </ErrorBoundary>
+            )}
             {view === "code" && (
                 <ErrorBoundary>
                     <CodePage token={token} onBack={() => setView("chat")} onUnauthorized={logout} />

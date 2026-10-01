@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import ModelPicker, { loadModel } from "./ModelPicker";
+import { readEvents } from "../utils/sse";
 
 const API = import.meta.env.VITE_API_URL || "";
 const STORE_KEY = "semblance_code_state";
@@ -15,7 +16,7 @@ const field = {
     color: "var(--text)", fontSize: "13px", minWidth: 0,
 };
 
-function md(text) {
+export function md(text) {
     return { __html: DOMPurify.sanitize(marked.parse(text || "", { breaks: true })) };
 }
 
@@ -31,10 +32,10 @@ function toolSummary(name, args) {
     if (name === "bash") return args.command;
     if (name === "aws") return `${args.service} ${args.operation}`;
     if (name === "grep") return args.pattern;
-    return args.path ?? "";
+    return args.path ?? args.query ?? args.url ?? args.term ?? args.to ?? args.title ?? args.prompt ?? args.summary ?? args.file_id ?? "";
 }
 
-function ToolStep({ item }) {
+export function ToolStep({ item }) {
     const status = item.ok === undefined ? "…" : item.ok ? "✓" : "✗";
     const color = item.ok === false ? "var(--danger)" : item.ok ? "var(--ready)" : "var(--text-muted)";
     return (
@@ -180,27 +181,12 @@ export default function CodePage({ token, onBack, onUnauthorized }) {
             });
             if (res.status === 401) { onUnauthorized(); return; }
             if (!res.ok || !res.body) throw new Error(`Request failed: ${res.status}`);
-            const reader = res.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = "";
-            const handle = (line) => {
-                if (!line.startsWith("data: ") || line === "data: [DONE]") return;
-                let ev;
-                try { ev = JSON.parse(line.slice(6)); } catch { return; }
+            await readEvents(res, (ev) => {
                 if (ev.type === "text") setItems(it => [...it, { kind: "text", text: ev.text, mode: runMode }]);
                 else if (ev.type === "tool") setItems(it => [...it, { kind: "tool", id: ev.id, name: ev.name, args: ev.args }]);
                 else if (ev.type === "result") setItems(it => it.map(i => (i.kind === "tool" && i.id === ev.id && i.ok === undefined ? { ...i, ok: ev.ok, output: ev.output } : i)));
                 else if (ev.type === "error") setItems(it => [...it, { kind: "error", text: ev.text }]);
-            };
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split("\n");
-                buffer = lines.pop() ?? "";
-                lines.forEach(handle);
-            }
-            if (buffer) handle(buffer);
+            });
         } catch (e) {
             if (e.name !== "AbortError") setItems(it => [...it, { kind: "error", text: e.message }]);
         }
