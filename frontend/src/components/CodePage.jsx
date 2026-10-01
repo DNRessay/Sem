@@ -4,7 +4,7 @@ import DOMPurify from "dompurify";
 import ModelPicker, { loadModel } from "./ModelPicker";
 import { readEvents } from "../utils/sse";
 import { RepoPicker } from "./AttachMenu";
-import { errorClass } from "./MessageKit";
+import { AssistantText, AttachedChips, CLEAR_COMMAND, ChatMenu, ConnectorsSheet, HELP_COMMAND, NEW_COMMAND, PlusMenu, SuggestModel, errorClass, helpText, parseSlash, readTextFiles, withAttachments } from "./MessageKit";
 import { ApprovalCard } from "./CoworkPage";
 import TabDrawer, { HandoffCard, MenuButton } from "./TabDrawer";
 import useTabChats from "../hooks/useTabChats";
@@ -161,6 +161,16 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
     const [reposError, setReposError] = useState("");
     const [opened, setOpened] = useState(null);
     const [input, setInput] = useState("");
+    const [files, setFiles] = useState([]);
+    const [connectorsOpen, setConnectorsOpen] = useState(false);
+    const COMMANDS = [
+        { name: "plan", arg: "task", help: "Plan only — explore and propose, change nothing" },
+        { name: "pr", arg: "title", help: "Commit the changes and open a pull/merge request" },
+        { name: "merge", arg: "number", help: "Merge a PR/MR (asks you to approve)" },
+        { name: "ci", help: "Latest CI runs, and why any failed" },
+        { name: "changes", help: "What changed in the workspace" },
+        NEW_COMMAND, CLEAR_COMMAND, HELP_COMMAND,
+    ];
     const takenHandoff = useRef(0);
     useEffect(() => {
         if (handoff?.view !== "code" || takenHandoff.current === handoff.at) return;
@@ -223,12 +233,35 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
         .map(i => ({ role: i.kind === "user" ? "user" : "assistant", content: i.text }))
         .slice(-20);
 
-    const run = async (message, runMode = mode) => {
+    const runCommand = (name, rest = "") => {
+        if (name === "help") return setItems(it => [...it, { kind: "text", text: helpText(COMMANDS) }]);
+        if (name === "new") return newChat();
+        if (name === "clear") return setItems(() => []);
+        if (name === "plan") return rest ? run(rest, "plan") : setMode("plan");
+        if (name === "pr") return run(rest ? `Open a PR titled "${rest}" with the current changes.` : "Open a PR with the current changes.", "act");
+        if (name === "merge") return run(rest ? `Merge PR/MR #${rest.replace("#", "")}.` : "List the open PRs/MRs so I can pick one to merge.", "act");
+        if (name === "ci") return run("Show the latest CI runs; for any failure read its logs and tell me why it failed.", "act");
+        if (name === "changes") return showChanges();
+    };
+    const addFiles = async (list) => {
+        const { added, error } = await readTextFiles(list);
+        setFiles(x => [...x, ...added].slice(0, 8));
+        if (error) setItems(it => [...it, { kind: "error", text: error }]);
+    };
+    const transcript = items.filter(i => i.kind === "user" || i.kind === "text")
+        .map(i => ({ role: i.kind === "user" ? "user" : "assistant", text: i.text }));
+
+    const run = async (message, runMode = mode, useModel = model) => {
         if (!message.trim() || busy || !repo) return;
+        const slash = parseSlash(message, COMMANDS);
+        if (slash) { setInput(""); return runCommand(slash.cmd.name, slash.rest); }
+        const sent = withAttachments(message, files);
+        const attached = files.map(f => f.name);
+        setFiles([]);
         const chatId = chat.id;
         const add = (fn) => updateChat(chatId, c => ({ items: fn(c.items) }));
         const prior = history();
-        add(it => [...it, { kind: "user", text: message, mode: runMode }]);
+        add(it => [...it, { kind: "user", text: attached.length ? `${message}\n📎 ${attached.join(", ")}` : message, mode: runMode }]);
         if (!items.length) updateChat(chatId, () => ({ title: message.slice(0, 60) }));
         setInput("");
         if (!ready && !(await openRepo())) return;
@@ -237,7 +270,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
         try {
             const res = await fetch(`${API}/code/run`, {
                 method: "POST", headers, signal: abortRef.current.signal,
-                body: JSON.stringify({ provider, repo, message, history: prior, mode: runMode, model }),
+                body: JSON.stringify({ provider, repo, message: sent, history: prior, mode: runMode, model: useModel }),
             });
             if (res.status === 401) { onUnauthorized(); return; }
             if (!res.ok || !res.body) throw new Error(`Request failed: ${res.status}`);
@@ -247,7 +280,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
                 else if (ev.type === "result") add(it => it.map(i => (i.kind === "tool" && i.id === ev.id && i.ok === undefined ? { ...i, ok: ev.ok, output: ev.output } : i)));
                 else if (ev.type === "approval") add(it => [...it, { kind: "approval", id: ev.id, name: ev.name, args: ev.args, summary: ev.summary, state: "pending" }]);
                 else if (ev.type === "handoff") add(it => [...it, { kind: "handoff", tab: ev.tab, task: ev.task }]);
-                else if (ev.type === "error") add(it => [...it, { kind: "error", text: ev.text }]);
+                else if (ev.type === "error") add(it => [...it, { kind: "error", text: ev.text, suggest: ev.suggest, retry: message }]);
             });
         } catch (e) {
             if (e.name !== "AbortError") add(it => [...it, { kind: "error", text: e.message }]);
@@ -302,6 +335,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
             <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "12px 16px", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
                 <MenuButton onClick={() => setMenuOpen(true)} />
                 <span style={{ fontWeight: 700, color: "var(--text)" }}>Sem Code</span>
+                <ChatMenu title={chat.title || "Sem Code"} messages={transcript} />
                 <select value={provider} onChange={e => pickRepo(e.target.value, "")} style={field}>
                     <option value="github">GitHub</option>
                     <option value="gitlab">GitLab</option>
@@ -351,8 +385,13 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
                     );
                     if (item.kind === "approval") return <ApprovalCard key={i} item={item} onDecide={decide} />;
                     if (item.kind === "handoff") return <HandoffCard key={i} tab={item.tab} task={item.task} onHandoff={onHandoff} />;
-                    if (item.kind === "error") return <div key={i} className={errorClass(item.text)}>{item.text}</div>;
-                    return <div key={i} className="md-content" style={{ fontSize: "14px", color: "var(--text)", margin: "6px 0" }} dangerouslySetInnerHTML={md(item.text)} />;
+                    if (item.kind === "error") return (
+                        <div key={i}>
+                            <div className={errorClass(item.text)}>{item.text}</div>
+                            <SuggestModel suggest={item.suggest} onSwitch={id => { setModel(id); run(item.retry, mode, id); }} />
+                        </div>
+                    );
+                    return <AssistantText key={i} text={item.text} token={token} />;
                 })}
                 {busy && <div style={{ color: "var(--text-muted)", fontSize: "13px", margin: "8px 0" }}>{busy}</div>}
                 {lastIsPlan && (
@@ -365,6 +404,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
 
             <div style={{ padding: "8px 8px 20px" }}>
                 <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "20px", padding: "10px 14px 8px" }}>
+                    <AttachedChips files={files} setFiles={setFiles} />
                     <textarea
                         value={input} rows={2} disabled={!repo}
                         onChange={e => setInput(e.target.value)}
@@ -373,6 +413,8 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
                         style={{ width: "100%", background: "transparent", border: "none", color: "var(--text)", fontSize: "15px", outline: "none", resize: "none", fontFamily: "inherit" }}
                     />
                     <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <PlusMenu commands={COMMANDS} onCommand={c => (c.arg ? setInput(`/${c.name} `) : runCommand(c.name))}
+                            onFiles={addFiles} onConnectors={() => setConnectorsOpen(true)} disabled={!!busy} />
                         <div style={{ display: "flex", border: "1px solid var(--border)", borderRadius: "999px", overflow: "hidden" }}>
                             {["plan", "act"].map(m => (
                                 <button key={m} onClick={() => setMode(m)} style={{
@@ -394,6 +436,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
                     </div>
                 </div>
             </div>
+            {connectorsOpen && <ConnectorsSheet token={token} onClose={() => setConnectorsOpen(false)} />}
         </div>
     );
 }

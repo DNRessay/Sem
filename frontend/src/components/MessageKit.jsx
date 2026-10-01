@@ -3,6 +3,7 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { copyToClipboard } from "../utils/clipboard";
 import { downloadAllAsZip, downloadText, extractCodeBlocks, filenameFor } from "../utils/codeBlocks";
+import ConnectorsPanel from "./ConnectorsPanel";
 
 const API = import.meta.env.VITE_API_URL || "";
 
@@ -159,6 +160,11 @@ export function CopyButton({ text }) {
 }
 
 
+// Colour coding for problems: limits/overloads amber (wait or switch model), everything else red.
+export function errorClass(text = "") {
+    return /limit|rate|quota|429|credits|overload|high demand|503|time limit|try again/i.test(text) ? "msg-warning" : "msg-error";
+}
+
 const pill = {
     display: "flex", alignItems: "center", gap: "4px", background: "none", border: "1px solid var(--border)",
     borderRadius: "999px", padding: "4px 10px", fontSize: "11px", color: "var(--text-muted)", cursor: "pointer",
@@ -183,7 +189,8 @@ export function AssistantText({ text, token }) {
 export function SuggestModel({ suggest, onSwitch }) {
     if (!suggest) return null;
     return (
-        <button onClick={() => onSwitch(suggest.id)} style={{ ...pill, margin: "6px 0", color: "var(--text)", fontWeight: 600 }}>
+        <button className="btn-primary" onClick={() => onSwitch(suggest.id)}
+            style={{ ...pill, margin: "6px 0", fontWeight: 600, padding: "6px 12px", fontSize: "12px" }}>
             Use {suggest.label} (paid) and retry
         </button>
     );
@@ -207,7 +214,7 @@ function ArtifactsDrawer({ open, onClose, artifacts }) {
             <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.25)", opacity: open ? 1 : 0, pointerEvents: open ? "auto" : "none", transition: "opacity 0.2s", zIndex: 42 }} />
             <div style={{ position: "fixed", top: 0, right: 0, bottom: 0, width: "90%", maxWidth: "420px", background: "var(--bg)", borderLeft: "1px solid var(--border)", transform: open ? "translateX(0)" : "translateX(100%)", transition: "transform 0.2s", zIndex: 43, display: "flex", flexDirection: "column" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
-                    <span style={{ fontWeight: 700, flex: 1 }}>Artifacts ({artifacts.length})</span>
+                    <span style={{ fontWeight: 700, flex: 1, color: "var(--text)" }}>Artifacts ({artifacts.length})</span>
                     {artifacts.length > 0 && <button onClick={() => downloadAllAsZip(artifacts)} style={pill}>Download all (.zip)</button>}
                     <button onClick={onClose} aria-label="Close artifacts" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "18px", color: "var(--text-muted)" }}>✕</button>
                 </div>
@@ -217,9 +224,9 @@ function ArtifactsDrawer({ open, onClose, artifacts }) {
                         const name = filenameFor(a.lang, i);
                         return (
                             <details key={i} style={{ border: "1px solid var(--border)", borderRadius: "10px", margin: "8px 0", background: "var(--surface)" }}>
-                                <summary style={{ cursor: "pointer", padding: "8px 10px", fontSize: "13px", display: "flex", gap: "8px", alignItems: "center" }}>
-                                    <span style={{ flex: 1, fontFamily: "ui-monospace, monospace" }}>{name}</span>
-                                    <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>{a.code.split("\n").length} lines</span>
+                                <summary style={{ cursor: "pointer", padding: "8px 10px", fontSize: "13px", color: "var(--text)" }}>
+                                    <span style={{ fontFamily: "ui-monospace, monospace" }}>{name}</span>
+                                    <span style={{ fontSize: "11px", color: "var(--text-muted)" }}> · {a.code.split("\n").length} lines</span>
                                 </summary>
                                 <div style={{ display: "flex", gap: "6px", padding: "0 10px 6px" }}>
                                     <button onClick={() => copyToClipboard(a.code)} style={pill}>Copy</button>
@@ -261,29 +268,15 @@ export function ChatMenu({ title, messages }) {
 
 const MAX_ATTACH_BYTES = 200 * 1024;
 
-// "+" attach for the tabs: text/code files are read here and sent with the message.
-export function AttachButton({ files, setFiles, disabled }) {
-    const [error, setError] = useState("");
-    const add = async (list) => {
-        setError("");
-        const added = [];
-        for (const f of list) {
-            if (f.size > MAX_ATTACH_BYTES) { setError(`${f.name} is over 200 KB — attach a smaller file or the relevant part`); continue; }
-            const text = await f.text();
-            if (/\u0000/.test(text.slice(0, 2000))) { setError(`${f.name} isn't a text file`); continue; }
-            added.push({ name: f.name, text });
-        }
-        setFiles(x => [...x, ...added].slice(0, 8));
-    };
-    return (
-        <>
-            <label title="Attach files" style={{ width: "30px", height: "30px", borderRadius: "50%", border: "1px solid var(--border)", display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: disabled ? "default" : "pointer", color: "var(--text-muted)", fontSize: "18px", flexShrink: 0, opacity: disabled ? 0.5 : 1 }}>
-                +
-                <input type="file" multiple disabled={disabled} style={{ display: "none" }} onChange={e => { add([...e.target.files]); e.target.value = ""; }} />
-            </label>
-            {error && <span style={{ fontSize: "11px", color: "var(--danger)" }}>{error}</span>}
-        </>
-    );
+export async function readTextFiles(list) {
+    const added = [], errors = [];
+    for (const f of list) {
+        if (f.size > MAX_ATTACH_BYTES) { errors.push(`${f.name} is over 200 KB`); continue; }
+        const text = await f.text();
+        if (text.slice(0, 2000).includes("\u0000")) { errors.push(`${f.name} isn't a text file`); continue; }
+        added.push({ name: f.name, text });
+    }
+    return { added, error: errors.join(" · ") };
 }
 
 export function AttachedChips({ files, setFiles }) {
@@ -305,7 +298,75 @@ export function withAttachments(message, files) {
     return `${message}\n\n` + files.map(f => `Attached file \`${f.name}\`:\n\`\`\`\n${f.text}\n\`\`\``).join("\n\n");
 }
 
-// Colour coding for problems: limits/overloads amber (wait or switch model), everything else red.
-export function errorClass(text = "") {
-    return /limit|rate|quota|429|credits|overload|high demand|503|time limit|try again/i.test(text) ? "msg-warning" : "msg-error";
+// The composer's "+": add files, pick a slash command, or open connectors.
+export function PlusMenu({ commands = [], onCommand, onFiles, onConnectors, disabled }) {
+    const [open, setOpen] = useState(false);
+    const [showCommands, setShowCommands] = useState(false);
+    const fileRef = useRef(null);
+    const row = { display: "flex", alignItems: "center", gap: "10px", width: "100%", textAlign: "left", padding: "12px 16px", background: "none", border: "none", color: "var(--text)", fontSize: "14px", cursor: "pointer" };
+    return (
+        <>
+            <button onClick={() => setOpen(true)} disabled={disabled} aria-label="More" title="Files, commands, connectors"
+                style={{ width: "30px", height: "30px", borderRadius: "50%", border: "1px solid var(--border)", background: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "var(--text-muted)", fontSize: "18px", flexShrink: 0 }}>+</button>
+            <input ref={fileRef} type="file" multiple style={{ display: "none" }} onChange={e => { onFiles([...e.target.files]); e.target.value = ""; }} />
+            {open && (
+                <>
+                    <div onClick={() => { setOpen(false); setShowCommands(false); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.25)", zIndex: 44 }} />
+                    <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 45, background: "var(--bg)", borderTop: "1px solid var(--border)", borderRadius: "16px 16px 0 0", padding: "8px 0 20px", maxHeight: "70vh", overflowY: "auto" }}>
+                        <div style={{ width: "40px", height: "4px", borderRadius: "2px", background: "var(--border)", margin: "0 auto 8px" }} />
+                        {!showCommands ? (
+                            <>
+                                <button style={row} onClick={() => { setOpen(false); fileRef.current?.click(); }}>📎 Add files</button>
+                                {commands.length > 0 && <button style={row} onClick={() => setShowCommands(true)}>⌘ Slash commands</button>}
+                                {onConnectors && <button style={row} onClick={() => { setOpen(false); onConnectors(); }}>🔌 Connectors <span style={{ marginLeft: "auto", color: "var(--text-muted)" }}>›</span></button>}
+                            </>
+                        ) : (
+                            <>
+                                <button style={{ ...row, color: "var(--text-muted)", fontSize: "12px" }} onClick={() => setShowCommands(false)}>‹ Back</button>
+                                {commands.map(c => (
+                                    <button key={c.name} style={{ ...row, flexDirection: "column", alignItems: "flex-start", gap: "2px" }}
+                                        onClick={() => { setOpen(false); setShowCommands(false); onCommand(c); }}>
+                                        <span style={{ fontFamily: "ui-monospace, monospace", color: "var(--gold-text)" }}>/{c.name}{c.arg ? ` <${c.arg}>` : ""}</span>
+                                        <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>{c.help}</span>
+                                    </button>
+                                ))}
+                            </>
+                        )}
+                    </div>
+                </>
+            )}
+        </>
+    );
+}
+
+// "/name rest" → {cmd, rest} when name is one of `commands`, else null.
+export function parseSlash(text, commands) {
+    const m = /^\/(\w+)\s*([\s\S]*)$/.exec(text.trim());
+    if (!m) return null;
+    const cmd = commands.find(c => c.name === m[1].toLowerCase());
+    return cmd ? { cmd, rest: m[2].trim() } : null;
+}
+
+// Connectors (GitHub, GitLab, Google…) as a bottom sheet, for the tabs' + menu.
+export function ConnectorsSheet({ token, onClose }) {
+    return (
+        <>
+            <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.25)", zIndex: 44 }} />
+            <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 45, background: "var(--bg)", borderTop: "1px solid var(--border)", borderRadius: "16px 16px 0 0", padding: "12px 16px 24px", maxHeight: "75vh", overflowY: "auto" }}>
+                <div style={{ display: "flex", alignItems: "center", marginBottom: "8px" }}>
+                    <span style={{ fontWeight: 700, flex: 1, color: "var(--text)" }}>Connectors</span>
+                    <button onClick={onClose} aria-label="Close connectors" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "18px", color: "var(--text-muted)" }}>✕</button>
+                </div>
+                <ConnectorsPanel token={token} />
+            </div>
+        </>
+    );
+}
+
+export const HELP_COMMAND = { name: "help", help: "List the commands" };
+export const NEW_COMMAND = { name: "new", help: "Start a new chat" };
+export const CLEAR_COMMAND = { name: "clear", help: "Clear this chat's messages" };
+
+export function helpText(commands) {
+    return "**Commands**\n\n" + commands.map(c => `- \`/${c.name}${c.arg ? ` <${c.arg}>` : ""}\` — ${c.help}`).join("\n");
 }

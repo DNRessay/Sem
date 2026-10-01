@@ -3,7 +3,7 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { useStream } from "../hooks/useStream";
 import { HandoffCard } from "./TabDrawer";
-import { CopyButton, DownloadAllButton, SpeakButton, errorClass, handleCodeCardClick, renderMarkdown } from "./MessageKit";
+import { ChatMenu, CopyButton, DownloadAllButton, SpeakButton, SuggestModel, errorClass, handleCodeCardClick, renderMarkdown } from "./MessageKit";
 import { useTypewriter } from "../hooks/useTypewriter";
 import VoiceInput from "./VoiceInput";
 import ModelPicker, { loadModel } from "./ModelPicker";
@@ -133,20 +133,21 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
     // (and animating) the same content instead of a hard cut.
     useEffect(() => {
         if (!pendingReply || revealed.length < fullResponse.length) return;
-        setHistory(h => [...h, { role: "assistant", content: pendingReply.reply, tool: pendingReply.tool, handoff: pendingReply.handoff }]);
+        setHistory(h => [...h, { role: "assistant", content: pendingReply.reply, tool: pendingReply.tool, handoff: pendingReply.handoff,
+                                 suggest: pendingReply.suggest, retry: pendingReply.retry }]);
         if (pendingReply.title) onTitle?.(sessionId, pendingReply.title);
         setPendingReply(null);
     }, [pendingReply, revealed, fullResponse, sessionId, onTitle]);
 
-    const submit = async () => {
-        if ((!input.trim() && attachments.length === 0) || streaming) return;
-        const msg = input.trim();
-        const files = attachments;
-        setInput("");
-        setAttachments([]);
+    const submit = async (retry = null, useModel = model) => {
+        if (streaming) return;
+        if (!retry && !input.trim() && attachments.length === 0) return;
+        const msg = retry ?? input.trim();
+        const files = retry ? [] : attachments;
+        if (!retry) { setInput(""); setAttachments([]); }
         setHistory(h => [...h, { role: "user", content: msg, files: files.map(f => ({ name: f.name, source: f.source, mime: f.mime })) }]);
-        const { reply, tool: toolResult, title, handoff } = await send(msg, sessionId, history, files, webSearchEnabled, model, research);
-        if (reply || handoff) setPendingReply({ reply, tool: toolResult, title, handoff });
+        const { reply, tool: toolResult, title, handoff, suggest } = await send(msg, sessionId, history, files, webSearchEnabled, useModel, research);
+        if (reply || handoff) setPendingReply({ reply, tool: toolResult, title, handoff, suggest, retry: suggest ? msg : null });
         else if (title) onTitle?.(sessionId, title);
     };
 
@@ -154,7 +155,12 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
     const removeAttachment = (name) => setAttachments(a => a.filter(f => f.name !== name));
 
     return (
-        <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, height: "100%", background: "var(--bg)", color: "var(--text)" }}>
+        <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, height: "100%", background: "var(--bg)", color: "var(--text)", position: "relative" }}>
+            {history.length > 0 && (
+                <div style={{ position: "absolute", top: "6px", right: "8px", zIndex: 5 }}>
+                    <ChatMenu title="SEMBLANCE chat" messages={history.map(m => ({ role: m.role, text: m.content || "" }))} />
+                </div>
+            )}
             <div style={{ flex: 1, overflowY: "auto", padding: "20px 16px", display: "flex", flexDirection: "column", gap: "18px" }}>
                 {history.map((m, i) => (
                     m.role === "user" ? (
@@ -187,6 +193,9 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                                 dangerouslySetInnerHTML={renderMarkdown(m.content)}
                             />
                             {m.handoff && <HandoffCard tab={m.handoff.tab} task={m.handoff.task} onHandoff={onHandoff} />}
+                            {m.suggest && i === history.length - 1 && (
+                                <SuggestModel suggest={m.suggest} onSwitch={id => { setModel(id); submit(m.retry, id); }} />
+                            )}
                             <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                                 <CopyButton text={m.content} />
                                 <SpeakButton text={m.content} token={token} />
@@ -267,7 +276,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                         <span style={{ flex: 1 }} />
                         <VoiceInput onTranscript={text => setInput(prev => (prev ? `${prev} ${text}` : text))} />
                         <button
-                            onClick={streaming ? abort : submit}
+                            onClick={streaming ? abort : () => submit()}
                             aria-label={streaming ? "Stop" : "Send"} className={streaming ? "" : "btn-gold"}
                             style={{
                                 width: "32px", height: "32px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",

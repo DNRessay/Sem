@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import ModelPicker, { loadModel } from "./ModelPicker";
 import { ToolStep, md } from "./CodePage";
 import { readEvents } from "../utils/sse";
-import { errorClass } from "./MessageKit";
+import { AssistantText, AttachedChips, CLEAR_COMMAND, ChatMenu, ConnectorsSheet, HELP_COMMAND, NEW_COMMAND, PlusMenu, SuggestModel, errorClass, helpText, parseSlash, readTextFiles, withAttachments } from "./MessageKit";
 import TabDrawer, { HandoffCard, MenuButton } from "./TabDrawer";
 import useTabChats from "../hooks/useTabChats";
 
@@ -69,6 +69,13 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized, handoff,
     const setItems = fn => updateChat(chat.id, x => ({ items: fn(x.items) }));
     const [menuOpen, setMenuOpen] = useState(false);
     const [input, setInput] = useState("");
+    const [files, setFiles] = useState([]);
+    const [connectorsOpen, setConnectorsOpen] = useState(false);
+    const COMMANDS = [
+        { name: "research", arg: "question", help: "Research a question on the web with sources" },
+        { name: "remind", arg: "what and when", help: "Set a reminder" },
+        NEW_COMMAND, CLEAR_COMMAND, HELP_COMMAND,
+    ];
     const takenHandoff = useRef(0);
     useEffect(() => {
         if (handoff?.view !== "cowork" || takenHandoff.current === handoff.at) return;
@@ -83,20 +90,40 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized, handoff,
 
     useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [items, busy]);
 
-    const run = async (message) => {
+    const runCommand = (name, rest = "") => {
+        if (name === "help") return setItems(it => [...it, { kind: "text", text: helpText(COMMANDS) }]);
+        if (name === "new") return newChat();
+        if (name === "clear") return setItems(() => []);
+        if (name === "research") return run(`Research this thoroughly on the web, read the best sources and answer with links: ${rest}`);
+        if (name === "remind") return run(`Set a reminder: ${rest}`);
+    };
+    const addFiles = async (list) => {
+        const { added, error } = await readTextFiles(list);
+        setFiles(x => [...x, ...added].slice(0, 8));
+        if (error) setItems(it => [...it, { kind: "error", text: error }]);
+    };
+    const transcript = items.filter(i => i.kind === "user" || i.kind === "text")
+        .map(i => ({ role: i.kind === "user" ? "user" : "assistant", text: i.text }));
+
+    const run = async (message, useModel = model) => {
         if (!message.trim() || busy) return;
+        const slash = parseSlash(message, COMMANDS);
+        if (slash) { setInput(""); return runCommand(slash.cmd.name, slash.rest); }
+        const sent = withAttachments(message, files);
+        const attached = files.map(f => f.name);
+        setFiles([]);
         const chatId = chat.id;
         const add = fn => updateChat(chatId, x => ({ items: fn(x.items) }));
         if (!items.length) updateChat(chatId, () => ({ title: message.slice(0, 60) }));
         const history = items.filter(i => i.kind === "user" || i.kind === "text")
             .map(i => ({ role: i.kind === "user" ? "user" : "assistant", content: i.text })).slice(-20);
-        add(it => [...it, { kind: "user", text: message }]);
+        add(it => [...it, { kind: "user", text: attached.length ? `${message}\n📎 ${attached.join(", ")}` : message }]);
         setInput(""); setBusy(true);
         abortRef.current = new AbortController();
         try {
             const res = await fetch(`${API}/cowork/run`, {
                 method: "POST", headers, signal: abortRef.current.signal,
-                body: JSON.stringify({ message, history, model }),
+                body: JSON.stringify({ message: sent, history, model: useModel }),
             });
             if (res.status === 401) { onUnauthorized(); return; }
             if (!res.ok || !res.body) throw new Error(`Request failed: ${res.status}`);
@@ -107,7 +134,7 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized, handoff,
                 else if (ev.type === "approval") add(it => [...it, { kind: "approval", id: ev.id, name: ev.name, args: ev.args, summary: ev.summary, state: "pending" }]);
                 else if (ev.type === "image") add(it => [...it, { kind: "image", id: ev.id, mime: ev.mime, base64: ev.base64, prompt: ev.prompt }]);
                 else if (ev.type === "handoff") add(it => [...it, { kind: "handoff", tab: ev.tab, task: ev.task }]);
-                else if (ev.type === "error") add(it => [...it, { kind: "error", text: ev.text }]);
+                else if (ev.type === "error") add(it => [...it, { kind: "error", text: ev.text, suggest: ev.suggest, retry: message }]);
             });
         } catch (e) {
             if (e.name !== "AbortError") add(it => [...it, { kind: "error", text: e.message }]);
@@ -134,6 +161,7 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized, handoff,
             <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
                 <MenuButton onClick={() => setMenuOpen(true)} />
                 <span style={{ fontWeight: 700, color: "var(--text)", flex: 1 }}>Sem Co-work</span>
+                <ChatMenu title={chat.title || "Sem Co-work"} messages={transcript} />
             </div>
 
             <TabDrawer open={menuOpen} onClose={() => setMenuOpen(false)} title="Sem Co-work" current="cowork"
@@ -170,8 +198,13 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized, handoff,
                         </div>
                     );
                     if (item.kind === "handoff") return <HandoffCard key={i} tab={item.tab} task={item.task} onHandoff={onHandoff} />;
-                    if (item.kind === "error") return <div key={i} className={errorClass(item.text)}>{item.text}</div>;
-                    return <div key={i} className="md-content" style={{ fontSize: "14px", color: "var(--text)", margin: "6px 0" }} dangerouslySetInnerHTML={md(item.text)} />;
+                    if (item.kind === "error") return (
+                        <div key={i}>
+                            <div className={errorClass(item.text)}>{item.text}</div>
+                            <SuggestModel suggest={item.suggest} onSwitch={id => { setModel(id); run(item.retry, id); }} />
+                        </div>
+                    );
+                    return <AssistantText key={i} text={item.text} token={token} />;
                 })}
                 {busy && <div style={{ color: "var(--text-muted)", fontSize: "13px", margin: "8px 0" }}>Working…</div>}
                 <div ref={endRef} />
@@ -179,6 +212,7 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized, handoff,
 
             <div style={{ padding: "8px 8px 20px" }}>
                 <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "20px", padding: "10px 14px 8px" }}>
+                    <AttachedChips files={files} setFiles={setFiles} />
                     <textarea
                         value={input} rows={2}
                         onChange={e => setInput(e.target.value)}
@@ -187,6 +221,8 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized, handoff,
                         style={{ width: "100%", background: "transparent", border: "none", color: "var(--text)", fontSize: "15px", outline: "none", resize: "none", fontFamily: "inherit" }}
                     />
                     <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <PlusMenu commands={COMMANDS} onCommand={c => (c.arg ? setInput(`/${c.name} `) : runCommand(c.name))}
+                            onFiles={addFiles} onConnectors={() => setConnectorsOpen(true)} disabled={!!busy} />
                         <ModelPicker token={token} value={model} onChange={setModel} storageKey="semblance_cowork_model" />
                         <span style={{ flex: 1 }} />
                         <button
@@ -198,6 +234,7 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized, handoff,
                     </div>
                 </div>
             </div>
+            {connectorsOpen && <ConnectorsSheet token={token} onClose={() => setConnectorsOpen(false)} />}
         </div>
     );
 }
