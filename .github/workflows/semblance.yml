@@ -94,6 +94,9 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          MODAL_VIDEO_URL: ${{ secrets.MODAL_VIDEO_URL }}
+          MODAL_VIDEO_SECRET: ${{ secrets.MODAL_VIDEO_SECRET }}
+          SEARXNG_URL: ${{ secrets.SEARXNG_URL }}
           NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
           MODAL_EMBEDDINGS_URL: ${{ secrets.MODAL_EMBEDDINGS_URL }}
           MODAL_REPO_URL: ${{ secrets.MODAL_REPO_URL }}
@@ -134,6 +137,9 @@ jobs:
           deepseek_api_key=$(printf '%s' "$DEEPSEEK_API_KEY" | tr -d '\r\n')
           kimi_api_key=$(printf '%s' "$KIMI_API_KEY" | tr -d '\r\n')
           hf_token=$(printf '%s' "$HF_TOKEN" | tr -d '\r\n')
+          modal_video_url=$(printf '%s' "$MODAL_VIDEO_URL" | tr -d '\r\n')
+          modal_video_secret=$(printf '%s' "$MODAL_VIDEO_SECRET" | tr -d '\r\n')
+          searxng_url=$(printf '%s' "$SEARXNG_URL" | tr -d '\r\n')
           neon_database_url=$(printf '%s' "$NEON_DATABASE_URL" | tr -d '\r\n')
           modal_embeddings_url=$(printf '%s' "$MODAL_EMBEDDINGS_URL" | tr -d '\r\n')
           modal_repo_url=$(printf '%s' "$MODAL_REPO_URL" | tr -d '\r\n')
@@ -187,6 +193,9 @@ jobs:
           [ -n "$deepseek_api_key" ] && params+=("DeepseekApiKey=${deepseek_api_key}")
           [ -n "$kimi_api_key" ] && params+=("KimiApiKey=${kimi_api_key}")
           [ -n "$hf_token" ] && params+=("HfToken=${hf_token}")
+          [ -n "$modal_video_url" ] && params+=("ModalVideoUrl=${modal_video_url}")
+          [ -n "$modal_video_secret" ] && params+=("ModalVideoSecret=${modal_video_secret}")
+          [ -n "$searxng_url" ] && params+=("SearxngUrl=${searxng_url}")
           [ -n "$modal_embeddings_url" ] && params+=("ModalEmbeddingsUrl=${modal_embeddings_url}")
           [ -n "$modal_repo_url" ] && params+=("ModalRepoUrl=${modal_repo_url}")
           [ -n "$modal_repo_secret" ] && params+=("ModalRepoSecret=${modal_repo_secret}")

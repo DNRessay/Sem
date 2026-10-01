@@ -1,0 +1,235 @@
+import { useEffect, useRef, useState } from "react";
+import ModelPicker, { loadModel } from "./ModelPicker";
+import { readEvents } from "../utils/sse";
+import { copyToClipboard } from "../utils/clipboard";
+
+const API = import.meta.env.VITE_API_URL || "";
+const STORE_KEY = "semblance_design";
+const PLACEMENTS = [
+    ["fb_ig_feed", "FB/IG feed"], ["square", "Square"], ["story_reel", "Story/Reel/TikTok"],
+    ["google_display", "Google Display"], ["whatsapp_status", "WhatsApp Status"],
+];
+
+const btn = {
+    padding: "8px 12px", borderRadius: "10px", border: "1px solid var(--border)", background: "var(--surface)",
+    color: "var(--text)", fontSize: "13px", fontWeight: 600, cursor: "pointer",
+};
+const primary = { ...btn, background: "var(--accent)", color: "var(--accent-contrast)", border: "none" };
+const field = {
+    width: "100%", padding: "9px 11px", borderRadius: "10px", border: "1px solid var(--border)",
+    background: "var(--surface)", color: "var(--text)", fontSize: "14px", fontFamily: "inherit", boxSizing: "border-box",
+};
+const label = { fontSize: "11px", fontWeight: 600, letterSpacing: "1px", color: "var(--text-muted)", margin: "14px 0 6px" };
+
+function loadSaved() {
+    try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch { return {}; }
+}
+
+function AdCard({ ad, onRetry }) {
+    const text = `${ad.headline}\n\n${ad.primary_text}\n\n${(ad.hashtags || []).join(" ")}`;
+    return (
+        <div style={{ border: "1px solid var(--border)", borderRadius: "14px", overflow: "hidden", background: "var(--surface)" }}>
+            <div style={{ background: "var(--surface-2)", minHeight: "120px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                {ad.image ? (
+                    <img src={`data:${ad.image.mime};base64,${ad.image.base64}`} alt={ad.headline} style={{ width: "100%", display: "block" }} />
+                ) : (
+                    <span style={{ fontSize: "12px", color: ad.imageError ? "var(--danger)" : "var(--text-muted)", padding: "16px", textAlign: "center" }}>
+                        {ad.imageError || "Making image…"}
+                    </span>
+                )}
+            </div>
+            <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" }}>
+                <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>{ad.placementLabel} · {ad.angle}</div>
+                <div style={{ fontWeight: 700, fontSize: "15px" }}>{ad.headline}</div>
+                <div style={{ fontSize: "14px", lineHeight: 1.5 }}>{ad.primary_text}</div>
+                <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>{(ad.hashtags || []).join(" ")}</div>
+                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
+                    <span style={{ ...btn, cursor: "default", fontSize: "12px" }}>{ad.cta}</span>
+                    <span style={{ flex: 1 }} />
+                    <button onClick={() => copyToClipboard(text)} style={{ ...btn, fontSize: "12px" }}>Copy text</button>
+                    {ad.image && (
+                        <a href={`data:${ad.image.mime};base64,${ad.image.base64}`} download={`ad-${ad.placement}.png`} style={{ ...btn, fontSize: "12px", textDecoration: "none" }}>Download</a>
+                    )}
+                    <button onClick={onRetry} style={{ ...btn, fontSize: "12px" }}>New image</button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function VideoStudio({ token, seedPrompt }) {
+    const [prompt, setPrompt] = useState("");
+    const [aspect, setAspect] = useState("9:16");
+    const [job, setJob] = useState(null);
+    const [status, setStatus] = useState("");
+    const [video, setVideo] = useState(null);
+    const [budget, setBudget] = useState(null);
+    const timer = useRef(null);
+    const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
+
+    useEffect(() => { if (seedPrompt) setPrompt(seedPrompt); }, [seedPrompt]);
+    useEffect(() => {
+        fetch(`${API}/design/video/budget`, { headers }).then(r => r.json()).then(d => d.ok && setBudget(d)).catch(() => {});
+        return () => clearTimeout(timer.current);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const poll = (id) => {
+        timer.current = setTimeout(async () => {
+            try {
+                const r = await fetch(`${API}/design/video/${id}`, { headers });
+                const d = await r.json();
+                if (d.status === "done") { setVideo(d); setStatus(`Done in ${Math.round((d.gpu_seconds || 0) / 60)} min of GPU time`); setJob(null); return; }
+                if (d.status === "failed" || !r.ok) { setStatus(d.error || d.detail || "Render failed"); setJob(null); return; }
+                setStatus("Rendering… (usually 5-10 minutes; you can leave this page open)");
+                poll(id);
+            } catch { poll(id); }
+        }, 10000);
+    };
+
+    const submit = async () => {
+        setVideo(null); setStatus("Starting…");
+        const r = await fetch(`${API}/design/video`, { method: "POST", headers, body: JSON.stringify({ prompt, aspect_ratio: aspect }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { setStatus(d.detail || `Failed (${r.status})`); return; }
+        setJob(d.job_id); setBudget({ used_usd: d.used_usd, cap_usd: d.cap_usd });
+        setStatus("Queued — warming up the GPU…");
+        poll(d.job_id);
+    };
+
+    return (
+        <div>
+            <div style={label}>VIDEO AD (OPEN-SOURCE WAN 2.1)</div>
+            <textarea value={prompt} onChange={e => setPrompt(e.target.value)} rows={3} style={field}
+                placeholder="Describe a 5-second clip, e.g. Slow close-up of steaming sourdough on a wooden board, warm morning light" />
+            <div style={{ display: "flex", gap: "8px", alignItems: "center", marginTop: "8px", flexWrap: "wrap" }}>
+                <select value={aspect} onChange={e => setAspect(e.target.value)} style={{ ...field, width: "auto" }}>
+                    <option value="9:16">9:16 Reel/Story</option>
+                    <option value="16:9">16:9 YouTube</option>
+                    <option value="1:1">1:1 Feed</option>
+                </select>
+                <button onClick={submit} disabled={!prompt.trim() || !!job} style={primary}>{job ? "Rendering…" : "Render video"}</button>
+                {budget && <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>Budget ${Number(budget.used_usd).toFixed(2)} / ${Number(budget.cap_usd).toFixed(2)} this month</span>}
+            </div>
+            {status && <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "8px" }}>{status}</div>}
+            {video && (
+                <div style={{ marginTop: "10px" }}>
+                    <video src={`data:${video.mime};base64,${video.base64}`} controls style={{ width: "100%", borderRadius: "12px" }} />
+                    <a href={`data:${video.mime};base64,${video.base64}`} download="semblance-video-ad.mp4" style={{ ...btn, display: "inline-block", marginTop: "6px", textDecoration: "none" }}>Download video</a>
+                </div>
+            )}
+        </div>
+    );
+}
+
+// Design tab: digital-marketing assistant. Learns the business from its own
+// website, then writes ad copy and makes matching images per placement
+// (Nano Banana, free tier) and short video ads (Wan 2.1 on Modal, capped).
+export default function DesignPage({ token, onBack, onUnauthorized }) {
+    const saved = loadSaved();
+    const [site, setSite] = useState(saved.site || "");
+    const [brief, setBrief] = useState(saved.brief || "");
+    const [campaign, setCampaign] = useState(saved.campaign || "");
+    const [placements, setPlacements] = useState(saved.placements || ["fb_ig_feed", "story_reel"]);
+    const [count, setCount] = useState(saved.count || 2);
+    const [model, setModel] = useState(() => loadModel("semblance_design_model"));
+    const [ads, setAds] = useState([]);
+    const [busy, setBusy] = useState("");
+    const [notice, setNotice] = useState("");
+    const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
+
+    useEffect(() => {
+        try { localStorage.setItem(STORE_KEY, JSON.stringify({ site, brief, campaign, placements, count })); } catch {}
+    }, [site, brief, campaign, placements, count]);
+
+    const learn = async () => {
+        setBusy("Reading your website…"); setNotice("");
+        try {
+            const r = await fetch(`${API}/design/brief`, { method: "POST", headers, body: JSON.stringify({ url: site, model }) });
+            if (r.status === 401) { onUnauthorized(); return; }
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.detail || `Failed (${r.status})`);
+            setBrief(d.brief);
+            setNotice(`Read ${d.pages_read} page${d.pages_read === 1 ? "" : "s"} from ${d.url}. Edit the brief if anything's off.`);
+        } catch (e) { setNotice(e.message); }
+        setBusy("");
+    };
+
+    const create = async () => {
+        setBusy("Writing ads…"); setNotice(""); setAds([]);
+        try {
+            const r = await fetch(`${API}/design/ads`, { method: "POST", headers, body: JSON.stringify({ brief, campaign, placements, count, model }) });
+            if (r.status === 401) { onUnauthorized(); return; }
+            if (!r.ok || !r.body) throw new Error((await r.json().catch(() => ({}))).detail || `Failed (${r.status})`);
+            await readEvents(r, (ev) => {
+                if (ev.type === "variants") {
+                    setAds(ev.variants.map(v => ({ ...v, placementLabel: (PLACEMENTS.find(p => p[0] === v.placement) || [])[1] })));
+                    setBusy("Making images…");
+                } else if (ev.type === "image") setAds(a => a.map((ad, i) => (i === ev.index ? { ...ad, image: { mime: ev.mime, base64: ev.base64 } } : ad)));
+                else if (ev.type === "image_error") setAds(a => a.map((ad, i) => (i === ev.index ? { ...ad, imageError: ev.error } : ad)));
+                else if (ev.type === "error") setNotice(ev.text);
+            });
+            setAds(a => a.map(ad => (ad.image || ad.imageError ? ad : { ...ad, imageError: "Skipped (image limit reached) — tap New image later" })));
+        } catch (e) { setNotice(e.message); }
+        setBusy("");
+    };
+
+    const retryImage = async (index) => {
+        const ad = ads[index];
+        setAds(a => a.map((x, i) => (i === index ? { ...x, image: null, imageError: "" } : x)));
+        try {
+            const r = await fetch(`${API}/design/image`, { method: "POST", headers, body: JSON.stringify({ prompt: ad.image_prompt, aspect_ratio: ad.aspect_ratio }) });
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.detail || `Failed (${r.status})`);
+            setAds(a => a.map((x, i) => (i === index ? { ...x, image: { mime: d.mime, base64: d.base64 } } : x)));
+        } catch (e) { setAds(a => a.map((x, i) => (i === index ? { ...x, imageError: e.message } : x))); }
+    };
+
+    const toggle = (id) => setPlacements(p => (p.includes(id) ? p.filter(x => x !== id) : [...p, id]));
+
+    return (
+        <div style={{ position: "fixed", inset: 0, background: "var(--bg)", zIndex: 25, display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
+                <button onClick={onBack} aria-label="Back" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "18px", color: "var(--text)" }}>←</button>
+                <span style={{ fontWeight: 700, color: "var(--text)", flex: 1 }}>Design</span>
+                <ModelPicker token={token} value={model} onChange={setModel} storageKey="semblance_design_model" />
+            </div>
+
+            <div style={{ flex: 1, overflowY: "auto", padding: "4px 16px 32px" }}>
+                <div style={label}>YOUR BUSINESS</div>
+                <div style={{ display: "flex", gap: "8px" }}>
+                    <input value={site} onChange={e => setSite(e.target.value)} placeholder="yourwebsite.co.za" style={{ ...field, flex: 1 }} />
+                    <button onClick={learn} disabled={!site.trim() || !!busy} style={btn}>Learn from site</button>
+                </div>
+                <textarea value={brief} onChange={e => setBrief(e.target.value)} rows={brief ? 9 : 3} style={{ ...field, marginTop: "8px" }}
+                    placeholder="Or describe the business: what you sell, who to, where, your tone…" />
+
+                <div style={label}>CAMPAIGN</div>
+                <textarea value={campaign} onChange={e => setCampaign(e.target.value)} rows={2} style={field}
+                    placeholder="e.g. Weekend special: 2 loaves for R80, ends Sunday" />
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "8px" }}>
+                    {PLACEMENTS.map(([id, name]) => (
+                        <button key={id} onClick={() => toggle(id)} aria-pressed={placements.includes(id)}
+                            style={{ ...btn, fontSize: "12px", fontWeight: 500, ...(placements.includes(id) ? { background: "var(--accent)", color: "var(--accent-contrast)" } : {}) }}>
+                            {name}
+                        </button>
+                    ))}
+                </div>
+                <div style={{ display: "flex", gap: "8px", alignItems: "center", marginTop: "10px" }}>
+                    <select value={count} onChange={e => setCount(Number(e.target.value))} style={{ ...field, width: "auto" }}>
+                        {[1, 2, 3].map(n => <option key={n} value={n}>{n} per placement</option>)}
+                    </select>
+                    <button onClick={create} disabled={!brief.trim() || !campaign.trim() || !placements.length || !!busy} style={primary}>Create ads</button>
+                </div>
+                {(busy || notice) && <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "8px" }}>{busy || notice}</div>}
+
+                {ads.length > 0 && (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "12px", marginTop: "14px" }}>
+                        {ads.map((ad, i) => <AdCard key={i} ad={ad} onRetry={() => retryImage(i)} />)}
+                    </div>
+                )}
+
+                <VideoStudio token={token} seedPrompt={ads[0]?.image_prompt || ""} />
+            </div>
+        </div>
+    );
+}

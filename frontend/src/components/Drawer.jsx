@@ -12,7 +12,7 @@ function timeAgo(unixSeconds) {
     return `${Math.floor(diff / 86400)}d ago`;
 }
 
-export default function Drawer({ open, onClose, currentSessionId, onNewChat, onOpenSession, token, onLogout, onViewAllChats, onOpenCode, onOpenCowork, onSessionRenamed, onSessionDeleted }) {
+export default function Drawer({ open, onClose, currentSessionId, onNewChat, onOpenSession, token, onLogout, onViewAllChats, onOpenCode, onOpenCowork, onOpenDesign, onSessionRenamed, onSessionDeleted }) {
     const [sessions, setSessions] = useState([]);
     const [loading, setLoading] = useState(false);
 
@@ -94,6 +94,12 @@ export default function Drawer({ open, onClose, currentSessionId, onNewChat, onO
                         style={{ width: "100%", textAlign: "left", padding: "10px 14px", marginTop: "8px", borderRadius: "10px", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: "14px", fontWeight: "600", cursor: "pointer" }}
                     >
                         ✦ Co-work
+                    </button>
+                    <button
+                        onClick={onOpenDesign}
+                        style={{ width: "100%", textAlign: "left", padding: "10px 14px", marginTop: "8px", borderRadius: "10px", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: "14px", fontWeight: "600", cursor: "pointer" }}
+                    >
+                        ◐ Design &amp; ads
                     </button>
                 </div>
 

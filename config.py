@@ -87,6 +87,11 @@ class Settings(BaseSettings):
     MODAL_REPO_URL: str = ""
     MODAL_REPO_SECRET: str = ""
 
+    # Video ads (modal_app/video.py): Wan 2.1 on Modal with its own monthly
+    # spend cap, set in the Modal secret (VIDEO_MONTHLY_CAP_USD).
+    MODAL_VIDEO_URL: str = ""
+    MODAL_VIDEO_SECRET: str = ""
+
     # Cache — DynamoDB-backed, in-memory L1 on top for warm Lambda invocations.
     CACHE_TABLE_NAME: str = "semblance-cache"
     AWS_REGION: str = "us-east-1"

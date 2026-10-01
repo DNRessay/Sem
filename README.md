@@ -244,6 +244,9 @@ DREAM consolidates memories on a 3-gate trigger (24hr + 5 sessions + lock), scor
 | LLM Backend | Groq (Qwen3.8-27B) | Free |
 | Planning LLM | Groq (GPT-OSS-120B) | Free |
 | Backup LLM (optional) | Modal (Ternary Bonsai 2 27B, scales to zero) | $30/mo Modal credit |
+| Model picker | Free: Bonsai, Gemini, Groq · Paid: Claude, GPT, Qwen, DeepSeek, Kimi, Hugging Face | Free by default |
+| Images / voice | Gemini (Nano Banana, TTS) | Free tier |
+| Video ads (optional) | Modal (Wan 2.1, monthly cap) | Capped spend |
 | Persistent Storage + Vector Store | Neon Postgres + pgvector | Free |
 | Cache | DynamoDB (pay-per-request, TTL) | ~$0 |
 | Embeddings | Modal (sentence-transformers) | Free ($30/mo credit) |

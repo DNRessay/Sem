@@ -73,6 +73,19 @@ Parameters:
     NoEcho: true
     Default: ""
     Description: Optional - Hugging Face token: any model on HF's Inference Providers router
+  ModalVideoUrl:
+    Type: String
+    Default: ""
+    Description: Optional - URL of modal_app/video.py (Design tab video ads)
+  ModalVideoSecret:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Must match VIDEO_SECRET in the semblance-video-secret Modal secret
+  SearxngUrl:
+    Type: String
+    Default: ""
+    Description: Optional - a SearXNG server for keyless web search
   NeonDatabaseUrl:
     Type: String
     NoEcho: true
@@ -183,6 +196,9 @@ Globals:
         DEEPSEEK_API_KEY: !Ref DeepseekApiKey
         KIMI_API_KEY: !Ref KimiApiKey
         HF_TOKEN: !Ref HfToken
+        MODAL_VIDEO_URL: !Ref ModalVideoUrl
+        MODAL_VIDEO_SECRET: !Ref ModalVideoSecret
+        SEARXNG_URL: !Ref SearxngUrl
         NEON_DATABASE_URL: !Ref NeonDatabaseUrl
         MODAL_EMBEDDINGS_URL: !Ref ModalEmbeddingsUrl
         MODAL_REPO_URL: !Ref ModalRepoUrl

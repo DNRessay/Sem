@@ -131,6 +131,35 @@ The agent's read-only `aws` tool uses the chat Lambda's own role: attach
 AWS's `ViewOnlyAccess` managed policy to that role if you want it to see more
 than Sem's own resources.
 
+### 2e. Video ads (optional, costs GPU time)
+
+The Design tab's video ads run Wan 2.1 (open source) on an L4 GPU, with a
+hard monthly cap enforced on the Modal side:
+
+```bash
+modal secret create semblance-video-secret VIDEO_SECRET=<invent-any-random-string> VIDEO_MONTHLY_CAP_USD=10
+modal deploy modal_app/video.py    # first deploy downloads ~15 GB of model weights
+```
+
+Set `MODAL_VIDEO_URL` and `MODAL_VIDEO_SECRET` (GitHub secrets of the same names).
+
+### 2f. Model and media keys (all optional)
+
+Add any of these as GitHub secrets; each provider appears in the model
+picker once its key is set. "Auto" uses only the free ones.
+
+| Secret | Gives you |
+|---|---|
+| `GEMINI_API_KEY` | Gemini free tier in the picker, Nano Banana images (Design/Co-work), read-aloud voice |
+| `ANTHROPIC_API_KEY` | Claude (paid) |
+| `OPENAI_API_KEY` | GPT (paid) |
+| `QWEN_API_KEY` | Qwen via Alibaba Cloud Model Studio (paid) |
+| `DEEPSEEK_API_KEY` / `KIMI_API_KEY` | DeepSeek / Kimi (paid) |
+| `HF_TOKEN` | Any chat model on Hugging Face's router, picked by repo id |
+
+Web search needs no key: it tries `SEARXNG_URL` (any SearXNG server you
+run), then SerpAPI, then the open-source `ddgs` package.
+
 ### 3. First deploy (local, guided)
 
 ```bash
