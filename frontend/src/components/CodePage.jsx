@@ -36,15 +36,39 @@ function toolSummary(name, args) {
     return args.path ?? args.query ?? args.url ?? args.term ?? args.to ?? args.title ?? args.prompt ?? args.summary ?? args.file_id ?? "";
 }
 
+// File edits show as a diff (red removed, green added) with +N −M, built from the tool's own arguments.
+function editDiff(item) {
+    const a = item.args || {};
+    if (item.name === "edit_file" && typeof a.old === "string" && typeof a.new === "string") {
+        const removed = a.old.split("\n"), added = a.new.split("\n");
+        return { lines: [...removed.map(t => ["-", t]), ...added.map(t => ["+", t])], plus: added.length, minus: removed.length };
+    }
+    if (item.name === "write_file" && typeof a.content === "string") {
+        const added = a.content.split("\n");
+        return { lines: added.map(t => ["+", t]), plus: added.length, minus: 0 };
+    }
+    return null;
+}
+
 export function ToolStep({ item }) {
     const status = item.ok === undefined ? "…" : item.ok ? "✓" : "✗";
     const color = item.ok === false ? "var(--danger)" : item.ok ? "var(--ready)" : "var(--text-muted)";
+    const diff = editDiff(item);
     return (
         <details style={{ margin: "4px 0", fontSize: "12px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "8px", padding: "6px 10px" }}>
             <summary style={{ cursor: "pointer", fontFamily: "ui-monospace, monospace", color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 <span style={{ color }}>{status}</span> {item.name} <span style={{ color: "var(--text-muted)" }}>{toolSummary(item.name, item.args)}</span>
+                {diff && <> <span style={{ color: "var(--ready)" }}>+{diff.plus}</span> <span style={{ color: "var(--danger)" }}>−{diff.minus}</span></>}
             </summary>
-            {item.output && (
+            {diff && (
+                <pre style={{ margin: "6px 0 0", maxHeight: "320px", overflow: "auto", fontSize: "11px", lineHeight: 1.45 }}>
+                    {diff.lines.slice(0, 400).map(([sign, text], i) => (
+                        <div key={i} style={{ whiteSpace: "pre", background: sign === "+" ? "var(--ready-bg)" : "var(--danger-bg)", color: sign === "+" ? "var(--ready)" : "var(--danger)" }}>{sign} {text}</div>
+                    ))}
+                    {diff.lines.length > 400 && <div style={{ color: "var(--text-muted)" }}>… {diff.lines.length - 400} more lines</div>}
+                </pre>
+            )}
+            {item.output && !(diff && item.ok) && (
                 <pre style={{ margin: "6px 0 0", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: "260px", overflow: "auto", color: "var(--text-muted)" }}>{item.output}</pre>
             )}
         </details>
@@ -250,7 +274,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
         try {
             const d = await post("/code/changes", {});
             setNotice(d.files.length || d.deleted.length
-                ? `Changed: ${d.files.join(", ")}${d.deleted.length ? ` · deleted: ${d.deleted.join(", ")}` : ""}`
+                ? `Changed: ${d.files.join(", ")}${d.deleted.length ? ` · deleted: ${d.deleted.join(", ")}` : ""}${d.stat ? `\n${d.stat.trim().split("\n").slice(-1)[0]}` : ""}`
                 : "No changes yet.");
         } catch (e) { setNotice(e.message); }
     };
@@ -307,7 +331,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
             )}
             {repo && showAutomations && <Automations token={token} provider={provider} repo={repo} onUnauthorized={onUnauthorized} />}
             {reposError && <div style={{ padding: "8px 16px", fontSize: "12px", color: "var(--danger)", borderBottom: "1px solid var(--border)" }}>{reposError}</div>}
-            {notice && <div style={{ padding: "8px 16px", fontSize: "12px", color: "var(--text-muted)", borderBottom: "1px solid var(--border)" }}>{notice}</div>}
+            {notice && <div style={{ padding: "8px 16px", fontSize: "12px", color: "var(--text-muted)", borderBottom: "1px solid var(--border)", whiteSpace: "pre-wrap" }}>{notice}</div>}
 
             <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px" }}>
                 {!items.length && (
