@@ -12,7 +12,7 @@ function timeAgo(unixSeconds) {
     return `${Math.floor(diff / 86400)}d ago`;
 }
 
-export default function Drawer({ open, onClose, currentSessionId, onNewChat, onOpenSession, token, onLogout, onViewAllChats, onOpenCode, onOpenCowork, onOpenDesign, onSessionRenamed, onSessionDeleted }) {
+export default function Drawer({ open, onClose, currentSessionId, onNewChat, onOpenSession, token, onLogout, onViewAllChats, onOpenCode, onOpenCowork, onOpenDesign, onOpenSettings, onSessionRenamed, onSessionDeleted }) {
     const [sessions, setSessions] = useState([]);
     const [loading, setLoading] = useState(false);
 
@@ -139,6 +139,12 @@ export default function Drawer({ open, onClose, currentSessionId, onNewChat, onO
                     )}
                 </div>
 
+                <button
+                    onClick={onOpenSettings}
+                    style={{ borderTop: "1px solid var(--border)", padding: "12px 16px", display: "flex", alignItems: "center", gap: "10px", background: "none", border: "none", borderTopWidth: "1px", borderTopStyle: "solid", borderTopColor: "var(--border)", width: "100%", cursor: "pointer", textAlign: "left", fontSize: "13px", color: "var(--text)" }}
+                >
+                    ⚙ Settings &amp; MCP
+                </button>
                 <button
                     onClick={onLogout}
                     style={{ borderTop: "1px solid var(--border)", padding: "12px 16px", display: "flex", alignItems: "center", gap: "10px", background: "none", border: "none", borderTopWidth: "1px", borderTopStyle: "solid", borderTopColor: "var(--border)", width: "100%", cursor: "pointer", textAlign: "left" }}

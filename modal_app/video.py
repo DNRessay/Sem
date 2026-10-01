@@ -24,9 +24,11 @@ from fastapi import Request
 
 app = modal.App("semblance-video")
 
-MODEL_ID = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-GPU = "L4"
-GPU_USD_PER_HOUR = 0.80  # Modal's L4 rate, rounded up — keeps the cap conservative
+# Deploy-time overrides, e.g. `SEMBLANCE_VIDEO_GPU=A10G SEMBLANCE_VIDEO_GPU_RATE=1.10 modal deploy modal_app/video.py`.
+MODEL_ID = os.environ.get("SEMBLANCE_VIDEO_MODEL", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
+GPU = os.environ.get("SEMBLANCE_VIDEO_GPU", "L4")
+# USD per GPU-hour used for the spend cap — Modal's L4 rate rounded up, so the cap stays conservative.
+GPU_USD_PER_HOUR = float(os.environ.get("SEMBLANCE_VIDEO_GPU_RATE", "0.80"))
 SIZES = {"9:16": (480, 832), "16:9": (832, 480), "1:1": (624, 624)}
 FPS = 16
 _NEGATIVE = "blurry, low quality, distorted, deformed, watermark, text artifacts, static, worst quality"

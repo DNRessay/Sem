@@ -48,11 +48,13 @@ _HF_REPO = "prism-ml/Ternary-Bonsai-2-27B-gguf"
 _MODEL_DIR = "/models"
 _PORT = 8000
 
+# Deploy-time overrides, e.g. `SEMBLANCE_LLM_GPU=A10G modal deploy modal_app/llm.py`.
+GPU = os.environ.get("SEMBLANCE_LLM_GPU", "L4")
 MODEL_ALIAS = "bonsai-2-27b"
-SCALEDOWN_SECONDS = 300
+SCALEDOWN_SECONDS = int(os.environ.get("SEMBLANCE_LLM_SCALEDOWN", "300"))
 # Two 32K slots — the configuration a 24 GB RTX 3090 Ti community benchmark
 # ran Bonsai 2 27B with, so Sem and a coding session don't queue on each other.
-CTX_SIZE = 65536
+CTX_SIZE = int(os.environ.get("SEMBLANCE_LLM_CTX", "65536"))
 PARALLEL = 2
 
 
@@ -90,7 +92,7 @@ def _find(suffix: str) -> str:
 
 @app.function(
     image=image,
-    gpu="L4",
+    gpu=GPU,
     scaledown_window=SCALEDOWN_SECONDS,
     max_containers=1,
     timeout=3600,

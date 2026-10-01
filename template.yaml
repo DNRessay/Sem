@@ -86,6 +86,14 @@ Parameters:
     Type: String
     Default: ""
     Description: Optional - a SearXNG server for keyless web search
+  OwnerWhatsappNumber:
+    Type: String
+    Default: ""
+    Description: Optional - your WhatsApp number (international, no +) for reminders and the morning brief
+  KairosBriefHour:
+    Type: String
+    Default: "7"
+    Description: Hour (South Africa time, 0-23) for the daily morning brief
   NeonDatabaseUrl:
     Type: String
     NoEcho: true
@@ -199,6 +207,8 @@ Globals:
         MODAL_VIDEO_URL: !Ref ModalVideoUrl
         MODAL_VIDEO_SECRET: !Ref ModalVideoSecret
         SEARXNG_URL: !Ref SearxngUrl
+        OWNER_WHATSAPP_NUMBER: !Ref OwnerWhatsappNumber
+        KAIROS_BRIEF_HOUR: !Ref KairosBriefHour
         NEON_DATABASE_URL: !Ref NeonDatabaseUrl
         MODAL_EMBEDDINGS_URL: !Ref ModalEmbeddingsUrl
         MODAL_REPO_URL: !Ref ModalRepoUrl

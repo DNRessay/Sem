@@ -147,3 +147,13 @@ async def test_cowork_uses_mcp_tools(store, monkeypatch, require_approval):
     else:
         assert "tools/call" in called
         assert any(e["type"] == "image" for e in events)  # the fake server returns an image part
+
+
+def test_settings_status_reports_features_without_secret_values(client, monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "super-secret-value")
+    r = client.get("/settings/status").json()
+    gemini = next(f for f in r["features"] if f["name"] == "Gemini (free tier)")
+    assert gemini["on"] is True and gemini["enable"] == "GEMINI_API_KEY"
+    assert "super-secret-value" not in str(r)
+    assert r["limits"]["code_max_steps"] == settings.CODE_MAX_STEPS

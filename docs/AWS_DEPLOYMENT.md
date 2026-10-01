@@ -160,6 +160,29 @@ picker once its key is set. "Auto" uses only the free ones.
 Web search needs no key: it tries `SEARXNG_URL` (any SearXNG server you
 run), then SerpAPI, then the open-source `ddgs` package.
 
+### 2g. MCP (optional)
+
+- **Use Sem from other apps:** Settings → "Create MCP key" shows a ready-to-paste
+  `claude mcp add ...` command and a JSON config for other MCP clients. Sem's
+  endpoint is `<PUBLIC_API_URL>/mcp`.
+- **Give Sem other MCP servers:** Settings → "MCP servers Sem can use". Their
+  tools appear in Co-work and Code; tick "ask me first" to get approval cards.
+  `MCP_SERVERS` (JSON, `{"name": {"url": ..., "auth": ...}}`) still works for
+  servers every account should share.
+
+### 2h. Background jobs
+
+One EventBridge schedule (every 15 minutes, free) runs KAIROS (due
+reminders + the morning brief at `KAIROS_BRIEF_HOUR`), DREAM, and one due
+Code automation per tick. Briefs and reminders always appear in the app as
+chats; set `OWNER_WHATSAPP_NUMBER` to also get them on WhatsApp. Nothing is
+scheduled on GitHub Actions — its terms limit Actions to building, testing
+and deploying the repo.
+
+Modal GPU/model choices are deploy-time env vars: `SEMBLANCE_LLM_GPU`,
+`SEMBLANCE_LLM_CTX`, `SEMBLANCE_VIDEO_GPU`, `SEMBLANCE_VIDEO_MODEL`,
+`SEMBLANCE_VIDEO_GPU_RATE`.
+
 ### 3. First deploy (local, guided)
 
 ```bash

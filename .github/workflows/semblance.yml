@@ -97,6 +97,8 @@ jobs:
           MODAL_VIDEO_URL: ${{ secrets.MODAL_VIDEO_URL }}
           MODAL_VIDEO_SECRET: ${{ secrets.MODAL_VIDEO_SECRET }}
           SEARXNG_URL: ${{ secrets.SEARXNG_URL }}
+          OWNER_WHATSAPP_NUMBER: ${{ secrets.OWNER_WHATSAPP_NUMBER }}
+          KAIROS_BRIEF_HOUR: ${{ secrets.KAIROS_BRIEF_HOUR }}
           NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
           MODAL_EMBEDDINGS_URL: ${{ secrets.MODAL_EMBEDDINGS_URL }}
           MODAL_REPO_URL: ${{ secrets.MODAL_REPO_URL }}
@@ -140,6 +142,8 @@ jobs:
           modal_video_url=$(printf '%s' "$MODAL_VIDEO_URL" | tr -d '\r\n')
           modal_video_secret=$(printf '%s' "$MODAL_VIDEO_SECRET" | tr -d '\r\n')
           searxng_url=$(printf '%s' "$SEARXNG_URL" | tr -d '\r\n')
+          owner_whatsapp_number=$(printf '%s' "$OWNER_WHATSAPP_NUMBER" | tr -d '\r\n')
+          kairos_brief_hour=$(printf '%s' "$KAIROS_BRIEF_HOUR" | tr -d '\r\n')
           neon_database_url=$(printf '%s' "$NEON_DATABASE_URL" | tr -d '\r\n')
           modal_embeddings_url=$(printf '%s' "$MODAL_EMBEDDINGS_URL" | tr -d '\r\n')
           modal_repo_url=$(printf '%s' "$MODAL_REPO_URL" | tr -d '\r\n')
@@ -196,6 +200,8 @@ jobs:
           [ -n "$modal_video_url" ] && params+=("ModalVideoUrl=${modal_video_url}")
           [ -n "$modal_video_secret" ] && params+=("ModalVideoSecret=${modal_video_secret}")
           [ -n "$searxng_url" ] && params+=("SearxngUrl=${searxng_url}")
+          [ -n "$owner_whatsapp_number" ] && params+=("OwnerWhatsappNumber=${owner_whatsapp_number}")
+          [ -n "$kairos_brief_hour" ] && params+=("KairosBriefHour=${kairos_brief_hour}")
           [ -n "$modal_embeddings_url" ] && params+=("ModalEmbeddingsUrl=${modal_embeddings_url}")
           [ -n "$modal_repo_url" ] && params+=("ModalRepoUrl=${modal_repo_url}")
           [ -n "$modal_repo_secret" ] && params+=("ModalRepoSecret=${modal_repo_secret}")
