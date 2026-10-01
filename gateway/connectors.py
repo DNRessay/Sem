@@ -42,6 +42,18 @@ _OAUTH = {
 }
 
 
+def _upstream_error(provider: str, e: httpx.HTTPStatusError) -> HTTPException:
+    """GitHub/GitLab's own 401 must not reach the app as a 401: the frontend
+    reads that as SEMBLANCE's login expiring and signs the user out."""
+    code, name = e.response.status_code, {"github": "GitHub", "gitlab": "GitLab"}[provider]
+    if code == 401 or (code == 403 and "credential" in e.response.text.lower()):
+        return HTTPException(400, f"{name} rejected the saved token (expired or revoked). Reconnect {name} in Connectors.")
+    if code == 404:
+        return HTTPException(404, f"{name} says not found — the repo, branch or file is gone, "
+                                  "or the token can't see it.")
+    return HTTPException(502 if code >= 500 else code, f"{provider} error: {e.response.text[:300]}")
+
+
 @router.get("/connectors")
 async def list_connectors(account: dict = Depends(require_account)):
     db = await get_store()
@@ -216,7 +228,7 @@ async def list_repos(provider: str, account: dict = Depends(require_account)):
             token = await _ensure_fresh_gitlab_token(account["account_id"], connector, db)
             repos = await _list_gitlab_repos(token)
     except httpx.HTTPStatusError as e:
-        raise HTTPException(e.response.status_code, f"{provider} error: {e.response.text[:300]}")
+        raise _upstream_error(provider, e)
 
     return {"provider": provider, "repos": repos}
 
@@ -278,7 +290,7 @@ async def list_branches(provider: str, repo: str, account: dict = Depends(requir
             token = await _ensure_fresh_gitlab_token(account["account_id"], connector, db)
             branches = await _list_gitlab_branches(repo, token)
     except httpx.HTTPStatusError as e:
-        raise HTTPException(e.response.status_code, f"{provider} error: {e.response.text[:300]}")
+        raise _upstream_error(provider, e)
 
     return {"provider": provider, "repo": repo, "branches": branches}
 
@@ -332,7 +344,7 @@ async def list_tree(provider: str, repo: str, path: str = "", ref: str = "", acc
             token = await _ensure_fresh_gitlab_token(account["account_id"], connector, db)
             entries = await _list_gitlab_tree(repo, path, ref, token)
     except httpx.HTTPStatusError as e:
-        raise HTTPException(e.response.status_code, f"{provider} error: {e.response.text[:300]}")
+        raise _upstream_error(provider, e)
 
     return {"provider": provider, "repo": repo, "path": path, "entries": entries}
 
@@ -401,7 +413,7 @@ async def fetch_file(provider: str, request: Request, account: dict = Depends(re
             token = await _ensure_fresh_gitlab_token(account["account_id"], connector, db)
             content = await _fetch_gitlab(repo, path, ref, token)
     except httpx.HTTPStatusError as e:
-        raise HTTPException(e.response.status_code, f"{provider} error: {e.response.text[:300]}")
+        raise _upstream_error(provider, e)
 
     truncated = len(content) > _MAX_FETCH_CHARS
     if truncated:
@@ -509,7 +521,7 @@ async def fetch_repo(provider: str, request: Request, account: dict = Depends(re
             resolved_token = await _ensure_fresh_gitlab_token(account["account_id"], connector, db)
             content, truncated, file_count = await _fetch_gitlab_repo(repo, ref, resolved_token)
     except httpx.HTTPStatusError as e:
-        raise HTTPException(e.response.status_code, f"{provider} error: {e.response.text[:300]}")
+        raise _upstream_error(provider, e)
 
     # Also clones (or pulls, if already cloned) this repo onto a persistent
     # Modal-hosted volume, and remembers it as this session's active repo —

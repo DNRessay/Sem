@@ -142,32 +142,33 @@ function FileIcon() {
     );
 }
 
-function RepoPicker({ repos, value, onChange }) {
+export function RepoPicker({ repos, value, onChange, floating = false, placeholder = "Select a repository" }) {
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState("");
     const filtered = query.trim()
         ? repos.filter(r => r.full_name.toLowerCase().includes(query.trim().toLowerCase()))
         : repos;
 
-    if (!open) {
-        return (
-            <button
-                onClick={() => setOpen(true)}
-                style={{
-                    ...inputStyle, display: "flex", alignItems: "center", justifyContent: "space-between",
-                    cursor: "pointer", textAlign: "left",
-                }}
-            >
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {value || "Select a repository"}
-                </span>
-                <span style={{ fontSize: "10px", color: "var(--text-muted)", flexShrink: 0, marginLeft: "6px" }}>▾</span>
-            </button>
-        );
-    }
+    const toggle = (
+        <button
+            onClick={() => setOpen(true)}
+            style={{
+                ...inputStyle, display: "flex", alignItems: "center", justifyContent: "space-between",
+                cursor: "pointer", textAlign: "left",
+            }}
+        >
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {value || placeholder}
+            </span>
+            <span style={{ fontSize: "10px", color: "var(--text-muted)", flexShrink: 0, marginLeft: "6px" }}>▾</span>
+        </button>
+    );
+    if (!open && !floating) return toggle;
 
-    return (
-        <div style={{ border: "1px solid var(--border)", borderRadius: "8px", overflow: "hidden" }}>
+    const panel = (
+        <div style={floating
+            ? { position: "absolute", top: 0, left: 0, right: 0, zIndex: 40, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "8px", overflow: "hidden", boxShadow: "0 8px 24px rgba(0,0,0,0.18)" }
+            : { border: "1px solid var(--border)", borderRadius: "8px", overflow: "hidden" }}>
             <input
                 autoFocus
                 value={query}
@@ -194,9 +195,20 @@ function RepoPicker({ repos, value, onChange }) {
                         {r.full_name}{r.private ? " (private)" : ""}
                     </button>
                 ))}
+                {floating && /^[\w.-]+\/[\w./-]+$/.test(query.trim()) && !repos.some(r => r.full_name === query.trim()) && (
+                    <button
+                        onMouseDown={e => e.preventDefault()}
+                        onClick={() => { onChange(query.trim()); setOpen(false); setQuery(""); }}
+                        style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 10px", background: "none", border: "none", color: "var(--text)", fontSize: "13px", cursor: "pointer" }}
+                    >
+                        Use {query.trim()}
+                    </button>
+                )}
             </div>
         </div>
     );
+    if (!floating) return panel;
+    return <div style={{ position: "relative" }}>{toggle}{open && panel}</div>;
 }
 
 function RepoForm({ provider, token, sessionId, onAttach, onNeedConnector, onClose }) {
@@ -222,7 +234,7 @@ function RepoForm({ provider, token, sessionId, onAttach, onNeedConnector, onClo
                 });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) {
-                    if (res.status === 400 && (data.detail || "").toLowerCase().includes("no ")) {
+                    if (res.status === 400 && /no |reconnect/.test((data.detail || "").toLowerCase())) {
                         onNeedConnector();
                         return;
                     }
@@ -312,7 +324,7 @@ function RepoForm({ provider, token, sessionId, onAttach, onNeedConnector, onClo
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) {
-                if (res.status === 400 && (data.detail || "").toLowerCase().includes("no ")) {
+                if (res.status === 400 && /no |reconnect/.test((data.detail || "").toLowerCase())) {
                     onNeedConnector();
                     return;
                 }
@@ -341,7 +353,7 @@ function RepoForm({ provider, token, sessionId, onAttach, onNeedConnector, onClo
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) {
-                if (res.status === 400 && (data.detail || "").toLowerCase().includes("no ")) {
+                if (res.status === 400 && /no |reconnect/.test((data.detail || "").toLowerCase())) {
                     onNeedConnector();
                     return;
                 }

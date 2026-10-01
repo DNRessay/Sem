@@ -3,6 +3,7 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import ModelPicker, { loadModel } from "./ModelPicker";
 import { readEvents } from "../utils/sse";
+import { RepoPicker } from "./AttachMenu";
 
 const API = import.meta.env.VITE_API_URL || "";
 const STORE_KEY = "semblance_code_state";
@@ -124,6 +125,7 @@ export default function CodePage({ token, onBack, onUnauthorized }) {
     const [provider, setProvider] = useState(saved.provider || "github");
     const [repo, setRepo] = useState(saved.repo || "");
     const [repos, setRepos] = useState([]);
+    const [reposError, setReposError] = useState("");
     const [opened, setOpened] = useState(null);
     const [items, setItems] = useState(saved.items || []);
     const [input, setInput] = useState("");
@@ -139,9 +141,14 @@ export default function CodePage({ token, onBack, onUnauthorized }) {
     useEffect(() => { saveState({ provider, repo, items: items.slice(-200) }); }, [provider, repo, items]);
     useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [items, busy]);
     useEffect(() => {
+        setReposError("");
         fetch(`${API}/connectors/${provider}/repos`, { headers })
-            .then(r => (r.ok ? r.json() : { repos: [] }))
-            .then(d => setRepos(d.repos || []))
+            .then(async r => {
+                const d = await r.json().catch(() => ({}));
+                if (r.status === 401) onUnauthorized();
+                if (!r.ok) setReposError(d.detail || `Couldn't load ${provider} repos (${r.status})`);
+                setRepos(r.ok ? d.repos || [] : []);
+            })
             .catch(() => setRepos([]));
     }, [provider]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -230,9 +237,10 @@ export default function CodePage({ token, onBack, onUnauthorized }) {
                     <option value="github">GitHub</option>
                     <option value="gitlab">GitLab</option>
                 </select>
-                <input list="code-repos" value={repo} onChange={e => { setRepo(e.target.value.trim()); setOpened(null); }}
-                    placeholder="owner/repo" style={{ ...field, flex: 1, minWidth: "140px" }} />
-                <datalist id="code-repos">{repos.map(r => <option key={r.full_name} value={r.full_name} />)}</datalist>
+                <div style={{ flex: 1, minWidth: "160px" }}>
+                    <RepoPicker floating repos={repos} value={repo} placeholder="Select a repository"
+                        onChange={v => { setRepo(v); setOpened(null); }} />
+                </div>
                 <button onClick={openRepo} disabled={!repo || !!busy} style={btn}>{ready ? "Pull" : "Open"}</button>
             </div>
 
@@ -246,6 +254,7 @@ export default function CodePage({ token, onBack, onUnauthorized }) {
                 </div>
             )}
             {ready && showAutomations && <Automations token={token} provider={provider} repo={repo} onUnauthorized={onUnauthorized} />}
+            {reposError && <div style={{ padding: "8px 16px", fontSize: "12px", color: "var(--danger)", borderBottom: "1px solid var(--border)" }}>{reposError}</div>}
             {notice && <div style={{ padding: "8px 16px", fontSize: "12px", color: "var(--text-muted)", borderBottom: "1px solid var(--border)" }}>{notice}</div>}
 
             <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px" }}>

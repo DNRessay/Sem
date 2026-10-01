@@ -534,3 +534,14 @@ def test_callback_exchanges_code_and_stores_token_for_the_authorizing_account(cl
     assert "connected" in resp.text.lower()
     assert store.connectors[("guest3", "github")]["token"] == "gho_realtoken"
     assert ("owner", "github") not in store.connectors
+
+
+@respx.mock
+def test_rejected_github_token_is_not_a_semblance_401(client):
+    c, store = client
+    store.connectors[("owner", "github")] = {"token": "ghp_dead", "refresh_token": None, "expires_at": None}
+    respx.get("https://api.github.com/repos/me/app/contents/README.md").mock(
+        return_value=Response(401, json={"message": "Bad credentials"}))
+    resp = c.post("/connectors/github/fetch", json={"repo": "me/app", "path": "README.md"})
+    assert resp.status_code == 400
+    assert "Reconnect GitHub" in resp.json()["detail"]
