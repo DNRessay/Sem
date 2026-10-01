@@ -16,6 +16,7 @@ import asyncio
 from agents.dream_agent import DreamAgent
 from agents.kairos import KairosDaemon
 from pipeline.code_tasks import run_due_automation
+from tau.pacific import refresh_profile
 
 
 def handler(event, context):
@@ -29,10 +30,17 @@ async def _run():
     dream = DreamAgent()
     dream_result = await dream.run({})
 
+    # Once a day: re-read the owner's personality/style profile (tau/pacific.py).
+    try:
+        pacific = await refresh_profile()
+    except Exception as e:
+        pacific = {"error": str(e)[:300]}
+
     # One scheduled Code tab automation per tick at most (see pipeline/code_tasks.py).
     try:
         automation = await run_due_automation()
     except Exception as e:  # a broken automation must not take KAIROS/DREAM down with it
         automation = {"error": str(e)[:300]}
 
-    return {"status": "ok", "kairos_audit": kairos.get_audit(), "dream": dream_result, "automation": automation}
+    return {"status": "ok", "kairos_audit": kairos.get_audit(), "dream": dream_result, "pacific": pacific,
+            "automation": automation}

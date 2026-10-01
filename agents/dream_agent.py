@@ -1,9 +1,11 @@
+import re
 import time
 
 from agents.base_agent import BaseAgent
 from memory.salience_engine import SalienceEngine
 from storage.embeddings import embed_text
 from storage.neon_store import get_store
+from tau.emotion_engine import NatureSCIEngine
 
 
 class DreamAgent(BaseAgent):
@@ -34,6 +36,7 @@ class DreamAgent(BaseAgent):
     def __init__(self, tools_registry=None, cables_man_ref=None, **kwargs):
         super().__init__(tools_registry, cables_man_ref, **kwargs)
         self.salience = SalienceEngine()
+        self.emotion = NatureSCIEngine()
 
     async def run(self, task: dict) -> dict:
         gate = await self.check_gates()
@@ -85,14 +88,23 @@ class DreamAgent(BaseAgent):
             return []
 
     async def phase_consolidate(self, raw: list) -> list:
-        """Phase 3: Score + rank. Never delete."""
+        """Phase 3: Score + rank. Never delete. Salience mixes recency, how
+        emotionally charged the memory is (NATURE SCI word-list reading —
+        cheap enough for hundreds of memories), and how novel its wording
+        is against the rest (rare words = surprise)."""
+        tokens = [set(re.findall(r"[a-z]{4,}", (m.get("content") or "").lower())) for m in raw]
+        doc_freq: dict[str, int] = {}
+        for words in tokens:
+            for w in words:
+                doc_freq[w] = doc_freq.get(w, 0) + 1
+        rare_cutoff = max(1, len(raw) // 50)
+
         scored = []
-        for m in raw:
-            score = self.salience.score(
-                {"created_at": m.get("created_at", time.time())},
-                {},
-                0.0
-            )
+        for m, words in zip(raw, tokens):
+            emu = self.emotion.analyse_text(m.get("content") or "")
+            emotion = {emu.label: emu.confidence} if emu.label != "neutral" else {}
+            surprise = (sum(1 for w in words if doc_freq[w] <= rare_cutoff) / len(words)) if words else 0.0
+            score = self.salience.score({"created_at": m.get("created_at", time.time())}, emotion, surprise)
             scored.append({**m, "salience": score})
         return sorted(scored, key=lambda x: x["salience"], reverse=True)
 

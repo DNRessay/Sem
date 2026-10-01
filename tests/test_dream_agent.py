@@ -139,3 +139,15 @@ async def test_phase_gather_returns_empty_list_on_db_failure(monkeypatch):
     monkeypatch.setattr("agents.dream_agent.get_store", fake_get_store)
     agent = DreamAgent(session_id="s1")
     assert await agent.phase_gather() == []
+
+
+@pytest.mark.asyncio
+async def test_consolidate_weights_emotion_and_novelty_not_just_recency():
+    import time
+
+    from agents.dream_agent import DreamAgent
+    now = time.time()
+    raw = [{"id": i, "content": "ok sounds good thanks", "created_at": now} for i in range(60)]
+    raw.append({"id": 99, "content": "terrified the investor pulled funding for vicinic tonight", "created_at": now - 86400})
+    ranked = await DreamAgent().phase_consolidate(raw)
+    assert ranked[0]["id"] == 99  # a day older, but charged and novel

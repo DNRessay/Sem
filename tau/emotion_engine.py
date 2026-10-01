@@ -1,6 +1,10 @@
 import re
 from dataclasses import dataclass
 
+import httpx
+
+from config import settings
+
 
 @dataclass
 class EMU:
@@ -22,20 +26,68 @@ EMOTION_LEXICON = {
 }
 
 
+# (valence, arousal) for the classifier's labels — the same scale as the lexicon.
+_AFFECT = {"joy": (0.9, 0.8), "anger": (-0.8, 0.9), "sadness": (-0.7, 0.2), "fear": (-0.6, 0.8),
+           "surprise": (0.3, 0.9), "disgust": (-0.8, 0.6), "neutral": (0.0, 0.0)}
+
+TONE_GUIDANCE = {
+    "anger": "The user sounds frustrated: acknowledge it briefly, skip pleasantries, get straight to a fix.",
+    "fear": "The user sounds worried or stressed: be calm and reassuring, give clear next steps.",
+    "sadness": "The user sounds down: be warm and supportive without overdoing it.",
+    "disgust": "The user is unhappy with something: acknowledge it and focus on what can be done.",
+    "joy": "The user is in a good mood: match the energy, keep it light.",
+    "surprise": "The user is surprised: explain clearly what happened.",
+}
+
+
+def emotion_url() -> str:
+    if settings.MODAL_EMOTION_URL:
+        return settings.MODAL_EMOTION_URL
+    url = settings.MODAL_EMBEDDINGS_URL
+    # Modal names class endpoints <app>-<class>-<method>: the emotion method sits beside "embed".
+    return re.sub(r"-embed(\.modal\.run)", r"-emotion\1", url) if re.search(r"-embed\.modal\.run", url) else ""
+
+
 class NatureSCIEngine:
     """
-    Emotional intelligence ensemble.
-    v1: rule-based BERT-style text classification + RNN sequential tracking.
-    Upgrade path: swap _bert_classify for a real transformers BERT model.
+    Reads the emotion in a message. Uses the open-source DistilRoBERTa
+    emotion classifier on Modal (modal_app/embeddings.py) when deployed,
+    and a small word list otherwise. Its result steers Sem's tone each turn
+    (tau/tau_engine.py) and weights memory salience.
     """
 
     def __init__(self):
         self._history: list[EMU] = []
 
     def analyse_text(self, text: str) -> EMU:
-        emu = self._bert_classify(text.lower())
+        emu = self._lexicon_classify(text.lower())
         self._history.append(emu)
         return emu
+
+    async def classify(self, text: str) -> EMU:
+        """The model's reading when available, the word list otherwise."""
+        url = emotion_url()
+        if url and text.strip():
+            try:
+                async with httpx.AsyncClient(timeout=3) as client:
+                    r = await client.post(url, json={"text": text})
+                scores = r.json().get("scores") or {}
+                if r.status_code == 200 and scores:
+                    label, confidence = max(scores.items(), key=lambda kv: kv[1])
+                    valence, arousal = _AFFECT.get(label, (0.0, 0.0))
+                    emu = EMU(label, float(confidence), valence, arousal)
+                    self._history.append(emu)
+                    return emu
+            except (httpx.HTTPError, ValueError):
+                pass
+        return self.analyse_text(text)
+
+    @staticmethod
+    def guidance(emu: EMU) -> str:
+        """A one-line tone instruction for confident, non-neutral readings."""
+        if emu.label == "neutral" or emu.confidence < 0.5:
+            return ""
+        return TONE_GUIDANCE.get(emu.label, "")
 
     def track_sequence(self, history: list[dict]) -> dict:
         """RNN-style: track emotional arc across turns."""
@@ -68,7 +120,7 @@ class NatureSCIEngine:
             return f"[tone: calm and measured]\n{base_prompt}"
         return base_prompt
 
-    def _bert_classify(self, text: str) -> EMU:
+    def _lexicon_classify(self, text: str) -> EMU:
         scores = {}
         for emotion, (keywords, valence, arousal) in EMOTION_LEXICON.items():
             if emotion == "neutral":

@@ -63,23 +63,26 @@ The pipeline design — particularly the BOOTSTRAP 7-stage init, CONNECTOR_TEXT 
 - 23-check bash security gate before any shell command
 - `<artifact type='jsx|html|svg|md'>` tag-based renderer pattern
 
-### Nature Scientific Reports 2026 — NATURE SCI Emotional Engine
-The NATURE SCI module implements the 4-model ensemble described in the 2026 paper:
+### NATURE SCI — emotion
 
-| Model | Modality | Reported Accuracy |
-|-------|----------|-------------------|
-| BERT | Text sentiment | 92% |
-| RNN | Sequential emotional tracking | 89% |
-| CNN | Facial expression (multimodal input) | 80% |
-| GAN | Emotional content generation | 90% |
-
-Every agent response is modulated by this layer. Emotional context is passed into CABLES MAN before orchestration decisions are made. The output of NATURE SCI are Emotion Memory Units (EMUs) which feed the SALIENCE ENGINE.
+Each message is read by an open-source emotion classifier (DistilRoBERTa,
+`j-hartmann/emotion-english-distilroberta-base`: anger, disgust, fear, joy,
+neutral, sadness, surprise) running on the same Modal app as the embeddings.
+A confident, non-neutral reading adds one tone line to that turn's context
+("the user sounds frustrated — get straight to a fix"). Without Modal, a small
+word list stands in. DREAM uses emotional intensity when scoring memories.
+The design draws on the 2026 Nature Scientific Reports ensemble work; the
+multimodal parts (facial expression, generation) aren't built.
 
 ### Big Five OCEAN Model — PACIFIC
-PACIFIC stands for **Preference Alignment Choices Inference for Five-factor Identity Characterization**. It applies the Big Five personality model to improve personalization accuracy from **29.25% → 76%** by inferring your personality traits from implicit conversation signals rather than explicit questionnaires. Traits are refined continuously across sessions through TAU memory and DREAM consolidation.
 
-### Semantic Retrieval (Cosine Similarity)
-Classical topic-pointer memory lookup is replaced by SEM RETRIEVAL — a pgvector-backed cosine similarity engine. Every turn, the current query is embedded and matched against all stored memories by semantic distance. The top-K results are ranked by closeness of *meaning* — not by filename, topic tag, or recency. Nothing is ever discarded. Every memory remains in the store permanently; retrieval surfaces what matters now.
+PACIFIC (Preference Alignment Choices Inference for Five-factor Identity
+Characterization) infers Big Five traits from implicit signals rather than a
+questionnaire. Once a day the scheduled tick has a free model read recent
+messages across every conversation and saves OCEAN scores plus an observed
+answer style ("short answers, code first") to the owner's profile; every chat
+reads that saved profile. A keyword estimate covers the time before the first
+daily read.
 
 ---
 
@@ -164,7 +167,7 @@ CABLES MAN is pure orchestration — zero direct API calls. All external access 
 | Component | Description |
 |-----------|-------------|
 | **CABLES MAN** | Coordinated Autonomous Background Learning Execution System. Routes tasks to agents. |
-| **NATURE SCI** | 4-model emotional ensemble. Modulates all agent responses with emotional context. |
+| **NATURE SCI** | Open-source emotion classifier on each message; steers the reply's tone. |
 | **SALIENCE ENGINE** | Scores every memory candidate before persistence. Combines EMU weights + surprise delta from Query Engine. High salience = encoded to Neon (row + embedding) first. Nothing deleted — salience controls priority only. |
 | **WORKING MEM** | Cross-turn scratchpad. Persists active reasoning across multiple turns on the same problem. Cleared only when the problem is resolved. |
 
@@ -292,7 +295,6 @@ Each level overrides the previous. Total limit: 40,000 characters.
 | DREAM trigger gates | 3 (24hr + 5 sessions + lock) |
 | DREAM phases | 4 (Orient → Gather → Consolidate → Index) |
 | BUDDY species | 18 |
-| PACIFIC accuracy improvement | 29.25% → 76% |
 | Cache write cost (5-min TTL) | 1.25× base |
 | Cache write cost (1-hr TTL) | 2.0× base |
 | Cache read cost | 0.10× base |
