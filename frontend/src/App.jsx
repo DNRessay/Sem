@@ -8,6 +8,7 @@ import CodePage from "./components/CodePage";
 import CoworkPage from "./components/CoworkPage";
 import DesignPage from "./components/DesignPage";
 import SettingsPage from "./components/SettingsPage";
+import FinancePage from "./components/FinancePage";
 import Login from "./components/Login";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { turnsToHistory } from "./utils/toolMarker";
@@ -34,7 +35,7 @@ export default function App() {
     const [sessionTitle, setSessionTitle] = useState("");
     const [menuOpen, setMenuOpen] = useState(false);
     const [agentFeedOpen, setAgentFeedOpen] = useState(false);
-    const [view, setView] = useState("chat"); // "chat" | "allChats" | "code" | "cowork" | "design" | "settings"
+    const [view, setView] = useState("chat"); // "chat" | "allChats" | "code" | "cowork" | "design" | "settings" | "finance"
     const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || "");
     const [restoring, setRestoring] = useState(true);
     const sessionIdRef = useRef(sessionId);
@@ -161,6 +162,7 @@ export default function App() {
                 onOpenCowork={() => { setMenuOpen(false); setView("cowork"); }}
                 onOpenDesign={() => { setMenuOpen(false); setView("design"); }}
                 onOpenSettings={() => { setMenuOpen(false); setView("settings"); }}
+                onOpenFinance={() => { setMenuOpen(false); setView("finance"); }}
                 onSessionRenamed={handleSessionRenamed}
                 onSessionDeleted={handleSessionDeleted}
             />
@@ -169,6 +171,11 @@ export default function App() {
                 onClose={() => setAgentFeedOpen(false)}
                 events={agentEvents}
             />
+            {view === "finance" && (
+                <ErrorBoundary>
+                    <FinancePage token={token} onBack={() => setView("chat")} onUnauthorized={logout} />
+                </ErrorBoundary>
+            )}
             {view === "settings" && (
                 <ErrorBoundary>
                     <SettingsPage token={token} onBack={() => setView("chat")} onUnauthorized={logout} />
