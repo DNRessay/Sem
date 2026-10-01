@@ -140,7 +140,7 @@ async def test_aws_tool_refuses_writes_and_secret_reads():
     aws = AwsReadTool()
     assert "read-only" in (await aws.call("s3", "DeleteBucket"))["error"]
     assert "not allowed" in (await aws.call("secretsmanager", "GetSecretValue"))["error"]
-    assert "not allowed" in (await aws.call("lambda", "get_function_configuration"))["error"]
+    assert "not allowed" in (await aws.call("lambda", "get_function"))["error"]  # config is allowed: env is redacted
 
 
 @pytest.mark.asyncio

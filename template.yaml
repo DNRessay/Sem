@@ -266,6 +266,17 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref CacheTable
+        # Sem Code's read-only AWS tool (tools/aws_read_tool.py): see what's
+        # deployed (Sem, C-Lab, Vicinic share this account) and read their logs.
+        # Metadata only — the tool itself also refuses secret-returning calls.
+        - arn:aws:iam::aws:policy/job-function/ViewOnlyAccess
+        - Statement:
+            - Effect: Allow
+              Action:
+                - lambda:GetFunctionConfiguration
+                - logs:FilterLogEvents
+                - logs:GetLogEvents
+              Resource: "*"
 
   ChatFunctionLogGroup:
     Type: AWS::Logs::LogGroup

@@ -7,14 +7,16 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from config import settings
 
-# Read-only by construction: only Describe*/List*/Get* operations run, and
-# the ones that return secrets or raw data are refused outright. Permissions
-# come from the Lambda's own role — attach AWS's ViewOnlyAccess policy to it
-# for this tool to see anything beyond what Sem already uses.
+# Read-only by construction: only Describe*/List*/Get* (plus CloudWatch's
+# FilterLogEvents) run, the ones that return secrets or raw data are refused
+# outright, and environment variables are redacted from every result (so
+# GetFunctionConfiguration is safe). Permissions come from the Lambda's role:
+# ViewOnlyAccess plus log reads (template.yaml).
 _ALLOWED_PREFIXES = ("Describe", "List", "Get")
+_ALLOWED_EXTRA = {"FilterLogEvents"}  # reading CloudWatch logs to debug a failing function
 _DENIED = {
     "GetSecretValue", "GetParameter", "GetParameters", "GetParametersByPath",
-    "GetFunction", "GetFunctionConfiguration", "GetObject", "GetItem", "BatchGetItem",
+    "GetFunction", "GetObject", "GetItem", "BatchGetItem",
     "GetCredentialsForIdentity", "GetSessionToken", "GetFederationToken", "GetAuthorizationToken",
     "GetPasswordData", "GetQueueAttributes", "GetLoginProfile", "GetAccessKeyLastUsed",
 }
@@ -41,7 +43,7 @@ class AwsReadTool:
         if not re.fullmatch(r"[a-z0-9-]+", service or ""):
             return {"ok": False, "error": "service must be a boto3 service name, e.g. 'lambda', 's3', 'dynamodb'"}
         op = _to_pascal(operation or "")
-        if not op.startswith(_ALLOWED_PREFIXES):
+        if not op.startswith(_ALLOWED_PREFIXES) and op not in _ALLOWED_EXTRA:
             return {"ok": False, "error": "read-only: only Describe*/List*/Get* operations are allowed"}
         if op in _DENIED:
             return {"ok": False, "error": f"{op} can return secrets or raw data, so it's not allowed"}
