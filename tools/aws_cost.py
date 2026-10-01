@@ -2,8 +2,9 @@
 
 Free on purpose: AWS's EstimatedCharges metric from CloudWatch (us-east-1,
 needs "Receive Billing Alerts" on in Billing preferences) instead of Cost
-Explorer, which charges $0.01 a call. The USD→ZAR rate comes from a keyless
-public API. Both are cached for 6 hours."""
+Explorer, which charges $0.01 a call. The USD→ZAR rate is C-Lab's live
+quote when C-Lab is connected, else a keyless daily public rate. Cached for
+an hour (the bill itself only updates a few times a day)."""
 import asyncio
 import json
 import time
@@ -14,7 +15,7 @@ import httpx
 
 from cache import ddb_backend
 
-_TTL = 6 * 3600
+_TTL = 3600
 _FX_URL = "https://open.er-api.com/v6/latest/USD"
 
 
@@ -30,6 +31,22 @@ def _estimated_charges_usd() -> float | None:
     return float(points[-1]["Maximum"]) if points else None
 
 
+async def _clab_usd_zar(account_id: str) -> float | None:
+    """Live USD/ZAR from C-Lab's markets board (Yahoo ZAR=X) when C-Lab is connected as MCP server "clab"."""
+    from storage.neon_store import get_store
+    from tools.mcp_client import MCPClient
+    try:
+        db = await get_store()
+        server = next((s for s in await db.list_mcp_servers(account_id) if s["name"] == "clab"), None)
+        if not server:
+            return None
+        result = await MCPClient(server["url"], server.get("auth", ""), timeout=15).call_tool("quote", {"symbol": "ZAR=X"})
+        price = json.loads(result["text"]).get("price") if result.get("ok") else None
+        return float(price) if price else None
+    except Exception:
+        return None
+
+
 async def _usd_to_zar() -> float | None:
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -39,7 +56,7 @@ async def _usd_to_zar() -> float | None:
         return None
 
 
-async def month_to_date() -> dict:
+async def month_to_date(account_id: str = "owner") -> dict:
     cached = ddb_backend.get("aws_cost", "mtd")
     if cached:
         return json.loads(cached)
@@ -49,8 +66,10 @@ async def month_to_date() -> dict:
         return {"ok": False, "error": f"Couldn't read the AWS bill: {str(e)[:200]}"}
     if usd is None:
         return {"ok": False, "error": "No billing data yet — turn on 'Receive Billing Alerts' in AWS Billing preferences"}
-    rate = await _usd_to_zar()
+    rate, source = await _clab_usd_zar(account_id), "C-Lab (live)"
+    if not rate:
+        rate, source = await _usd_to_zar(), "open.er-api.com (daily)"
     result = {"ok": True, "usd": round(usd, 2), "zar": round(usd * rate, 2) if rate else None,
-              "rate": rate, "as_of": int(time.time())}
+              "rate": rate, "rate_source": source if rate else None, "as_of": int(time.time())}
     ddb_backend.set("aws_cost", "mtd", json.dumps(result), ttl=_TTL)
     return result

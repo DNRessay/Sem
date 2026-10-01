@@ -141,6 +141,6 @@ async def usage(account: dict = Depends(require_account)):
 
 
 @router.get("/aws-cost")
-async def aws_cost(_account: dict = Depends(require_account)):
+async def aws_cost(account: dict = Depends(require_account)):
     from tools.aws_cost import month_to_date
-    return await month_to_date()
+    return await month_to_date(account["account_id"])

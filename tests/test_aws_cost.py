@@ -30,3 +30,17 @@ async def test_no_billing_data_says_how_to_turn_it_on(monkeypatch):
     monkeypatch.setattr(aws_cost, "_estimated_charges_usd", lambda: None)
     result = await aws_cost.month_to_date()
     assert not result["ok"] and "Billing Alerts" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_live_rate_from_clab_wins(monkeypatch):
+    ddb_backend.delete("aws_cost", "mtd")
+    monkeypatch.setattr(aws_cost, "_estimated_charges_usd", lambda: 10.0)
+
+    async def live(account_id):
+        return 17.5
+
+    monkeypatch.setattr(aws_cost, "_clab_usd_zar", live)
+    result = await aws_cost.month_to_date("owner")
+    assert result["zar"] == 175.0 and result["rate_source"] == "C-Lab (live)"
+    ddb_backend.delete("aws_cost", "mtd")

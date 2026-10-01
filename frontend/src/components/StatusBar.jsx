@@ -38,7 +38,7 @@ export function CostButton({ token }) {
                         {bill.ok
                             ? <div style={{ fontSize: "20px", fontWeight: 700, color: "var(--gold-text)" }}>{rand(bill)}</div>
                             : <div style={{ fontSize: "12px", color: "var(--text)" }}>{bill.error}</div>}
-                        {bill.ok && bill.zar != null && <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>${bill.usd.toFixed(2)} at R{bill.rate.toFixed(2)}/$</div>}
+                        {bill.ok && bill.zar != null && <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>${bill.usd.toFixed(2)} at R{bill.rate.toFixed(2)}/$ · {bill.rate_source}</div>}
                     </div>
                 </>
             )}
