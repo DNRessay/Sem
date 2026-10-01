@@ -13,7 +13,7 @@ from config import settings
 # GetFunctionConfiguration is safe). Permissions come from the Lambda's role:
 # ViewOnlyAccess plus log reads (template.yaml).
 _ALLOWED_PREFIXES = ("Describe", "List", "Get")
-_ALLOWED_EXTRA = {"FilterLogEvents"}  # reading CloudWatch logs to debug a failing function
+_ALLOWED_EXTRA = {"FilterLogEvents", "StartQuery", "BatchGetTraces"}  # logs, Logs Insights, X-Ray traces
 _DENIED = {
     "GetSecretValue", "GetParameter", "GetParameters", "GetParametersByPath",
     "GetFunction", "GetObject", "GetItem", "BatchGetItem",

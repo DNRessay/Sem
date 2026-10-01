@@ -115,6 +115,8 @@ class Settings(BaseSettings):
     # OWNER_WHATSAPP_NUMBER (international format, no +) to also get them
     # on WhatsApp via the Cloud API credentials above.
     OWNER_ACCOUNT_ID: str = "owner"
+    # Approved AWS changes stop (deletes/stops excepted) once the month's bill reaches this.
+    AWS_SPEND_LIMIT_USD: float = 5.0
     OWNER_WHATSAPP_NUMBER: str = ""
     KAIROS_MORNING_BRIEF: bool = True
     KAIROS_BRIEF_HOUR: int = 7  # South Africa time

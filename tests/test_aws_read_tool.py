@@ -30,3 +30,8 @@ async def test_logs_can_be_filtered_and_writes_are_refused():
     assert not (await AwsReadTool().call("lambda", "DeleteFunction", {}))["ok"]
     assert not (await AwsReadTool().call("lambda", "GetFunction", {}))["ok"]
     assert not (await AwsReadTool().call("secretsmanager", "GetSecretValue", {}))["ok"]
+
+
+def test_logs_insights_and_traces_count_as_reads():
+    from tools.aws_read_tool import _ALLOWED_EXTRA
+    assert {"StartQuery", "BatchGetTraces"} <= _ALLOWED_EXTRA
