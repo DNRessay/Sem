@@ -26,9 +26,13 @@ class CodeWorkspace:
         try:
             async with httpx.AsyncClient(timeout=http_timeout) as client:
                 r = await client.post(settings.MODAL_REPO_URL, json=body, headers=headers)
-                return r.json()
+                result = r.json()
         except (httpx.HTTPError, ValueError) as e:
             return {"ok": False, "error": f"workspace unreachable: {e}"}
+        if result.get("error") == "unauthorized":
+            result["error"] = ("The Modal code workspace rejected Sem's key: the GitHub secret MODAL_REPO_SECRET must "
+                               "equal REPO_TOOL_SECRET in the Modal secret semblance-repo-secret.")
+        return result
 
     async def open(self, token: str | None, ref: str = "") -> dict:
         return await self._call("clone_or_pull", http_timeout=150, ref=ref, token=token)

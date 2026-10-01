@@ -90,3 +90,18 @@ def test_list_dir_hides_git(workspace):
     tool._write_file(repo, "pkg/mod.py", "")
     entries = tool._list_dir(repo, "")["entries"]
     assert entries == ["app.py", "pkg/"]
+
+
+@pytest.mark.asyncio
+async def test_secret_mismatch_says_what_to_fix(monkeypatch):
+    import respx
+    from httpx import Response
+
+    from config import settings
+    from tools.code_workspace import CodeWorkspace
+
+    monkeypatch.setattr(settings, "MODAL_REPO_URL", "https://ws.example/handle")
+    with respx.mock:
+        respx.post("https://ws.example/handle").mock(return_value=Response(200, json={"ok": False, "error": "unauthorized"}))
+        result = await CodeWorkspace("github", "me/app").open(None)
+    assert "MODAL_REPO_SECRET" in result["error"] and "REPO_TOOL_SECRET" in result["error"]

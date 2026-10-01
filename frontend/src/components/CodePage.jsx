@@ -233,7 +233,7 @@ export default function CodePage({ token, onBack, onUnauthorized }) {
             <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "12px 16px", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
                 <button onClick={onBack} aria-label="Back" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "18px", color: "var(--text)" }}>←</button>
                 <span style={{ fontWeight: 700, color: "var(--text)" }}>Code</span>
-                <select value={provider} onChange={e => { setProvider(e.target.value); setOpened(null); }} style={field}>
+                <select value={provider} onChange={e => { setProvider(e.target.value); setRepo(""); setOpened(null); }} style={field}>
                     <option value="github">GitHub</option>
                     <option value="gitlab">GitLab</option>
                 </select>
