@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import ModelPicker, { loadModel } from "./ModelPicker";
 import { readEvents } from "../utils/sse";
 import { copyToClipboard } from "../utils/clipboard";
+import { HeaderStatus } from "./StatusBar";
 import TabDrawer, { MenuButton } from "./TabDrawer";
 import useTabChats from "../hooks/useTabChats";
 
@@ -264,7 +265,7 @@ function VideoStudio({ token, seedPrompt }) {
 // Design tab: digital-marketing assistant. Learns the business from its own
 // website, then writes ad copy and makes matching images per placement
 // (Nano Banana, free tier) and short video ads (Wan 2.1 on Modal, capped).
-export default function DesignPage({ token, onNavigate, onUnauthorized, handoff, onHandoff }) {
+export default function DesignPage({ token, onNavigate, onUnauthorized, onFeed, feedError, handoff, onHandoff }) {
     // Each campaign is a saved "chat": the business brief, the campaign and its ad copy (images aren't stored).
     const { chats, chat, updateChat, newChat, selectChat, deleteChat } = useTabChats(STORE_KEY, {
         blank: () => ({ site: "", brief: "", campaign: "", placements: ["fb_ig_feed", "story_reel"], count: 2, ads: [] }),
@@ -349,6 +350,7 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
             <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
                 <MenuButton onClick={() => setMenuOpen(true)} />
                 <span style={{ fontWeight: 700, color: "var(--text)", flex: 1 }}>Sem Design</span>
+                <HeaderStatus token={token} onFeed={onFeed} hasError={feedError} />
                 <ModelPicker token={token} value={model} onChange={setModel} storageKey="semblance_design_model" />
             </div>
             <TabDrawer open={menuOpen} onClose={() => setMenuOpen(false)} title="Sem Design" current="design"

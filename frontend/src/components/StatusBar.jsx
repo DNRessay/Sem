@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 const API = import.meta.env.VITE_API_URL || "";
 
 // This month's AWS bill in rand (free CloudWatch estimate, refreshed every 6 hours server-side).
-function AwsCost({ token }) {
+export function AwsCost({ token }) {
     const [bill, setBill] = useState(null);
     useEffect(() => {
         if (!token) return;
@@ -17,6 +17,22 @@ function AwsCost({ token }) {
     return (
         <span title="AWS bill so far this month (estimate)" style={{ color: "var(--gold-text)", fontWeight: 600, whiteSpace: "nowrap" }}>
             AWS {amount}
+        </span>
+    );
+}
+
+// The bill and the ⚡ activity feed, for the Code / Co-work / Design / Finance headers.
+export function HeaderStatus({ token, onFeed, hasError }) {
+    return (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px" }}>
+            <AwsCost token={token} />
+            {onFeed && (
+                <button onClick={onFeed} aria-label="Agent activity feed" title="Agent activity feed"
+                    style={{ position: "relative", background: "none", border: "none", cursor: "pointer", padding: "4px 0", color: "var(--text-muted)", fontSize: "16px", lineHeight: 1 }}>
+                    ⚡
+                    {hasError && <span style={{ position: "absolute", top: "1px", right: "-2px", width: "7px", height: "7px", borderRadius: "50%", background: "#e33", border: "1.5px solid var(--bg)" }} />}
+                </button>
+            )}
         </span>
     );
 }

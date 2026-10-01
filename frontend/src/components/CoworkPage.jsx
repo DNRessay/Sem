@@ -3,6 +3,7 @@ import ModelPicker, { loadModel } from "./ModelPicker";
 import { ToolStep, md } from "./CodePage";
 import { readEvents } from "../utils/sse";
 import { AssistantText, AttachedChips, CLEAR_COMMAND, ChatMenu, ConnectorsSheet, HELP_COMMAND, NEW_COMMAND, PlusMenu, SuggestModel, errorClass, helpText, parseSlash, readTextFiles, withAttachments } from "./MessageKit";
+import { HeaderStatus } from "./StatusBar";
 import TabDrawer, { HandoffCard, MenuButton } from "./TabDrawer";
 import useTabChats from "../hooks/useTabChats";
 
@@ -59,7 +60,7 @@ export function ApprovalCard({ item, onDecide }) {
 // Full-screen Co-work tab: an assistant that does the work (research, email,
 // calendar, Drive notes, images) instead of only advising. Anything that
 // leaves SEMBLANCE — sending email, adding events — waits for Approve.
-export default function CoworkPage({ token, onNavigate, onUnauthorized, handoff, onHandoff }) {
+export default function CoworkPage({ token, onNavigate, onUnauthorized, onFeed, feedError, handoff, onHandoff }) {
     const { chats, chat, updateChat, newChat, selectChat, deleteChat } = useTabChats(STORE_KEY, {
         blank: () => ({ items: [] }),
         legacy: () => { const items = loadItems(); return { items, title: items.find(i => i.kind === "user")?.text.slice(0, 60) || "" }; },
@@ -162,6 +163,7 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized, handoff,
                 <MenuButton onClick={() => setMenuOpen(true)} />
                 <span style={{ fontWeight: 700, color: "var(--text)", flex: 1 }}>Sem Co-work</span>
                 <ChatMenu title={chat.title || "Sem Co-work"} messages={transcript} />
+                <HeaderStatus token={token} onFeed={onFeed} hasError={feedError} />
             </div>
 
             <TabDrawer open={menuOpen} onClose={() => setMenuOpen(false)} title="Sem Co-work" current="cowork"

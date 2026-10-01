@@ -204,7 +204,8 @@ export default function App() {
             />
             {view === "finance" && (
                 <ErrorBoundary>
-                    <FinancePage token={token} onNavigate={setView} onUnauthorized={logout} handoff={handoff} onHandoff={handOff} />
+                    <FinancePage token={token} onNavigate={setView} onUnauthorized={logout} handoff={handoff} onHandoff={handOff}
+                        onFeed={() => { setAgentFeedOpen(true); acknowledgeErrors(); }} feedError={agentHasError} />
                 </ErrorBoundary>
             )}
             {view === "settings" && (
@@ -214,17 +215,20 @@ export default function App() {
             )}
             {view === "design" && (
                 <ErrorBoundary>
-                    <DesignPage token={token} onNavigate={setView} onUnauthorized={logout} handoff={handoff} onHandoff={handOff} />
+                    <DesignPage token={token} onNavigate={setView} onUnauthorized={logout} handoff={handoff} onHandoff={handOff}
+                        onFeed={() => { setAgentFeedOpen(true); acknowledgeErrors(); }} feedError={agentHasError} />
                 </ErrorBoundary>
             )}
             {view === "cowork" && (
                 <ErrorBoundary>
-                    <CoworkPage token={token} onNavigate={setView} onUnauthorized={logout} handoff={handoff} onHandoff={handOff} />
+                    <CoworkPage token={token} onNavigate={setView} onUnauthorized={logout} handoff={handoff} onHandoff={handOff}
+                        onFeed={() => { setAgentFeedOpen(true); acknowledgeErrors(); }} feedError={agentHasError} />
                 </ErrorBoundary>
             )}
             {view === "code" && (
                 <ErrorBoundary>
-                    <CodePage token={token} onNavigate={setView} onUnauthorized={logout} handoff={handoff} onHandoff={handOff} />
+                    <CodePage token={token} onNavigate={setView} onUnauthorized={logout} handoff={handoff} onHandoff={handOff}
+                        onFeed={() => { setAgentFeedOpen(true); acknowledgeErrors(); }} feedError={agentHasError} />
                 </ErrorBoundary>
             )}
             {view === "allChats" && (

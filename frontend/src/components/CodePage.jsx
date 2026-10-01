@@ -6,6 +6,7 @@ import { readEvents } from "../utils/sse";
 import { RepoPicker } from "./AttachMenu";
 import { AssistantText, AttachedChips, CLEAR_COMMAND, ChatMenu, ConnectorsSheet, HELP_COMMAND, NEW_COMMAND, PlusMenu, SuggestModel, errorClass, helpText, parseSlash, readTextFiles, withAttachments } from "./MessageKit";
 import { ApprovalCard } from "./CoworkPage";
+import { HeaderStatus } from "./StatusBar";
 import TabDrawer, { HandoffCard, MenuButton } from "./TabDrawer";
 import useTabChats from "../hooks/useTabChats";
 
@@ -144,7 +145,7 @@ function Automations({ token, provider, repo, onUnauthorized }) {
 
 // Full-screen Code tab: a coding agent working in a clone of one repo on
 // Modal. Nothing reaches the repo until "Open PR" (or an automation) does.
-export default function CodePage({ token, onNavigate, onUnauthorized, handoff, onHandoff }) {
+export default function CodePage({ token, onNavigate, onUnauthorized, onFeed, feedError, handoff, onHandoff }) {
     const { chats, chat, updateChat, newChat: addChat, selectChat, deleteChat } = useTabChats(STORE_KEY, {
         blank: () => ({ provider: "github", repo: "", items: [] }),
         legacy: () => {
@@ -338,6 +339,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
                 <MenuButton onClick={() => setMenuOpen(true)} />
                 <span style={{ fontWeight: 700, color: "var(--text)" }}>Sem Code</span>
                 <ChatMenu title={chat.title || "Sem Code"} messages={transcript} />
+                <HeaderStatus token={token} onFeed={onFeed} hasError={feedError} />
                 <select value={provider} onChange={e => pickRepo(e.target.value, "")} style={field}>
                     <option value="github">GitHub</option>
                     <option value="gitlab">GitLab</option>

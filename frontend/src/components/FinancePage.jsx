@@ -3,6 +3,7 @@ import ModelPicker, { loadModel } from "./ModelPicker";
 import { ToolStep, md } from "./CodePage";
 import { readEvents } from "../utils/sse";
 import { AssistantText, AttachedChips, CLEAR_COMMAND, ChatMenu, ConnectorsSheet, HELP_COMMAND, NEW_COMMAND, PlusMenu, SuggestModel, errorClass, helpText, parseSlash, readTextFiles, withAttachments } from "./MessageKit";
+import { HeaderStatus } from "./StatusBar";
 import TabDrawer, { HandoffCard, MenuButton } from "./TabDrawer";
 import useTabChats from "../hooks/useTabChats";
 
@@ -59,7 +60,7 @@ function Connect({ headers, onConnected }) {
 
 // Finance tab: ask about your own money. Answers come from C-Lab over MCP
 // (read-only), with web search for outside context.
-export default function FinancePage({ token, onNavigate, onUnauthorized, handoff, onHandoff }) {
+export default function FinancePage({ token, onNavigate, onUnauthorized, onFeed, feedError, handoff, onHandoff }) {
     const [status, setStatus] = useState(null);
     const { chats, chat, updateChat, newChat, selectChat, deleteChat } = useTabChats(STORE_KEY, {
         blank: () => ({ items: [] }),
@@ -150,6 +151,7 @@ export default function FinancePage({ token, onNavigate, onUnauthorized, handoff
                 <MenuButton onClick={() => setMenuOpen(true)} />
                 <span style={{ fontWeight: 700, color: "var(--text)", flex: 1 }}>Sem Finance</span>
                 <ChatMenu title={chat.title || "Sem Finance"} messages={transcript} />
+                <HeaderStatus token={token} onFeed={onFeed} hasError={feedError} />
                 {status?.connected && <span style={{ fontSize: "11px", color: "var(--ready)" }}>● C-Lab connected</span>}
             </div>
 
