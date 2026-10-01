@@ -3,6 +3,7 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { useStream } from "../hooks/useStream";
 import { HandoffCard } from "./TabDrawer";
+import { CopyButton, DownloadAllButton, SpeakButton, handleCodeCardClick, renderMarkdown } from "./MessageKit";
 import { useTypewriter } from "../hooks/useTypewriter";
 import VoiceInput from "./VoiceInput";
 import ModelPicker, { loadModel } from "./ModelPicker";
@@ -13,162 +14,11 @@ import { extractCodeBlocks, filenameFor, downloadText, downloadAllAsZip } from "
 const API = import.meta.env.VITE_API_URL || "";
 const THINKING_WORDS = ["Thinking", "Pondering", "Mulling it over", "Sleuthing", "Working on it", "Piecing it together"];
 
-function escapeHtml(s) {
-    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-// Fenced code blocks render as "code cards" — a header (language + Copy/
-// Download) above the code — instead of marked's plain <pre><code>, so a
-// reply with code doesn't force copying the whole message just to grab one
-// snippet. A fresh renderer per call resets the per-message snippet
-// counter (snippet-1.py, snippet-2.js, ...), keeping it in sync with
-// extractCodeBlocks' same top-to-bottom order used for the zip download.
-function buildRenderer() {
-    const renderer = new marked.Renderer();
-    let index = 0;
-    renderer.code = ({ text, lang }) => {
-        const filename = filenameFor(lang, index++);
-        const langLabel = (lang || "text").split(/\s+/)[0] || "text";
-        return (
-            `<div class="code-card">`
-            + `<div class="code-card-header">`
-            + `<span class="code-card-lang">${escapeHtml(langLabel)}</span>`
-            + `<span class="code-card-actions">`
-            + `<button type="button" class="code-card-btn" data-action="copy">Copy</button>`
-            + `<button type="button" class="code-card-btn" data-action="download" data-filename="${escapeHtml(filename)}">Download</button>`
-            + `</span></div>`
-            + `<pre><code>${escapeHtml(text)}</code></pre>`
-            + `</div>`
-        );
-    };
-    return renderer;
-}
-
-function renderMarkdown(text) {
-    return { __html: DOMPurify.sanitize(marked.parse(text, { breaks: true, renderer: buildRenderer() })) };
-}
-
-// Event delegation, not a per-card React handler — the code cards are raw
-// HTML from dangerouslySetInnerHTML, so there's nowhere to attach a real
-// onClick inside them. One listener on the message's outer div catches
-// every card's button clicks instead.
-function handleCodeCardClick(e) {
-    const btn = e.target.closest(".code-card-btn");
-    if (!btn) return;
-    const codeEl = btn.closest(".code-card")?.querySelector("pre code");
-    if (!codeEl) return;
-    const text = codeEl.textContent;
-
-    if (btn.dataset.action === "copy") {
-        copyToClipboard(text);
-        const original = btn.textContent;
-        btn.textContent = "Copied";
-        setTimeout(() => { btn.textContent = original; }, 1200);
-    } else if (btn.dataset.action === "download") {
-        downloadText(btn.dataset.filename || "snippet.txt", text);
-    }
-}
-
-function DownloadAllButton({ content }) {
-    const blocks = extractCodeBlocks(content);
-    if (blocks.length < 2) return null;
-    return (
-        <button
-            onClick={() => downloadAllAsZip(blocks)}
-            style={{
-                display: "flex", alignItems: "center", gap: "4px", background: "none",
-                border: "1px solid var(--border)", borderRadius: "999px", padding: "4px 10px",
-                fontSize: "11px", color: "var(--text-muted)", cursor: "pointer",
-            }}
-        >
-            Download all ({blocks.length} files, .zip)
-        </button>
-    );
-}
-
-function CopyIcon() {
-    return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="9" y="9" width="13" height="13" rx="2" />
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-        </svg>
-    );
-}
-
 function iconForSource(source, mime) {
     if (source === "github") return <GitHubIcon />;
     if (source === "gitlab") return <GitLabIcon />;
     if ((mime || "").startsWith("image/")) return <ImageIcon />;
     return <AttachFileIcon />;
-}
-
-function CheckIcon() {
-    return (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="20 6 9 17 4 12" />
-        </svg>
-    );
-}
-
-// Reads a reply aloud with Gemini's TTS (/media/speech). Strips markdown
-// and code blocks first — nobody wants a code listing read out.
-function SpeakButton({ text, token }) {
-    const [state, setState] = useState("idle"); // idle | loading | playing
-    const audioRef = useRef(null);
-
-    const toggle = async () => {
-        if (state === "playing") { audioRef.current?.pause(); setState("idle"); return; }
-        if (state === "loading") return;
-        const plain = text.replace(/```[\s\S]*?```/g, " (code omitted) ").replace(/[#*_`>|\[\]]/g, "").trim();
-        if (!plain) return;
-        setState("loading");
-        try {
-            const r = await fetch(`${API}/media/speech`, {
-                method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ text: plain }),
-            });
-            if (!r.ok) throw new Error();
-            const d = await r.json();
-            const audio = new Audio(`data:${d.mime};base64,${d.base64}`);
-            audioRef.current = audio;
-            audio.onended = () => setState("idle");
-            await audio.play();
-            setState("playing");
-        } catch { setState("idle"); }
-    };
-
-    return (
-        <button onClick={toggle} aria-label={state === "playing" ? "Stop reading" : "Read aloud"} title="Read aloud (Gemini voice)"
-            style={{ width: "26px", height: "26px", display: "flex", alignItems: "center", justifyContent: "center",
-                background: "none", border: "none", borderRadius: "6px", color: "var(--text-muted)", cursor: "pointer", fontSize: "13px" }}>
-            {state === "loading" ? "…" : state === "playing" ? "■" : "🔊"}
-        </button>
-    );
-}
-
-function CopyButton({ text }) {
-    const [copied, setCopied] = useState(false);
-
-    const handleCopy = async () => {
-        await copyToClipboard(text);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
-    };
-
-    return (
-        <button
-            onClick={handleCopy}
-            aria-label={copied ? "Copied" : "Copy"}
-            title={copied ? "Copied" : "Copy"}
-            style={{
-                width: "26px", height: "26px", display: "flex", alignItems: "center", justifyContent: "center",
-                background: "none", border: "none", borderRadius: "6px",
-                color: copied ? "var(--accent)" : "var(--text-muted)", cursor: "pointer",
-            }}
-        >
-            {copied ? <CheckIcon /> : <CopyIcon />}
-        </button>
-    );
 }
 
 function GlobeIcon() {

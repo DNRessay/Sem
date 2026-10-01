@@ -200,6 +200,8 @@ class Bootstrap:
                 provider, messages, tools if step < _MAX_TOOL_STEPS else None, max_tokens=4096, deadline=deadline,
             )
             if "error" in result:
+                if result.get("suggest"):
+                    yield {"suggest_model": result["suggest"]}
                 raise RuntimeError(result["error"])
             calls = result.get("tool_calls") or []
             if not calls:

@@ -151,7 +151,7 @@ class ToolLoopAgent:
                 except httpx.HTTPError as e:
                     msg = {"error": f"model unreachable: {e}"}
                 if "error" in msg:
-                    yield {"type": "error", "text": msg["error"]}
+                    yield {"type": "error", "text": msg["error"], **({"suggest": msg["suggest"]} if msg.get("suggest") else {})}
                     return
 
                 content = msg.get("content") or ""

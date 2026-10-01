@@ -22,6 +22,13 @@ function newSessionId() {
     return `session_${Date.now()}`;
 }
 
+const VIEWS = ["chat", "allChats", "code", "cowork", "design", "settings", "finance"];
+
+function viewFromHash() {
+    const v = window.location.hash.slice(1);
+    return VIEWS.includes(v) ? v : "chat";
+}
+
 export default function App() {
     const [streaming, setStreaming] = useState(false);
     const [sessionId, setSessionId] = useState(() => {
@@ -35,7 +42,21 @@ export default function App() {
     const [sessionTitle, setSessionTitle] = useState("");
     const [menuOpen, setMenuOpen] = useState(false);
     const [agentFeedOpen, setAgentFeedOpen] = useState(false);
-    const [view, setView] = useState("chat");
+    // The open tab lives in the URL (#design, #code…) so a refresh stays put and the phone's back button works.
+    const [view, setView] = useState(viewFromHash);
+    useEffect(() => {
+        const target = view === "chat" ? "" : `#${view}`;
+        if (window.location.hash !== target) {
+            if (target) window.location.hash = view;
+            else history.pushState(null, "", window.location.pathname + window.location.search);
+        }
+    }, [view]);
+    useEffect(() => {
+        const onNav = () => setView(viewFromHash());
+        window.addEventListener("hashchange", onNav);
+        window.addEventListener("popstate", onNav);
+        return () => { window.removeEventListener("hashchange", onNav); window.removeEventListener("popstate", onNav); };
+    }, []);
     // Work passed between tabs ("Open in Code →"): the target tab starts a new chat with this task filled in.
     const [handoff, setHandoff] = useState(null);
     const handOff = (tab, task) => {

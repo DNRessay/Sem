@@ -61,6 +61,16 @@ PROVIDERS = {p.id: p for p in [
 ]}
 HF_PREFIX = "hf:"
 FREE_ORDER = ("bonsai", "gemini", "groq")
+# Cheapest first — offered (never switched to silently) when every free model is out.
+PAID_ORDER = ("qwen", "deepseek", "kimi", "openai", "anthropic")
+
+
+def cheapest_paid() -> dict | None:
+    for pid in PAID_ORDER:
+        p = PROVIDERS[pid]
+        if p.configured:
+            return {"id": p.id, "label": p.label}
+    return None
 
 
 def available() -> list[dict]:
@@ -155,6 +165,9 @@ async def complete(choice: str, messages: list[dict], tools: list[dict] | None =
     finally:
         if owns_client:
             await client.aclose()
+    if choice == "auto" and (last.get("rate_limited") or last.get("unavailable")):
+        # The free chain is exhausted for now; the UI asks before using a paid model.
+        last = {**last, "suggest": cheapest_paid()}
     if len(errors) > 1:
         return {**last, "error": "No free model answered — " + " · ".join(errors)}
     return last

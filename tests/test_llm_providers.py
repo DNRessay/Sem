@@ -135,3 +135,12 @@ async def test_a_picked_model_retries_once_on_overload(keys, monkeypatch):
         route = respx.post(GEMINI).mock(side_effect=[Response(503, json={"error": "high demand"}), _ok("ok")])
         msg = await llm_providers.complete("gemini", [{"role": "user", "content": "hi"}])
     assert msg["_provider"] == "gemini" and route.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_auto_suggests_the_cheapest_paid_model_when_free_ones_are_out(keys):
+    with respx.mock:
+        respx.post(GEMINI).mock(return_value=Response(429))
+        respx.post(GROQ).mock(return_value=Response(429))
+        msg = await llm_providers.complete("auto", [{"role": "user", "content": "hi"}])
+    assert "error" in msg and msg["suggest"]["id"] == "qwen"
