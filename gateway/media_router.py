@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from gateway.auth import require_account
-from tools import gemini_media
+from tools import gemini_media, image_gen
 
 router = APIRouter(prefix="/media")
 
@@ -12,7 +12,7 @@ async def image(request: Request, _account: dict = Depends(require_account)):
     prompt = (body.get("prompt") or "").strip()
     if not prompt:
         raise HTTPException(400, "prompt required")
-    result = await gemini_media.generate_image(prompt, body.get("aspect_ratio") or "1:1")
+    result = await image_gen.generate_image(prompt, body.get("aspect_ratio") or "1:1")
     if not result["ok"]:
         raise HTTPException(429 if result.get("rate_limited") else 400, result["error"])
     return result

@@ -16,7 +16,7 @@ from pipeline.code_tasks import connector_token, open_pr, valid_target
 from pipeline.mcp_tools import MCPToolset
 from pipeline.site_brief import learn_site
 from storage.neon_store import get_store
-from tools import gemini_media
+from tools import gemini_media, image_gen
 from tools.code_workspace import CodeWorkspace
 from tools.web.search import web_search
 
@@ -54,7 +54,7 @@ TOOLS = [
           ["provider", "repo", "title"]),
     _tool("web_search", "Web search", "Search the web.", {"query": _S}, ["query"], True),
     _tool("search_memory", "Search past chats", "Search the owner's past SEMBLANCE conversations.", {"term": _S}, ["term"], True),
-    _tool("generate_image", "Generate image", "Create an image (Gemini Nano Banana).",
+    _tool("generate_image", "Generate image", "Create an image (Gemini, or open-source FLUX when Gemini is out of quota).",
           {"prompt": _S, "aspect_ratio": {"type": "string", "enum": list(gemini_media.ASPECT_RATIOS)}}, ["prompt"]),
     _tool("speak", "Text to speech", "Read text aloud (Gemini voice). Returns WAV audio.",
           {"text": _S, "voice": {"type": "string", "enum": list(gemini_media.VOICES)}}, ["text"]),
@@ -136,7 +136,7 @@ async def call_tool(name: str, args: dict, account_id: str) -> dict:
         db = await get_store()
         return _text(json.dumps(await db.search_conversations(args.get("term", ""), limit=20), default=str))
     if name == "generate_image":
-        r = await gemini_media.generate_image(args.get("prompt", ""), args.get("aspect_ratio") or "1:1")
+        r = await image_gen.generate_image(args.get("prompt", ""), args.get("aspect_ratio") or "1:1")
         if not r["ok"]:
             return _text(r["error"], True)
         return {"content": [{"type": "image", "data": r["base64"], "mimeType": r["mime"]}], "isError": False}

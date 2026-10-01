@@ -54,7 +54,7 @@ async def test_generated_image_goes_to_the_ui_but_not_back_to_the_model(monkeypa
     async def fake_image(prompt, aspect_ratio="1:1"):
         return {"ok": True, "mime": "image/png", "base64": "QUJD" * 1000}
 
-    monkeypatch.setattr("agents.cowork_agent.gemini_media.generate_image", fake_image)
+    monkeypatch.setattr("agents.cowork_agent.image_gen.generate_image", fake_image)
     with respx.mock:
         route = respx.post(GROQ).mock(side_effect=[
             _reply("", [_call("c1", "generate_image", {"prompt": "a flyer", "aspect_ratio": "4:5"})]),

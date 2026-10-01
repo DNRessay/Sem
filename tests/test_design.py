@@ -77,7 +77,7 @@ def test_ads_stream_sends_copy_then_images(client, monkeypatch):
         return {"ok": True, "mime": "image/png", "base64": "QUJD"}
 
     monkeypatch.setattr("gateway.design_router.write_variants", fake_write)
-    monkeypatch.setattr("gateway.design_router.gemini_media.generate_image", fake_image)
+    monkeypatch.setattr("gateway.design_router.image_gen.generate_image", fake_image)
     r = client.post("/design/ads", json={"brief": "bakery", "campaign": "weekend special"})
     events = [json.loads(line[6:]) for line in r.text.split("\n") if line.startswith("data: {")]
     assert [e["type"] for e in events] == ["variants", "image", "image_error"]
@@ -112,7 +112,7 @@ def test_inspiration_images_shape_the_copy_and_the_images(client, monkeypatch):
 
     monkeypatch.setattr("gateway.design_router.gemini_media.describe_style", fake_describe)
     monkeypatch.setattr("gateway.design_router.write_variants", fake_write)
-    monkeypatch.setattr("gateway.design_router.gemini_media.generate_image", fake_image)
+    monkeypatch.setattr("gateway.design_router.image_gen.generate_image", fake_image)
     refs = [{"mime": "image/jpeg", "base64": "QUJD"}] * 6 + [{"mime": "text/html", "base64": "x"}]
     r = client.post("/design/ads", json={"brief": "bakery", "campaign": "weekend", "references": refs})
     types = [json.loads(line[6:])["type"] for line in r.text.split("\n") if line.startswith("data: {")]

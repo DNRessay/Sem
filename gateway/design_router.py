@@ -8,7 +8,7 @@ from pipeline.activity import log, session_for
 from pipeline.ad_studio import PLACEMENTS, write_variants
 from pipeline.site_brief import learn_site
 from storage.neon_store import get_store
-from tools import gemini_media
+from tools import gemini_media, image_gen
 from tools.mcp_client import MCPClient
 from tools.video_tool import video_call
 
@@ -65,9 +65,9 @@ async def ads(request: Request, _account: dict = Depends(require_account)):
         yield f"data: {json.dumps({'type': 'variants', 'variants': variants})}\n\n"
         if body.get("images", True):
             for i, v in enumerate(variants):
-                img = await gemini_media.generate_image(v["image_prompt"], v["aspect_ratio"], references=refs)
+                img = await image_gen.generate_image(v["image_prompt"], v["aspect_ratio"], references=refs)
                 await log(session, "gemini", f"{'ok' if img['ok'] else 'blocked'}:image {i + 1} — "
-                                             f"{'made' if img['ok'] else img['error']}")
+                                             f"{('made with ' + img.get('engine', 'gemini')) if img['ok'] else img['error']}")
                 if img["ok"]:
                     yield f"data: {json.dumps({'type': 'image', 'index': i, 'mime': img['mime'], 'base64': img['base64']})}\n\n"
                 else:
@@ -82,7 +82,7 @@ async def ads(request: Request, _account: dict = Depends(require_account)):
 @router.post("/image")
 async def regenerate_image(request: Request, _account: dict = Depends(require_account)):
     body = await request.json()
-    result = await gemini_media.generate_image((body.get("prompt") or "").strip(), body.get("aspect_ratio") or "1:1",
+    result = await image_gen.generate_image((body.get("prompt") or "").strip(), body.get("aspect_ratio") or "1:1",
                                                references=body.get("references"))
     if not result["ok"]:
         raise HTTPException(429 if result.get("rate_limited") else 400, result["error"])

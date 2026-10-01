@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from agents.tool_loop import ToolLoopAgent, fn_tool
 from config import settings
 from storage.neon_store import get_store
-from tools import gemini_media
+from tools import gemini_media, image_gen
 from tools.google.calendar_tool import CalendarTool
 from tools.google.contacts_tool import ContactsTool
 from tools.google.drive_tool import DriveTool
@@ -59,7 +59,7 @@ TOOLS = {
     "list_reminders": fn_tool("list_reminders", "List the user's upcoming reminders.", {}, []),
     "contacts_search": fn_tool("contacts_search", "Find a person in Google Contacts.", {"query": _S}, ["query"]),
     "generate_image": fn_tool(
-        "generate_image", "Create an image with Gemini (Nano Banana). It's shown to the user directly.",
+        "generate_image", "Create an image (Gemini, or open-source FLUX when Gemini is out of quota). It's shown to the user directly.",
         {"prompt": _S, "aspect_ratio": {"type": "string", "enum": list(gemini_media.ASPECT_RATIOS)}}, ["prompt"],
     ),
 }
@@ -147,7 +147,7 @@ class CoworkAgent(ToolLoopAgent):
         if name == "contacts_search":
             return await ContactsTool().query("search_contacts", account_id=acct, query=args.get("query", ""))
         if name == "generate_image":
-            return await gemini_media.generate_image(args.get("prompt", ""), args.get("aspect_ratio") or "1:1")
+            return await image_gen.generate_image(args.get("prompt", ""), args.get("aspect_ratio") or "1:1")
         return {"ok": False, "error": f"unknown tool {name}"}
 
     def extra_events(self, call_id: str, name: str, args: dict, result: dict) -> list[dict]:
