@@ -1,60 +1,42 @@
 import pytest
-import respx
-from httpx import Response
 
+from agents import general_agent
 from agents.general_agent import GeneralAgent
 
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
+def _replies(*msgs):
+    queue = list(msgs)
 
-def _groq_response(content: str):
-    return Response(200, json={
-        "choices": [{"message": {"content": content}, "finish_reason": "stop"}]
-    })
+    async def fake_complete(choice, messages, tools=None, **kw):
+        fake_complete.calls.append((choice, messages, [t["function"]["name"] for t in tools or []]))
+        return queue.pop(0)
 
-
-@pytest.mark.asyncio
-async def test_run_makes_exactly_one_bounded_llm_call(moto_cache_table):
-    """The previous implementation looped up to MAX_ITERATIONS=10 times,
-    each with its own max_tokens budget, against a Groq tier capped at 1000
-    output tokens/minute total — a single delegated task could blow the
-    whole account's per-minute budget on its own. One call through the
-    shared, rate-aware QueryEngine is what this account can sustain."""
-    agent = GeneralAgent(session_id="s1")
-    with respx.mock:
-        route = respx.post(GROQ_URL).mock(return_value=_groq_response("here's the answer"))
-        result = await agent.run({"query": "what's 2+2"})
-
-    assert route.call_count == 1
-    assert result == {"status": "complete", "result": "here's the answer", "iterations": 1}
+    fake_complete.calls = []
+    return fake_complete
 
 
 @pytest.mark.asyncio
-async def test_run_folds_context_in_as_a_system_message(moto_cache_table):
-    agent = GeneralAgent(session_id="s1")
-    with respx.mock:
-        route = respx.post(GROQ_URL).mock(return_value=_groq_response("ok"))
-        await agent.run({"query": "go", "context": "you are helpful"})
+async def test_delegated_task_can_search_then_answer_on_the_free_chain(monkeypatch):
+    fake = _replies(
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"id": "1", "type": "function", "function": {"name": "web_search", "arguments": '{"query": "load shedding today"}'}}]},
+        {"role": "assistant", "content": "Stage 2 from 16:00 (source: eskom.co.za)", "_provider": "gemini"},
+    )
 
-    import json
-    body = json.loads(route.calls[0].request.content)
-    assert body["messages"][0] == {"role": "system", "content": "you are helpful"}
-    assert body["messages"][1] == {"role": "user", "content": "go"}
+    async def fake_search(q):
+        return {"ok": True, "results": [{"title": "Eskom", "url": "https://eskom.co.za"}]}
+
+    monkeypatch.setattr("agents.tool_loop.llm_providers.complete", fake)
+    monkeypatch.setattr(general_agent, "web_search", fake_search)
+    result = await GeneralAgent(session_id="s1").run({"query": "is there load shedding today?", "context": "Owner is in Joburg"})
+    assert result == {"status": "complete", "result": "Stage 2 from 16:00 (source: eskom.co.za)", "iterations": 1}
+    choice, messages, tools = fake.calls[0]
+    assert choice == "auto" and "web_search" in tools and "Owner is in Joburg" in messages[0]["content"]
 
 
 @pytest.mark.asyncio
-async def test_run_returns_an_error_for_an_empty_query(moto_cache_table):
-    agent = GeneralAgent(session_id="s1")
-    result = await agent.run({"query": ""})
-    assert result == {"error": "No query provided"}
-
-
-@pytest.mark.asyncio
-async def test_run_surfaces_a_groq_failure_instead_of_raising(moto_cache_table):
-    agent = GeneralAgent(session_id="s1")
-    with respx.mock:
-        respx.post(GROQ_URL).mock(return_value=Response(401, json={"error": {"message": "Invalid API Key"}}))
-        result = await agent.run({"query": "hi"})
-
-    assert result["status"] == "error"
-    assert "Invalid API Key" in result["result"]
+async def test_empty_query_and_model_failure(monkeypatch):
+    assert await GeneralAgent(session_id="s1").run({"query": ""}) == {"error": "No query provided"}
+    monkeypatch.setattr("agents.tool_loop.llm_providers.complete", _replies({"error": "No free model answered"}))
+    result = await GeneralAgent(session_id="s1").run({"query": "hi"})
+    assert result["status"] == "error" and "No free model answered" in result["result"]

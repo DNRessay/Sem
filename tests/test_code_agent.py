@@ -80,7 +80,7 @@ async def test_plan_mode_only_offers_and_allows_read_only_tools():
         events = [e async for e in CodeAgent(ws, mode="plan").run("plan it")]
 
     offered = {t["function"]["name"] for t in json.loads(route.calls[0].request.content)["tools"]}
-    assert offered == {"list_dir", "read_file", "grep", "aws", "handoff"}
+    assert offered == {"list_dir", "read_file", "grep", "aws", "deep_research", "handoff"}
     assert ws.calls == []
     assert events[1] == {"type": "result", "id": "c1", "name": "write_file", "ok": False, "output": "plan mode is read-only"}
 
@@ -183,3 +183,16 @@ async def test_one_chat_can_work_across_several_repos():
     agent.extra_events("c1", "merge_pr", {"number": 2, "repo": "me/site"}, result)
     assert agent.pending["c1"] == {"name": "merge_pr", "args": {"number": 2}, "provider": "gitlab", "repo": "me/site"}
     assert "me/site" in agent.system_prompt()
+
+
+@pytest.mark.asyncio
+async def test_deep_research_works_in_plan_mode(monkeypatch):
+    from agents import research_agent
+
+    async def fake(question, provider="auto"):
+        return {"ok": True, "answer": f"cited: {question}", "pages_read": []}
+
+    monkeypatch.setattr(research_agent, "deep_research", fake)
+    agent = CodeAgent(FakeWorkspace(), mode="plan")
+    assert "deep_research" in [t["function"]["name"] for t in agent.tools()]
+    assert (await agent.dispatch("deep_research", {"question": "q"}))["answer"] == "cited: q"

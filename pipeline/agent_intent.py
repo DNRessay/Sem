@@ -56,7 +56,7 @@ def explore_status_label(term: str) -> str:
 
 async def run_plan_intent(goal: str, session_id: str) -> dict:
     """Routes through CablesMan (Step 7 — sub-agent delegation) to
-    PlanAgent, a single bounded Groq call via the shared QueryEngine (see
+    PlanAgent, a single call on the free model chain (see
     agents/plan_agent.py). Returns the raw plan dict, or an empty dict on
     any failure so a broken/misconfigured planner degrades to "no plan
     generated," never a chat-breaking error.

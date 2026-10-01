@@ -106,6 +106,7 @@ class Settings(BaseSettings):
     SERP_API_KEY: str = ""
     WHATSAPP_TOKEN: str = ""
     WHATSAPP_PHONE_ID: str = ""
+    GITHUB_WEBHOOK_SECRET: str = ""  # the repo webhook's secret; /webhook/github checks signatures when set
     WHATSAPP_VERIFY_TOKEN: str = ""  # arbitrary string you also enter in the Meta App Dashboard webhook config
     OPENCLAW_URL: str = ""  # optional self-hosted WhatsApp/Telegram/Slack bridge
     # KAIROS (agents/kairos.py, every EventBridge tick): delivers due

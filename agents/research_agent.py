@@ -43,3 +43,27 @@ class ResearchAgent(ToolLoopAgent):
             db = await get_store()
             return {"matches": await db.search_conversations(args.get("term", ""), limit=20)}
         return {"ok": False, "error": f"unknown tool {name}"}
+
+
+_TOOL_STEPS = 8
+_TOOL_SECONDS = 150
+
+
+async def deep_research(question: str, provider: str = "auto") -> dict:
+    """The research loop as one tool call for other agents: a smaller
+    budget than the Deep research toggle so it fits inside their turn."""
+    question = (question or "").strip()
+    if not question:
+        return {"ok": False, "error": "question is empty"}
+    agent = ResearchAgent(provider, max_steps=_TOOL_STEPS, deadline_seconds=_TOOL_SECONDS)
+    answer, read, error = "", [], ""
+    async for ev in agent.run(question):
+        if ev["type"] == "text":
+            answer += ev["text"]
+        elif ev["type"] == "tool" and ev["name"] == "fetch_url":
+            read.append(ev["args"].get("url", ""))
+        elif ev["type"] == "error":
+            error = ev["text"]
+    if not answer:
+        return {"ok": False, "error": error or "research found nothing to report", "pages_read": read}
+    return {"ok": True, "answer": answer, "pages_read": read, **({"note": error} if error else {})}

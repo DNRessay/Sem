@@ -25,16 +25,16 @@ async def test_run_returns_the_plan_text():
 
 
 @pytest.mark.asyncio
-async def test_run_uses_the_planning_model():
-    from config import settings
-    agent = UltraPlanAgent(session_id="s1")
-    with respx.mock:
-        route = respx.post(GROQ_URL).mock(return_value=_groq_response("plan"))
-        await agent.run({"query": "ship it"})
+async def test_run_uses_the_free_chain_with_a_big_budget(monkeypatch):
+    seen = {}
 
-    import json
-    body = json.loads(route.calls[0].request.content)
-    assert body["model"] == settings.GROQ_PLANNING_MODEL
+    async def fake_complete(choice, messages, tools=None, max_tokens=0, **kw):
+        seen.update(choice=choice, max_tokens=max_tokens)
+        return {"role": "assistant", "content": "plan"}
+
+    monkeypatch.setattr("agents.ultraplan.llm_providers.complete", fake_complete)
+    await UltraPlanAgent(session_id="s1").run({"query": "ship it"})
+    assert seen == {"choice": "auto", "max_tokens": 4096}
 
 
 @pytest.mark.asyncio

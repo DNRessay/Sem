@@ -108,6 +108,7 @@ jobs:
           WHATSAPP_TOKEN: ${{ secrets.WHATSAPP_TOKEN }}
           WHATSAPP_PHONE_ID: ${{ secrets.WHATSAPP_PHONE_ID }}
           WHATSAPP_VERIFY_TOKEN: ${{ secrets.WHATSAPP_VERIFY_TOKEN }}
+          GITHUB_WEBHOOK_SECRET: ${{ secrets.GH_WEBHOOK_SECRET }}
           OPENCLAW_URL: ${{ secrets.OPENCLAW_URL }}
           MCP_SERVERS: ${{ secrets.MCP_SERVERS }}
           # Secret name can't start with GITHUB_ — GitHub Actions reserves
@@ -153,6 +154,7 @@ jobs:
           whatsapp_token=$(printf '%s' "$WHATSAPP_TOKEN" | tr -d '\r\n')
           whatsapp_phone_id=$(printf '%s' "$WHATSAPP_PHONE_ID" | tr -d '\r\n')
           whatsapp_verify_token=$(printf '%s' "$WHATSAPP_VERIFY_TOKEN" | tr -d '\r\n')
+          github_webhook_secret=$(printf '%s' "$GITHUB_WEBHOOK_SECRET" | tr -d '\r\n')
           openclaw_url=$(printf '%s' "$OPENCLAW_URL" | tr -d '\r\n')
           mcp_servers=$(printf '%s' "$MCP_SERVERS" | tr -d '\r\n')
           github_oauth_client_id=$(printf '%s' "$GH_OAUTH_CLIENT_ID" | tr -d '\r\n')
@@ -209,6 +211,7 @@ jobs:
           [ -n "$whatsapp_token" ] && params+=("WhatsappToken=${whatsapp_token}")
           [ -n "$whatsapp_phone_id" ] && params+=("WhatsappPhoneId=${whatsapp_phone_id}")
           [ -n "$whatsapp_verify_token" ] && params+=("WhatsappVerifyToken=${whatsapp_verify_token}")
+          [ -n "$github_webhook_secret" ] && params+=("GithubWebhookSecret=${github_webhook_secret}")
           [ -n "$openclaw_url" ] && params+=("OpenclawUrl=${openclaw_url}")
           [ -n "$mcp_servers" ] && params+=("McpServers=${mcp_servers}")
           [ -n "$github_oauth_client_id" ] && params+=("GithubClientId=${github_oauth_client_id}")

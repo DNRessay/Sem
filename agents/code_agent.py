@@ -95,13 +95,18 @@ TOOLS = {
         "and prefer the cheapest option.",
         {"service": _S, "operation": _S, "params": {"type": "object"}, "region": _S}, ["service", "operation"],
     ),
+    "deep_research": fn_tool(
+        "deep_research", "Research a question on the web properly (several searches, reads docs/issues, cross-checks) "
+        "and get a cited answer — library APIs, error messages, best practice. Takes a minute or two.",
+        {"question": _S}, ["question"],
+    ),
     "aws": fn_tool(
         "aws", "Read-only AWS call via boto3 (Describe*/List*/Get* only), e.g. service='lambda', operation='ListFunctions'.",
         {"service": _S, "operation": _S, "params": {"type": "object"}, "region": _S}, ["service", "operation"],
     ),
 }
-_NOT_REPO_SCOPED = {"aws", "aws_action"}
-_READ_ONLY = ("list_dir", "read_file", "grep", "aws", "list_prs", "pr_status", "list_workflows", "list_ci_runs",
+_NOT_REPO_SCOPED = {"aws", "aws_action", "deep_research"}
+_READ_ONLY = ("list_dir", "read_file", "grep", "aws", "deep_research", "list_prs", "pr_status", "list_workflows", "list_ci_runs",
               "ci_logs", "list_secrets")
 _HOST_TOOLS = {"open_pr", "list_prs", "pr_status", "list_workflows", "list_ci_runs", "ci_logs", "list_secrets",
                "merge_pr", "push_branch", "run_workflow", "rerun_ci", "set_secret"}
@@ -178,6 +183,9 @@ class CodeAgent(ToolLoopAgent):
     async def _dispatch(self, name: str, args: dict) -> dict:
         if self.mode == "plan" and name not in _READ_ONLY:
             return {"ok": False, "error": "plan mode is read-only"}
+        if name == "deep_research":
+            from agents.research_agent import deep_research
+            return await deep_research(args.get("question", ""), self.provider)
         if name == "list_dir":
             return await self.ws.list_dir(args.get("path", ""))
         if name == "read_file":

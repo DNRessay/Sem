@@ -55,3 +55,20 @@ async def test_repo_tools_only_with_an_attached_repo(monkeypatch):
     assert "repo_read" not in [t["function"]["name"] for t in tools]
     result = await chat_tools.run("repo_read", {"path": "README.md"}, "s", None)
     assert "attach" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_deep_research_tool_returns_the_cited_answer(monkeypatch):
+    from agents import research_agent
+
+    async def fake_run(self, task, history=None):
+        assert self.max_steps == 8
+        yield {"type": "tool", "id": "1", "name": "fetch_url", "args": {"url": "https://a"}}
+        yield {"type": "text", "text": "Answer [1]"}
+        yield {"type": "done", "steps": 2, "model": "bonsai"}
+
+    monkeypatch.setattr(research_agent.ResearchAgent, "run", fake_run)
+    assert "deep_research" in [t["function"]["name"] for t in chat_tools.BASE]
+    out = await chat_tools.run("deep_research", {"question": "best x?"}, "s1", None)
+    assert out == {"ok": True, "answer": "Answer [1]", "pages_read": ["https://a"]}
+    assert (await research_agent.deep_research("  "))["ok"] is False

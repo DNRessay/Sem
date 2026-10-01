@@ -133,6 +133,11 @@ Parameters:
     NoEcho: true
     Default: ""
     Description: "Arbitrary string also entered in the Meta App Dashboard's webhook Verify Token field"
+  GithubWebhookSecret:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: "Secret entered in the GitHub repo's webhook settings; signatures are checked when set"
   OpenclawUrl:
     Type: String
     Default: ""
@@ -219,6 +224,7 @@ Globals:
         WHATSAPP_TOKEN: !Ref WhatsappToken
         WHATSAPP_PHONE_ID: !Ref WhatsappPhoneId
         WHATSAPP_VERIFY_TOKEN: !Ref WhatsappVerifyToken
+        GITHUB_WEBHOOK_SECRET: !Ref GithubWebhookSecret
         OPENCLAW_URL: !Ref OpenclawUrl
         MCP_SERVERS: !Ref McpServers
         GITHUB_CLIENT_ID: !Ref GithubClientId

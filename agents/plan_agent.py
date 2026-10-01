@@ -1,7 +1,8 @@
 import json
+import re
 
 from agents.base_agent import BaseAgent
-from pipeline.query_engine import QueryEngine
+from pipeline import llm_providers
 
 
 class PlanAgent(BaseAgent):
@@ -11,15 +12,9 @@ class PlanAgent(BaseAgent):
     chat message (see pipeline/agent_intent.py).
     """
 
-    # Capped at QueryEngine's own safe ceiling (_DEFAULT_MAX_TOKENS, 800) —
-    # the previous 512/1024/2048 spread let "deep" alone request more output
-    # tokens than this Groq tier allows in an entire minute (1000 OTPM),
-    # which is the exact failure QueryEngine exists to avoid.
-    _DEPTH_TOKENS = {"quick": 400, "medium": 800, "deep": 800}
-
-    def __init__(self, tools_registry=None, cables_man_ref=None, **kwargs):
-        super().__init__(tools_registry, cables_man_ref, **kwargs)
-        self._query_engine = QueryEngine()
+    # Runs on the free chain (Bonsai → Gemini → Groq); Groq's own provider
+    # cap still keeps its share small if it ends up answering.
+    _DEPTH_TOKENS = {"quick": 600, "medium": 1200, "deep": 2400}
 
     async def run(self, task: dict) -> dict:
         goal = task.get("goal", "")
@@ -32,11 +27,9 @@ class PlanAgent(BaseAgent):
             return {"error": "No goal provided to PlanAgent"}
 
         plan = await self._generate_plan(goal, context, depth)
-        # "status": "complete" matters beyond this return value — CablesMan.
-        # route reads it to decide what to write to the agent_events audit
-        # trail (and whether to clear working_mem for this session). Without
-        # it, a fully successful plan was logged as "error" in AgentFeed —
-        # this key's absence, not any actual failure, was the bug.
+        if "error" in plan:
+            # No pretend plan: say it failed so the chat falls back to a normal answer.
+            return {"status": "error", "goal": goal, "error": plan["error"]}
         return {
             "status": "complete",
             "goal": goal,
@@ -51,23 +44,19 @@ class PlanAgent(BaseAgent):
             "You are a precise execution planner. "
             "Given a goal, produce a numbered step-by-step plan. "
             "Each step must be concrete and actionable — no vague instructions. "
-            "Output JSON: {steps: [{n, action, tool, expected_output}], risks: [], success_criteria: ''}"
+            "Reply with ONLY a JSON object: {\"steps\": [{\"n\", \"action\", \"tool\", \"expected_output\"}], \"risks\": [], \"success_criteria\": \"\"}"
         )
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": f"Goal: {goal}\n\nContext: {context}"},
         ]
 
+        result = await llm_providers.complete("auto", messages, max_tokens=max_tokens)
+        if "error" in result:
+            return {"error": result["error"]}
+        text = result.get("content") or ""
+        match = re.search(r"\{[\s\S]*\}", text)
         try:
-            result = await self._query_engine.call_llm(
-                messages, session_id=self._session_id, max_tokens=max_tokens,
-                temperature=0.2, response_format={"type": "json_object"},
-            )
-            return json.loads(result.get("content", "{}"))
-        except Exception as e:
-            return {
-                "steps": [{"n": 1, "action": goal, "tool": "general", "expected_output": "completion"}],
-                "risks": [],
-                "success_criteria": "Task completed without error",
-                "error": str(e),
-            }
+            return json.loads(match.group(0) if match else text)
+        except ValueError:
+            return {"error": "the model didn't return a plan in the expected format"}

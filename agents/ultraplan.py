@@ -1,12 +1,10 @@
-import httpx
-
 from agents.base_agent import BaseAgent
-from config import settings
+from pipeline import llm_providers
 
 
 class UltraPlanAgent(BaseAgent):
     """
-    Deep planning via Groq's larger GPT-OSS-120B model (GROQ_PLANNING_MODEL)
+    Deep planning with a big output budget on the free model chain
     — a bigger-budget, slower alternative to PlanAgent's quick pass, for a
     goal that genuinely needs more reasoning. Single bounded call, same
     shape as PlanAgent (agents/plan_agent.py).
@@ -22,7 +20,6 @@ class UltraPlanAgent(BaseAgent):
     """
 
     _MAX_TOKENS = 4096
-    _TIMEOUT_SECONDS = 25  # well under Lambda's 30s Globals.Function.Timeout
 
     async def run(self, task: dict) -> dict:
         query = task.get("query", "")
@@ -34,35 +31,12 @@ class UltraPlanAgent(BaseAgent):
         return {"status": "complete", "goal": query, "plan": plan}
 
     async def _deep_plan(self, query: str) -> str:
-        """Calls GPT-OSS-120B via Groq directly (not through QueryEngine —
-        this model's own use case, one long detailed reply, is exactly what
-        QueryEngine's tight _DEFAULT_MAX_TOKENS/cache-vector machinery isn't
-        tuned for). Any failure returns a plain error string rather than
-        raising, so a bad response degrades to a visible message instead of
-        crashing the whole chat turn."""
-        headers = {
-            "Authorization": f"Bearer {settings.GROQ_API_KEY}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": settings.GROQ_PLANNING_MODEL,
-            "messages": [
-                {"role": "system", "content": "You are a deep strategic planner. Think step-by-step, produce a detailed execution plan."},
-                {"role": "user", "content": query},
-            ],
-            "max_tokens": self._MAX_TOKENS,
-            "temperature": 0.6,
-        }
-        try:
-            async with httpx.AsyncClient(timeout=self._TIMEOUT_SECONDS) as client:
-                r = await client.post(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    json=payload, headers=headers,
-                )
-                data = r.json()
-        except httpx.HTTPError as e:
-            return f"Planning failed — network error: {e}"
-
-        if "choices" not in data:
-            return f"Planning failed — Groq API error (status {r.status_code}): {data}"
-        return data["choices"][0]["message"]["content"]
+        """One long, detailed reply on the free chain (Bonsai → Gemini → Groq).
+        A failure comes back as a readable message, never an exception."""
+        result = await llm_providers.complete("auto", [
+            {"role": "system", "content": "You are a deep strategic planner. Think step-by-step, produce a detailed execution plan."},
+            {"role": "user", "content": query},
+        ], max_tokens=self._MAX_TOKENS)
+        if "error" in result:
+            return f"Planning failed — {result['error'][:300]}"
+        return result.get("content") or "Planning failed — the model returned nothing."

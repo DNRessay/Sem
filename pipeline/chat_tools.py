@@ -20,6 +20,9 @@ BASE = [
             "It is not the user's own machine and can't see their files or repos.", {"command": _S}, ["command"]),
     fn_tool("search_memory", "Search every past SEMBLANCE conversation for a word or phrase (names, projects, "
             "anything the user told you before).", {"term": _S}, ["term"]),
+    fn_tool("deep_research", "Research a question properly: several searches, reads the best pages, cross-checks "
+            "and returns a cited answer. Takes a minute or two — use it when one web_search isn't enough.",
+            {"question": _S}, ["question"]),
     HANDOFF_TOOL,
 ]
 REPO = [
@@ -27,7 +30,8 @@ REPO = [
     fn_tool("repo_read", "Read a file from the repo attached to this chat.", {"path": _S}, ["path"]),
     fn_tool("repo_grep", "Search the repo attached to this chat for a term.", {"term": _S}, ["term"]),
 ]
-KIND = {"web_search": "search", "fetch_url": "fetch", "bash": "bash", "search_memory": "memory",
+KIND = {"web_search": "search", "deep_research": "search", "fetch_url": "fetch", "bash": "bash",
+        "search_memory": "memory",
         "repo_list": "read", "repo_read": "read", "repo_grep": "read", "handoff": "handoff"}
 
 
@@ -38,7 +42,7 @@ async def available(session_id: str) -> tuple[list[dict], dict | None]:
 
 
 def label(name: str, args: dict) -> str:
-    target = args.get("command") or args.get("query") or args.get("url") or args.get("term") or args.get("path") or ""
+    target = args.get("question") or args.get("command") or args.get("query") or args.get("url") or args.get("term") or args.get("path") or ""
     return f"{name} {target}".strip()[:120]
 
 
@@ -50,6 +54,9 @@ async def run(name: str, args: dict, session_id: str, active: dict | None) -> di
             return handoff_result(args)
         if name == "web_search":
             return await web_search(args.get("query", ""))
+        if name == "deep_research":
+            from agents.research_agent import deep_research
+            return await deep_research(args.get("question", ""))
         if name == "fetch_url":
             return await FetchTool().fetch(args.get("url", ""))
         if name == "bash":

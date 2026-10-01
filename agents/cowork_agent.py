@@ -30,6 +30,9 @@ _I = {"type": "integer"}
 TOOLS = {
     "web_search": fn_tool("web_search", "Search the web. Returns titles, URLs and snippets.", {"query": _S}, ["query"]),
     "fetch_url": fn_tool("fetch_url", "Read a web page as text.", {"url": _S}, ["url"]),
+    "deep_research": fn_tool("deep_research", "Research a question properly: several searches, reads the best pages, "
+                             "cross-checks and returns a cited answer. Takes a minute or two — use it when one "
+                             "web_search isn't enough.", {"question": _S}, ["question"]),
     "search_memory": fn_tool("search_memory", "Search the user's past SEMBLANCE conversations for a word or phrase.",
                              {"term": _S}, ["term"]),
     "gmail_search": fn_tool("gmail_search", "Search Gmail (Gmail search syntax, e.g. 'from:bank newer_than:7d').",
@@ -96,6 +99,9 @@ class CoworkAgent(ToolLoopAgent):
             return {"ok": True, "status": "waiting for the user's approval", "summary": _approval_summary(name, args)}
         if name == "web_search":
             return await web_search(args.get("query", ""))
+        if name == "deep_research":
+            from agents.research_agent import deep_research
+            return await deep_research(args.get("question", ""), self.provider)
         if name == "fetch_url":
             return await FetchTool().fetch(args.get("url", ""))
         if name == "search_memory":
