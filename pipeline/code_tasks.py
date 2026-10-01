@@ -1,0 +1,97 @@
+import re
+import time
+
+from agents.code_agent import CodeAgent
+from gateway.connectors import _ensure_fresh_gitlab_token
+from storage.neon_store import get_store
+from tools.code_workspace import CodeWorkspace
+from tools.repo_write_tool import RepoWriteTool, slugify
+
+PROVIDERS = ("github", "gitlab")
+_REPO_RE = re.compile(r"^[\w.-]+(/[\w.-]+)+$")
+EVERY_SECONDS = {"hourly": 3600, "daily": 86400, "weekly": 7 * 86400}
+
+
+def valid_target(provider: str, repo: str) -> bool:
+    if provider not in PROVIDERS or not _REPO_RE.fullmatch(repo or ""):
+        return False
+    return all(part not in (".", "..") for part in repo.split("/"))
+
+
+async def connector_token(account_id: str, provider: str) -> str | None:
+    db = await get_store()
+    connector = await db.get_connector(account_id, provider)
+    if not connector:
+        return None
+    if provider == "gitlab":
+        return await _ensure_fresh_gitlab_token(account_id, connector, db)
+    return connector["token"]
+
+
+async def open_pr(ws: CodeWorkspace, token: str, title: str, body: str = "") -> dict:
+    """Commits every changed file in the workspace to a fresh branch off the
+    default branch and opens a PR/MR back to it — the only way Code mode's
+    work ever reaches the repo, so a human always reviews it first."""
+    changes = await ws.changes()
+    if not changes.get("ok"):
+        return changes
+    files = changes.get("files") or {}
+    if not files:
+        return {"ok": False, "error": "No changes to open a PR with."}
+
+    writer = RepoWriteTool()
+    title = title.strip() or "Changes from Sem Code"
+    base = await writer.get_default_branch(ws.provider, ws.repo, token)
+    branch = f"sem-code/{slugify(title)}-{int(time.time())}"
+    created = await writer.create_branch(ws.provider, ws.repo, branch, base, token)
+    if not created.get("ok"):
+        return created
+    for path, content in files.items():
+        committed = await writer.commit_file(ws.provider, ws.repo, branch, path, content, f"{title}: {path}", token)
+        if not committed.get("ok"):
+            return committed
+
+    deleted = changes.get("deleted") or []
+    if deleted:
+        body += "\n\nNot included (file deletions aren't supported yet): " + ", ".join(deleted)
+    pr = await writer.create_pull_request(ws.provider, ws.repo, branch, base, title, body.strip(), token)
+    return {**pr, "branch": branch, "files": sorted(files)}
+
+
+async def run_due_automation(deadline_seconds: float = 600) -> dict | None:
+    """Runs at most one due automation per tick: fresh pull, agent run, PR if
+    it changed anything (and the automation asks for one), then the
+    workspace is reset so the next run starts clean."""
+    db = await get_store()
+    job = await db.claim_due_code_automation()
+    if not job:
+        return None
+
+    token = await connector_token(job["account_id"], job["provider"])
+    ws = CodeWorkspace(job["provider"], job["repo"])
+    await ws.discard()
+    opened = await ws.open(token)
+    if not opened.get("ok"):
+        result = f"Couldn't update the repo: {opened.get('error')}"
+        await db.set_code_automation_result(job["id"], result)
+        return {"id": job["id"], "result": result}
+
+    texts, error = [], None
+    async for event in CodeAgent(ws, max_steps=20, deadline_seconds=deadline_seconds).run(job["prompt"]):
+        if event["type"] == "text":
+            texts.append(event["text"])
+        elif event["type"] == "error":
+            error = event["text"]
+    summary = (texts[-1] if texts else "") or error or "No summary."
+
+    if job["open_pr"] and token:
+        pr = await open_pr(ws, token, f"Automation: {job['prompt'][:60]}", f"Scheduled Sem Code run.\n\n{summary}")
+        if pr.get("ok"):
+            summary = f"PR opened: {pr['url']}\n\n{summary}"
+        elif pr.get("error") != "No changes to open a PR with.":
+            summary = f"PR failed: {pr.get('error')}\n\n{summary}"
+    await ws.discard()
+
+    stamp = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime())
+    await db.set_code_automation_result(job["id"], f"[{stamp}] {summary}")
+    return {"id": job["id"], "result": summary}

@@ -140,6 +140,19 @@ _LOCAL_TIMEOUT = httpx.Timeout(10.0, read=110.0)
 _LOCAL_LOADING_POLL_SECONDS = 2.0
 
 
+async def wait_for_local_llm(client: httpx.AsyncClient, deadline: float) -> bool:
+    """True once the self-hosted model answers /health 200. llama-server
+    answers 503 "Loading model" for a while after a cold start even once its
+    port is open, so poll through that until `deadline` (time.monotonic())."""
+    headers = {"Authorization": f"Bearer {settings.LOCAL_LLM_API_KEY}"}
+    health_url = settings.LOCAL_LLM_URL.rstrip("/") + "/health"
+    while True:
+        r = await client.get(health_url, headers=headers)
+        if r.status_code != 503 or time.monotonic() >= deadline:
+            return r.status_code == 200
+        await asyncio.sleep(_LOCAL_LOADING_POLL_SECONDS)
+
+
 async def _stream_local(messages: list, max_tokens: int):
     """Yields reply deltas from the self-hosted Bonsai endpoint
     (modal_app/llm.py). Never raises — any failure just ends the stream, so
@@ -155,19 +168,10 @@ async def _stream_local(messages: list, max_tokens: int):
         "stream": True,
     }
     headers = {"Authorization": f"Bearer {settings.LOCAL_LLM_API_KEY}", "Content-Type": "application/json"}
-    base = settings.LOCAL_LLM_URL.rstrip("/")
-    url, health_url = base + "/v1/chat/completions", base + "/health"
-    deadline = time.monotonic() + _LOCAL_TIMEOUT.read
+    url = settings.LOCAL_LLM_URL.rstrip("/") + "/v1/chat/completions"
     try:
         async with httpx.AsyncClient(timeout=_LOCAL_TIMEOUT) as client:
-            # llama-server answers 503 "Loading model" for a while after a
-            # cold start even once its port is open — poll through that.
-            while True:
-                r = await client.get(health_url, headers=headers)
-                if r.status_code != 503 or time.monotonic() >= deadline:
-                    break
-                await asyncio.sleep(_LOCAL_LOADING_POLL_SECONDS)
-            if r.status_code != 200:
+            if not await wait_for_local_llm(client, time.monotonic() + _LOCAL_TIMEOUT.read):
                 return
             async with client.stream("POST", url, json=payload, headers=headers) as r:
                 if r.status_code != 200:

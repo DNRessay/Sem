@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from cache.sys_cache import SysCache
+from gateway.code_router import router as code_router
 from gateway.connectors import router as connectors_router
 from gateway.google_oauth import router as google_oauth_router
 from gateway.router import router
@@ -63,3 +64,4 @@ app.include_router(google_oauth_router)
 app.include_router(connectors_router)
 app.include_router(skills_router)
 app.include_router(webhook_router)
+app.include_router(code_router)

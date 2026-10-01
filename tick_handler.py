@@ -15,6 +15,7 @@ import asyncio
 
 from agents.dream_agent import DreamAgent
 from agents.kairos import KairosDaemon
+from pipeline.code_tasks import run_due_automation
 
 
 def handler(event, context):
@@ -28,4 +29,10 @@ async def _run():
     dream = DreamAgent()
     dream_result = await dream.run({})
 
-    return {"status": "ok", "kairos_audit": kairos.get_audit(), "dream": dream_result}
+    # One scheduled Code tab automation per tick at most (see pipeline/code_tasks.py).
+    try:
+        automation = await run_due_automation()
+    except Exception as e:  # a broken automation must not take KAIROS/DREAM down with it
+        automation = {"error": str(e)[:300]}
+
+    return {"status": "ok", "kairos_audit": kairos.get_audit(), "dream": dream_result, "automation": automation}

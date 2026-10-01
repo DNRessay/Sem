@@ -291,6 +291,24 @@ class NeonStore:
             # from anywhere in the live request path — the gate could never
             # pass. One row, keyed by a fixed id since there's only ever one
             # DREAM cycle running across the whole app, not one per session.
+            # Code tab automations: a saved prompt run against a repo on a
+            # schedule by the EventBridge tick (tick_handler.py), optionally
+            # opening a PR with whatever it changed.
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS code_automations (
+                    id BIGSERIAL PRIMARY KEY,
+                    account_id TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    repo TEXT NOT NULL,
+                    prompt TEXT NOT NULL,
+                    every_seconds BIGINT NOT NULL,
+                    open_pr BOOLEAN NOT NULL DEFAULT TRUE,
+                    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                    last_run_at BIGINT NOT NULL DEFAULT 0,
+                    last_result TEXT NOT NULL DEFAULT '',
+                    created_at BIGINT NOT NULL
+                )
+            """)
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS dream_state (
                     id TEXT PRIMARY KEY DEFAULT 'global',
@@ -585,6 +603,60 @@ class NeonStore:
             if not row:
                 return None
             return {"goal": row["goal"], "steps": json.loads(row["steps"])}
+
+    async def list_code_automations(self, account_id: str) -> list[dict]:
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM code_automations WHERE account_id=$1 ORDER BY id", account_id,
+            )
+            return [dict(r) for r in rows]
+
+    async def create_code_automation(self, account_id: str, provider: str, repo: str, prompt: str,
+                                     every_seconds: int, open_pr: bool) -> dict:
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """INSERT INTO code_automations (account_id, provider, repo, prompt, every_seconds, open_pr, created_at)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *""",
+                account_id, provider, repo, prompt, every_seconds, open_pr, int(time.time()),
+            )
+            return dict(row)
+
+    async def set_code_automation_enabled(self, account_id: str, automation_id: int, enabled: bool) -> bool:
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(
+                "UPDATE code_automations SET enabled=$1 WHERE id=$2 AND account_id=$3",
+                enabled, automation_id, account_id,
+            )
+            return result.endswith("1")
+
+    async def delete_code_automation(self, account_id: str, automation_id: int) -> bool:
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(
+                "DELETE FROM code_automations WHERE id=$1 AND account_id=$2", automation_id, account_id,
+            )
+            return result.endswith("1")
+
+    async def claim_due_code_automation(self) -> dict | None:
+        """The oldest-due enabled automation, with last_run_at bumped to now
+        in the same statement so an overlapping tick can't run it twice."""
+        now = int(time.time())
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """UPDATE code_automations SET last_run_at=$1
+                   WHERE id = (
+                       SELECT id FROM code_automations
+                       WHERE enabled AND last_run_at + every_seconds <= $1
+                       ORDER BY last_run_at LIMIT 1 FOR UPDATE SKIP LOCKED
+                   ) RETURNING *""",
+                now,
+            )
+            return dict(row) if row else None
+
+    async def set_code_automation_result(self, automation_id: int, result: str):
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE code_automations SET last_result=$1 WHERE id=$2", result[:2000], automation_id,
+            )
 
     async def get_buddy(self, session_id: str) -> dict | None:
         async with self._pool.acquire() as conn:

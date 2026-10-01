@@ -180,11 +180,11 @@ Resources:
       # has a hard 256-char limit — CFN's early-validation hook was
       # correctly rejecting it at 622 chars, not a false positive.)
       Description: Light tier — FastAPI (chat/status/webhooks) via uvicorn + AWS Lambda Web Adapter, RESPONSE_STREAM invoke mode
-      # Above the Globals 30s so a reply from the self-hosted backup model
-      # (modal_app/llm.py) can wait out its ~1 minute GPU cold start. Lambda
-      # bills per millisecond actually run, so the higher ceiling costs
-      # nothing on normal Groq replies.
-      Timeout: 150
+      # Lambda's 15-minute maximum: a Code tab run (agents/code_agent.py)
+      # loops for up to 13 minutes, and a chat reply from the self-hosted
+      # model can wait out its GPU cold start. Lambda bills per millisecond
+      # actually run, so the ceiling costs nothing on normal replies.
+      Timeout: 900
       Layers:
         - !Sub arn:aws:lambda:${AWS::Region}:753240598075:layer:LambdaAdapterLayerX86:28
       Environment:
@@ -218,7 +218,9 @@ Resources:
       # gives real headroom for that while staying comfortably under the
       # 15-minute schedule interval (so one tick finishes before the next
       # fires) and far under Lambda's 900s hard ceiling.
-      Timeout: 300
+      # 900s: a due Code tab automation (pipeline/code_tasks.py) gets up
+      # to 10 minutes of agent time on top of KAIROS/DREAM.
+      Timeout: 900
       MemorySize: 256
       Policies:
         - DynamoDBCrudPolicy:
