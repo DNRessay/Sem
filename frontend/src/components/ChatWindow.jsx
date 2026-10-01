@@ -109,6 +109,42 @@ function CheckIcon() {
     );
 }
 
+// Reads a reply aloud with Gemini's TTS (/media/speech). Strips markdown
+// and code blocks first — nobody wants a code listing read out.
+function SpeakButton({ text, token }) {
+    const [state, setState] = useState("idle"); // idle | loading | playing
+    const audioRef = useRef(null);
+
+    const toggle = async () => {
+        if (state === "playing") { audioRef.current?.pause(); setState("idle"); return; }
+        if (state === "loading") return;
+        const plain = text.replace(/```[\s\S]*?```/g, " (code omitted) ").replace(/[#*_`>|\[\]]/g, "").trim();
+        if (!plain) return;
+        setState("loading");
+        try {
+            const r = await fetch(`${API}/media/speech`, {
+                method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ text: plain }),
+            });
+            if (!r.ok) throw new Error();
+            const d = await r.json();
+            const audio = new Audio(`data:${d.mime};base64,${d.base64}`);
+            audioRef.current = audio;
+            audio.onended = () => setState("idle");
+            await audio.play();
+            setState("playing");
+        } catch { setState("idle"); }
+    };
+
+    return (
+        <button onClick={toggle} aria-label={state === "playing" ? "Stop reading" : "Read aloud"} title="Read aloud (Gemini voice)"
+            style={{ width: "26px", height: "26px", display: "flex", alignItems: "center", justifyContent: "center",
+                background: "none", border: "none", borderRadius: "6px", color: "var(--text-muted)", cursor: "pointer", fontSize: "13px" }}>
+            {state === "loading" ? "…" : state === "playing" ? "■" : "🔊"}
+        </button>
+    );
+}
+
 function CopyButton({ text }) {
     const [copied, setCopied] = useState(false);
 
@@ -299,6 +335,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                             />
                             <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                                 <CopyButton text={m.content} />
+                                <SpeakButton text={m.content} token={token} />
                                 <DownloadAllButton content={m.content} />
                             </div>
                         </div>
