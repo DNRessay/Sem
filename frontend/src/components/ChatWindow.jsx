@@ -254,6 +254,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
     const [attachments, setAttachments] = useState([]);
     const [webSearchEnabled, setWebSearchEnabled] = useState(true);
     const [model, setModel] = useState(() => loadModel("semblance_chat_model"));
+    const [research, setResearch] = useState(false);
     const { chunks, streaming, error, status, tool, send, abort } = useStream(API, token, onUnauthorized);
     const bottomRef = useRef(null);
     // Set once send() resolves and cleared once the typewriter below has
@@ -292,7 +293,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
         setInput("");
         setAttachments([]);
         setHistory(h => [...h, { role: "user", content: msg, files: files.map(f => ({ name: f.name, source: f.source, mime: f.mime })) }]);
-        const { reply, tool: toolResult, title } = await send(msg, sessionId, history, files, webSearchEnabled, model);
+        const { reply, tool: toolResult, title } = await send(msg, sessionId, history, files, webSearchEnabled, model, research);
         if (reply) setPendingReply({ reply, tool: toolResult, title });
         else if (title) onTitle?.(sessionId, title);
     };
@@ -399,6 +400,17 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                             webSearchEnabled={webSearchEnabled} onToggleWebSearch={setWebSearchEnabled}
                         />
                         <ModelPicker token={token} value={model} onChange={setModel} storageKey="semblance_chat_model" />
+                        <button
+                            onClick={() => setResearch(r => !r)}
+                            aria-pressed={research}
+                            title="Deep research: searches and reads several sources, then answers with citations (slower)"
+                            style={{
+                                border: "1px solid var(--border)", borderRadius: "999px", padding: "5px 10px", fontSize: "12px", cursor: "pointer",
+                                background: research ? "var(--accent)" : "transparent", color: research ? "var(--accent-contrast)" : "var(--text-muted)",
+                            }}
+                        >
+                            Research
+                        </button>
                         <span style={{ flex: 1 }} />
                         <VoiceInput onTranscript={text => setInput(prev => (prev ? `${prev} ${text}` : text))} />
                         <button

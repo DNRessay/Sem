@@ -887,3 +887,35 @@ def test_rename_session_endpoint_truncates_long_titles(client, monkeypatch):
     assert resp.status_code == 200
     assert len(resp.json()["title"]) == 80
     assert len(calls[0]) == 80
+
+
+def test_research_mode_streams_statuses_then_the_cited_answer(client, monkeypatch):
+    import json
+
+    turns = []
+
+    class Store(_NoopStore):
+        async def save_turn(self, session_id, role, content):
+            turns.append((role, content))
+
+    async def fake_get_store():
+        return Store()
+
+    class FakeResearch:
+        def __init__(self, provider="auto"):
+            pass
+
+        async def run(self, task, history):
+            yield {"type": "tool", "name": "web_search", "args": {"query": "load shedding schedule"}}
+            yield {"type": "tool", "name": "fetch_url", "args": {"url": "https://eskom.co.za"}}
+            yield {"type": "text", "text": "Stage 2 tonight [1].\n\nSources\n1. [Eskom](https://eskom.co.za)"}
+            yield {"type": "done", "steps": 3}
+
+    monkeypatch.setattr("gateway.router.get_store", fake_get_store)
+    monkeypatch.setattr("gateway.router.ResearchAgent", FakeResearch)
+    r = client.post("/chat", json={"message": "load shedding today?", "session_id": "s", "history": [{"role": "user", "content": "x"}], "research": True})
+    events = [json.loads(line[6:]) for line in r.text.split("\n") if line.startswith("data: {")]
+    assert events[0] == {"status": "Searching: load shedding schedule"}
+    assert events[2]["tool"]["label"] == "Deep research · 1 page read"
+    assert "Stage 2 tonight" in "".join(e.get("chunk", "") for e in events)
+    assert turns[0] == ("user", "load shedding today?") and "Stage 2" in turns[1][1]

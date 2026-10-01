@@ -5,6 +5,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from agents.research_agent import ResearchAgent
 from config import settings
 from gateway.auth import issue_token, require_account, verify_passphrase
 from pipeline import llm_providers
@@ -187,6 +188,7 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
     history = body.get("history", [])
     attachments = body.get("attachments", [])
     web_search_enabled = body.get("web_search_enabled", True)
+    research_mode = bool(body.get("research"))
 
     if not raw_msg and not attachments:
         raise HTTPException(400, "message required")
@@ -309,9 +311,47 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
 
         yield "data: [DONE]\n\n"
 
+    async def _research_stream():
+        """Chat's "Deep research" toggle: ResearchAgent searches and reads
+        sources, each step shown as a status line, then streams its cited
+        answer. Persisted like any other turn."""
+        agent = ResearchAgent(provider=body.get("model") or "auto")
+        texts, error, pages = [], None, 0
+        async for event in agent.run(augmented, history):
+            if event["type"] == "tool":
+                args = event.get("args") or {}
+                if event["name"] == "fetch_url":
+                    pages += 1
+                label = {"web_search": f"Searching: {args.get('query', '')}",
+                         "fetch_url": f"Reading: {args.get('url', '')}"}.get(event["name"], "Checking past chats")
+                yield f"data: {json.dumps({'status': label[:120]})}\n\n"
+            elif event["type"] == "text":
+                texts.append(event["text"])
+            elif event["type"] == "error":
+                error = event["text"]
+        reply = texts[-1] if texts else f"Research didn't finish — {error or 'no answer came back'}"
+        tool = {"kind": "research", "label": f"Deep research · {pages} page{'' if pages == 1 else 's'} read", "detail": ""}
+        yield f"data: {json.dumps({'tool': tool})}\n\n"
+        for i in range(0, len(reply), 400):
+            yield f"data: {json.dumps({'chunk': reply[i:i + 400]})}\n\n"
+        db = await get_store()
+        marker = f"[[SEMBLANCE_TOOL:{json.dumps({'kind': 'research', 'label': tool['label']})}]]\n"
+        await db.save_turn(session_id, "user", raw_msg)
+        await db.save_turn(session_id, "assistant", f"{marker}{reply}")
+        if not history:
+            title = await generate_title(raw_msg, reply)
+            if title:
+                await db.set_session_title(session_id, title)
+                yield f"data: {json.dumps({'title': title})}\n\n"
+        yield "data: [DONE]\n\n"
+
     async def stream_gen():
         msg = augmented
         tool_marker = ""
+        if research_mode:
+            async for line in _research_stream():
+                yield line
+            return
         if continue_intent:
             yield f"data: {json.dumps({'status': continue_status_label()})}\n\n"
             result = await run_continue_intent(session_id)
