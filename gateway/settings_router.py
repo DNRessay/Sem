@@ -28,7 +28,7 @@ async def status(_account: dict = Depends(require_account)):
         _feature("Models", "Kimi (paid)", bool(s.KIMI_API_KEY), "KIMI_API_KEY", s.KIMI_MODEL),
         _feature("Models", "Hugging Face (any model)", bool(s.HF_TOKEN), "HF_TOKEN"),
         _feature("Models", "Cohere overflow (free trial)", bool(s.COHERE_API_KEY), "COHERE_API_KEY"),
-        _feature("Search", "SearXNG", bool(s.SEARXNG_URL), "SEARXNG_URL", "any SearXNG server you run"),
+        _feature("Search", "SearXNG", bool(s.SEARXNG_URL), "SEARXNG_URL", "modal deploy modal_app/searxng.py"),
         _feature("Search", "SerpAPI (100/month free)", bool(s.SERP_API_KEY), "SERP_API_KEY"),
         _feature("Search", "Keyless web search (ddgs)", True, "", "always on as the last fallback"),
         _feature("Media", "Images + voice (Gemini)", bool(s.GEMINI_API_KEY), "GEMINI_API_KEY"),

@@ -157,8 +157,17 @@ picker once its key is set. "Auto" uses only the free ones.
 | `DEEPSEEK_API_KEY` / `KIMI_API_KEY` | DeepSeek / Kimi (paid) |
 | `HF_TOKEN` | Any chat model on Hugging Face's router, picked by repo id |
 
-Web search needs no key: it tries `SEARXNG_URL` (any SearXNG server you
-run), then SerpAPI, then the open-source `ddgs` package.
+Web search needs no key: it tries `SEARXNG_URL` (your own SearXNG), then
+SerpAPI, then the open-source `ddgs` package. To run a private SearXNG on
+Modal (CPU, scales to zero):
+
+```bash
+modal secret create semblance-searxng SEARXNG_KEY=<long random string> --force
+modal deploy modal_app/searxng.py
+```
+
+Set `SEARXNG_URL` to the printed URL + `/` + that key. Requests without the
+key get a 404.
 
 ### 2g. MCP (optional)
 
