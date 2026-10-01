@@ -11,7 +11,7 @@ How to work:
 - Prefer edit_file for changes to existing files (copy `old` exactly from what read_file returned). Use write_file for new files.
 - Verify with bash: run the project's tests, linter or a quick script. Install dependencies with pip/npm if needed.
 - Keep changes minimal and focused on the request. Don't reformat unrelated code.
-- You cannot push or commit. When you're done, the user reviews your changes and opens a pull request with a button.
+- Never run git commit, checkout, branch, reset or push yourself. {pr_line}
 - Never print or write secrets, tokens or API keys.
 - Finish with a short summary: what you changed, and how you verified it (or why you couldn't).
 You are SEMBLANCE running on open-weight models; never claim to be Claude, GPT or any other vendor's model."""
@@ -36,6 +36,10 @@ TOOLS = {
         "bash", "Run a shell command in the repo root (tests, linters, installs, git status/diff). Max 120s.",
         {"command": _S, "timeout": {"type": "integer"}}, ["command"],
     ),
+    "open_pr": fn_tool(
+        "open_pr", "Commit every changed file to a new branch and open a pull/merge request. Use when the user "
+        "asks for a PR or commit, after verifying your changes.", {"title": _S, "body": _S}, ["title"],
+    ),
     "aws": fn_tool(
         "aws", "Read-only AWS call via boto3 (Describe*/List*/Get* only), e.g. service='lambda', operation='ListFunctions'.",
         {"service": _S, "operation": _S, "params": {"type": "object"}, "region": _S}, ["service", "operation"],
@@ -50,20 +54,25 @@ class CodeAgent(ToolLoopAgent):
 
     def __init__(self, workspace: CodeWorkspace, mode: str = "act", max_steps: int | None = None,
                  deadline_seconds: float | None = None, aws: AwsReadTool | None = None, provider: str = "auto",
-                 mcp=None):
+                 mcp=None, pr_token: str | None = None):
         # MCP tools have unknown side effects, so plan mode never gets them.
         super().__init__(provider, max_steps or settings.CODE_MAX_STEPS,
                          deadline_seconds or settings.AGENT_TIMEOUT_SECONDS, mcp=None if mode == "plan" else mcp)
         self.ws = workspace
         self.mode = "plan" if mode == "plan" else "act"
         self.aws = aws or AwsReadTool()
+        self.pr_token = pr_token  # the connected GitHub/GitLab token; open_pr is only offered when set
 
     def tools(self) -> list[dict]:
-        names = _READ_ONLY if self.mode == "plan" else tuple(TOOLS)
+        names = _READ_ONLY if self.mode == "plan" else tuple(n for n in TOOLS if n != "open_pr" or self.pr_token)
         return [TOOLS[n] for n in names]
 
     def system_prompt(self) -> str:
-        system = _SYSTEM.format(repo=self.ws.repo, provider=self.ws.provider)
+        pr_line = ("When the user asks for a PR or commit, call open_pr: it commits everything you changed to a new branch "
+                   "and opens the PR, then share its link." if self.pr_token else
+                   f"Opening a PR needs {self.ws.provider} connected in Connectors; until then the user can review "
+                   "your changes with the Changes button.")
+        system = _SYSTEM.format(repo=self.ws.repo, provider=self.ws.provider, pr_line=pr_line)
         return system + _PLAN_SUFFIX if self.mode == "plan" else system
 
     async def dispatch(self, name: str, args: dict) -> dict:
@@ -82,6 +91,11 @@ class CodeAgent(ToolLoopAgent):
                                            bool(args.get("replace_all")))
         if name == "bash":
             return await self.ws.bash(args.get("command", ""), int(args.get("timeout") or 60))
+        if name == "open_pr":
+            if not self.pr_token:
+                return {"ok": False, "error": f"connect {self.ws.provider} in Connectors to open PRs"}
+            from pipeline.code_tasks import open_pr
+            return await open_pr(self.ws, self.pr_token, args.get("title", ""), args.get("body", ""))
         if name == "aws":
             return await self.aws.call(args.get("service", ""), args.get("operation", ""),
                                        args.get("params") or {}, args.get("region", ""))

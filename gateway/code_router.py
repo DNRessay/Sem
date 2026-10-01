@@ -39,7 +39,8 @@ async def run(request: Request, account: dict = Depends(require_account)):
     if not message:
         raise HTTPException(400, "message required")
     mcp = await MCPToolset.for_account(account["account_id"])
-    agent = CodeAgent(ws, mode=body.get("mode") or "act", provider=body.get("model") or "auto", mcp=mcp)
+    token = await connector_token(account["account_id"], ws.provider)
+    agent = CodeAgent(ws, mode=body.get("mode") or "act", provider=body.get("model") or "auto", mcp=mcp, pr_token=token)
 
     async def stream():
         try:

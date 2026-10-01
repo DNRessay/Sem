@@ -170,7 +170,7 @@ def test_run_streams_agent_events(client, monkeypatch):
     c, _ = client
 
     class FakeAgent:
-        def __init__(self, ws, mode="act", provider="auto", mcp=None):
+        def __init__(self, ws, mode="act", provider="auto", mcp=None, pr_token=None):
             self.mode = mode
 
         async def run(self, message, history):
@@ -197,3 +197,25 @@ def test_automation_create_validates_schedule(client):
     ok = c.post("/code/automations", json={"provider": "github", "repo": "me/app", "prompt": "x", "every": "weekly"})
     assert ok.json()["automation"]["every_seconds"] == 7 * 86400
     assert len(c.get("/code/automations").json()["automations"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_code_agent_opens_a_pr_only_with_a_token(monkeypatch):
+    from agents.code_agent import CodeAgent
+    from tools.code_workspace import CodeWorkspace
+
+    ws = CodeWorkspace("github", "me/app")
+    assert "open_pr" not in [t["function"]["name"] for t in CodeAgent(ws).tools()]
+    assert "open_pr" not in [t["function"]["name"] for t in CodeAgent(ws, mode="plan", pr_token="t").tools()]
+
+    calls = {}
+
+    async def fake_open_pr(workspace, token, title, body=""):
+        calls.update(token=token, title=title)
+        return {"ok": True, "url": "https://github.com/me/app/pull/1"}
+
+    monkeypatch.setattr("pipeline.code_tasks.open_pr", fake_open_pr)
+    agent = CodeAgent(ws, pr_token="tok")
+    assert "open_pr" in [t["function"]["name"] for t in agent.tools()]
+    result = await agent.dispatch("open_pr", {"title": "Add about page"})
+    assert result["url"].endswith("/pull/1") and calls == {"token": "tok", "title": "Add about page"}
