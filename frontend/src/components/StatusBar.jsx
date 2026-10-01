@@ -14,31 +14,53 @@ function rand(bill) {
         : `$${bill.usd.toFixed(2)}`;
 }
 
-// This month's AWS bill: a receipt icon; tap for the amount (free CloudWatch estimate, refreshed every 6 hours).
+// This month's AWS bill and Modal GPU spend: a receipt icon; tap for the amounts.
 export function CostButton({ token }) {
-    const [bill, setBill] = useState(null);
+    const [aws, setAws] = useState(null);
+    const [modal, setModal] = useState(null);
     const [open, setOpen] = useState(false);
     useEffect(() => {
         if (!token) return;
-        fetch(`${API}/settings/aws-cost`, { headers: { Authorization: `Bearer ${token}` } })
-            .then(r => (r.ok ? r.json() : null)).then(setBill).catch(() => {});
+        const get = (path, set) => fetch(`${API}/settings/${path}`, { headers: { Authorization: `Bearer ${token}` } })
+            .then(r => (r.ok ? r.json() : null)).then(set).catch(() => {});
+        get("aws-cost", setAws);
+        get("modal-cost", setModal);
     }, [token]);
-    if (!bill) return null;
+    if (!aws && !modal) return null;
+    const small = { fontSize: "11px", color: "var(--text-muted)" };
+    const big = { fontSize: "20px", fontWeight: 700, color: "var(--gold-text)" };
     return (
         <span style={{ position: "relative" }}>
-            <button onClick={() => setOpen(o => !o)} aria-label="AWS bill this month" title="AWS bill this month" style={iconBtn}>
+            <button onClick={() => setOpen(o => !o)} aria-label="Bills this month" title="Bills this month" style={iconBtn}>
                 <ReceiptIcon size={18} />
             </button>
             {open && (
                 <>
                     <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 30 }} />
-                    <div style={{ position: "absolute", right: 0, top: "100%", zIndex: 31, minWidth: "200px", background: "var(--surface)",
-                                  border: "1px solid var(--border)", borderRadius: "12px", padding: "10px 12px", boxShadow: "0 8px 24px rgba(0,0,0,0.18)" }}>
-                        <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>AWS this month (estimate)</div>
-                        {bill.ok
-                            ? <div style={{ fontSize: "20px", fontWeight: 700, color: "var(--gold-text)" }}>{rand(bill)}</div>
-                            : <div style={{ fontSize: "12px", color: "var(--text)" }}>{bill.error}</div>}
-                        {bill.ok && bill.zar != null && <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>${bill.usd.toFixed(2)} at R{bill.rate.toFixed(2)}/$ · {bill.rate_source}</div>}
+                    <div style={{ position: "absolute", right: 0, top: "100%", zIndex: 31, minWidth: "220px", background: "var(--surface)",
+                                  border: "1px solid var(--border)", borderRadius: "12px", padding: "10px 12px", boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+                                  display: "flex", flexDirection: "column", gap: "10px" }}>
+                        {aws && (
+                            <div>
+                                <div style={small}>AWS this month (estimate)</div>
+                                {aws.ok
+                                    ? <div style={big}>{rand(aws)}</div>
+                                    : <div style={{ fontSize: "12px", color: "var(--text)" }}>{aws.error}</div>}
+                                {aws.ok && aws.zar != null && <div style={small}>${aws.usd.toFixed(2)} at R{aws.rate.toFixed(2)}/$ · {aws.rate_source}</div>}
+                            </div>
+                        )}
+                        {modal && (
+                            <div style={{ borderTop: aws ? "1px solid var(--border)" : "none", paddingTop: aws ? "10px" : 0 }}>
+                                <div style={small}>Modal this month ({modal.ok ? modal.tracked : "GPU"})</div>
+                                {modal.ok ? (
+                                    <>
+                                        <div style={big}>{rand(modal)}</div>
+                                        <div style={small}>${modal.usd.toFixed(2)} of ${modal.free_usd.toFixed(0)} free · ${modal.free_left_usd.toFixed(2)} left</div>
+                                        <div style={small}>Stops at ${Number(modal.cap_usd).toFixed(2)} (your cap)</div>
+                                    </>
+                                ) : <div style={{ fontSize: "12px", color: "var(--text)" }}>{modal.error}</div>}
+                            </div>
+                        )}
                     </div>
                 </>
             )}

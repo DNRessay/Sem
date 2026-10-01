@@ -94,6 +94,7 @@ class Settings(BaseSettings):
     # spend cap, set in the Modal secret (VIDEO_MONTHLY_CAP_USD).
     MODAL_VIDEO_URL: str = ""
     MODAL_VIDEO_SECRET: str = ""
+    MODAL_FREE_CREDIT_USD: float = 30.0  # Modal Starter plan's free compute each month
 
     # Cache — DynamoDB-backed, in-memory L1 on top for warm Lambda invocations.
     CACHE_TABLE_NAME: str = "semblance-cache"

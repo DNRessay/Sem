@@ -56,6 +56,15 @@ async def _usd_to_zar() -> float | None:
         return None
 
 
+async def zar_rate(account_id: str = "owner") -> tuple[float | None, str | None]:
+    """USD→ZAR: C-Lab's live quote when connected, else the daily public rate."""
+    rate = await _clab_usd_zar(account_id)
+    if rate:
+        return rate, "C-Lab (live)"
+    rate = await _usd_to_zar()
+    return rate, "open.er-api.com (daily)" if rate else None
+
+
 async def month_to_date(account_id: str = "owner") -> dict:
     cached = ddb_backend.get("aws_cost", "mtd")
     if cached:
@@ -66,9 +75,7 @@ async def month_to_date(account_id: str = "owner") -> dict:
         return {"ok": False, "error": f"Couldn't read the AWS bill: {str(e)[:200]}"}
     if usd is None:
         return {"ok": False, "error": "No billing data yet — turn on 'Receive Billing Alerts' in AWS Billing preferences"}
-    rate, source = await _clab_usd_zar(account_id), "C-Lab (live)"
-    if not rate:
-        rate, source = await _usd_to_zar(), "open.er-api.com (daily)"
+    rate, source = await zar_rate(account_id)
     result = {"ok": True, "usd": round(usd, 2), "zar": round(usd * rate, 2) if rate else None,
               "rate": rate, "rate_source": source if rate else None, "as_of": int(time.time())}
     ddb_backend.set("aws_cost", "mtd", json.dumps(result), ttl=_TTL)
