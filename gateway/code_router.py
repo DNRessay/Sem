@@ -3,15 +3,17 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from agents.code_agent import CodeAgent
+from agents.code_agent import APPROVAL_ACTIONS, CodeAgent
+from cache import ddb_backend
 from gateway.auth import require_account
-from pipeline.code_tasks import EVERY_SECONDS, connector_token, open_pr, valid_target
+from pipeline.code_tasks import EVERY_SECONDS, connector_token, open_pr, run_code_action, valid_target
 from pipeline.mcp_tools import MCPToolset
 from storage.neon_store import get_store
 from tau.tau_engine import TAUEngine
 from tools.code_workspace import CodeWorkspace
 
 router = APIRouter(prefix="/code")
+_APPROVALS = "code_approval"
 
 
 async def _target(request: Request) -> tuple[dict, CodeWorkspace]:
@@ -47,12 +49,40 @@ async def run(request: Request, account: dict = Depends(require_account)):
     async def stream():
         try:
             async for event in agent.run(message, body.get("history") or []):
+                if event["type"] == "approval" and event["id"] in agent.pending:
+                    # Kept server-side (an hour): Approve can only run exactly what was shown, and a secret's
+                    # value never goes back to the browser.
+                    ddb_backend.set(_APPROVALS, f"{account['account_id']}:{event['id']}",
+                                    json.dumps({**agent.pending[event["id"]], "provider": ws.provider, "repo": ws.repo}),
+                                    ttl=3600)
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as e:  # surface it in the UI instead of a silently dead stream
             yield f"data: {json.dumps({'type': 'error', 'text': f'Code agent crashed: {str(e)[:300]}'})}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+@router.post("/execute")
+async def execute(request: Request, account: dict = Depends(require_account)):
+    """Runs one approved action (merge, push, workflow run, re-run, secret)."""
+    body = await request.json()
+    key = f"{account['account_id']}:{body.get('id', '')}"
+    saved = ddb_backend.get(_APPROVALS, key)
+    if not saved:
+        raise HTTPException(404, "This approval expired — ask Sem Code again")
+    action = json.loads(saved)
+    if action["name"] not in APPROVAL_ACTIONS:
+        raise HTTPException(400, "not an approvable action")
+    ws = CodeWorkspace(action["provider"], action["repo"])
+    token = await connector_token(account["account_id"], ws.provider)
+    if not token:
+        raise HTTPException(400, f"Connect {ws.provider} first")
+    ddb_backend.delete(_APPROVALS, key)  # one approval, one run
+    result = await run_code_action(ws, token, action["name"], action["args"])
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error") or result.get("message") or "action failed")
+    return result
 
 
 @router.post("/changes")

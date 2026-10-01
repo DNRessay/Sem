@@ -5,6 +5,7 @@ import ModelPicker, { loadModel } from "./ModelPicker";
 import { readEvents } from "../utils/sse";
 import { RepoPicker } from "./AttachMenu";
 import { errorClass } from "./MessageKit";
+import { ApprovalCard } from "./CoworkPage";
 import TabDrawer, { HandoffCard, MenuButton } from "./TabDrawer";
 import useTabChats from "../hooks/useTabChats";
 
@@ -220,6 +221,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
                 if (ev.type === "text") add(it => [...it, { kind: "text", text: ev.text, mode: runMode }]);
                 else if (ev.type === "tool") add(it => [...it, { kind: "tool", id: ev.id, name: ev.name, args: ev.args }]);
                 else if (ev.type === "result") add(it => it.map(i => (i.kind === "tool" && i.id === ev.id && i.ok === undefined ? { ...i, ok: ev.ok, output: ev.output } : i)));
+                else if (ev.type === "approval") add(it => [...it, { kind: "approval", id: ev.id, name: ev.name, args: ev.args, summary: ev.summary, state: "pending" }]);
                 else if (ev.type === "handoff") add(it => [...it, { kind: "handoff", tab: ev.tab, task: ev.task }]);
                 else if (ev.type === "error") add(it => [...it, { kind: "error", text: ev.text }]);
             });
@@ -227,6 +229,21 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
             if (e.name !== "AbortError") add(it => [...it, { kind: "error", text: e.message }]);
         }
         setBusy("");
+    };
+
+    // Merges, pushes, workflow runs and secrets wait for this tap; the server runs exactly what it showed.
+    const decide = async (id, decision) => {
+        let state = decision;
+        if (decision === "approved") {
+            try {
+                const r = await fetch(`${API}/code/execute`, { method: "POST", headers, body: JSON.stringify({ id }) });
+                const d = await r.json().catch(() => ({}));
+                state = r.ok ? "done" : (d.detail || `Failed (${r.status})`);
+                if (r.ok && (d.url || d.sha || d.status)) setItems(it => [...it, { kind: "text", text: [d.status, d.url && `[Open](${d.url})`, d.sha && `commit \`${String(d.sha).slice(0, 8)}\``].filter(Boolean).join(" · ") }]);
+            } catch (e) { state = e.message; }
+        }
+        setItems(it => it.map(i => (i.kind === "approval" && i.id === id ? { ...i, state } : i)));
+        return state;
     };
 
     const showChanges = async () => {
@@ -308,6 +325,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
                             </div>
                         </div>
                     );
+                    if (item.kind === "approval") return <ApprovalCard key={i} item={item} onDecide={decide} />;
                     if (item.kind === "handoff") return <HandoffCard key={i} tab={item.tab} task={item.task} onHandoff={onHandoff} />;
                     if (item.kind === "error") return <div key={i} className={errorClass(item.text)}>{item.text}</div>;
                     return <div key={i} className="md-content" style={{ fontSize: "14px", color: "var(--text)", margin: "6px 0" }} dangerouslySetInnerHTML={md(item.text)} />;

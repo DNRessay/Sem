@@ -26,7 +26,7 @@ function loadItems() {
     try { return JSON.parse(localStorage.getItem(OLD_KEY)) || []; } catch { return []; }
 }
 
-function ApprovalCard({ item, onDecide }) {
+export function ApprovalCard({ item, onDecide }) {
     const [state, setState] = useState(item.state || "pending");
     const decide = async (approve) => {
         if (!approve) { setState("dismissed"); onDecide(item.id, "dismissed"); return; }

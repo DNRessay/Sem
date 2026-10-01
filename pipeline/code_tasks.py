@@ -59,6 +59,49 @@ async def open_pr(ws: CodeWorkspace, token: str, title: str, body: str = "") -> 
     return {**pr, "branch": branch, "files": sorted(files)}
 
 
+async def push_branch(ws: CodeWorkspace, token: str, branch: str, message: str) -> dict:
+    """Commits every changed file in the workspace straight to `branch`
+    (created off the default branch if it doesn't exist) — no PR."""
+    changes = await ws.changes()
+    if not changes.get("ok"):
+        return changes
+    files = changes.get("files") or {}
+    if not files:
+        return {"ok": False, "error": "No changes to push."}
+    writer = RepoWriteTool()
+    base = await writer.get_default_branch(ws.provider, ws.repo, token)
+    branch = (branch or "").strip() or base
+    if branch != base:
+        created = await writer.create_branch(ws.provider, ws.repo, branch, base, token)
+        if not created.get("ok") and "exist" not in created.get("error", "").lower():
+            return created
+    message = message.strip() or "Changes from Sem Code"
+    for path, content in files.items():
+        committed = await writer.commit_file(ws.provider, ws.repo, branch, path, content, f"{message}: {path}", token)
+        if not committed.get("ok"):
+            return committed
+    return {"ok": True, "branch": branch, "files": sorted(files), "default_branch": branch == base}
+
+
+async def run_code_action(ws: CodeWorkspace, token: str, name: str, args: dict) -> dict:
+    from tools.git_host import GitHost, GitHostError
+    host = GitHost(ws.provider, ws.repo, token)
+    try:
+        if name == "merge_pr":
+            return await host.merge_pr(int(args.get("number")), args.get("method") or "merge")
+        if name == "push_branch":
+            return await push_branch(ws, token, args.get("branch", ""), args.get("message", ""))
+        if name == "run_workflow":
+            return await host.trigger(args.get("ref") or "main", args.get("workflow", ""), args.get("inputs") or None)
+        if name == "rerun_ci":
+            return await host.rerun(int(args.get("run_id")))
+        if name == "set_secret":
+            return await host.set_secret(args.get("name", ""), args.get("value", ""))
+    except (GitHostError, ValueError, TypeError) as e:
+        return {"ok": False, "error": str(e)[:400]}
+    return {"ok": False, "error": f"{name} isn't an approvable action"}
+
+
 async def run_due_automation() -> dict | None:
     """Runs at most one due automation per tick: fresh pull, agent run, PR if
     it changed anything (and the automation asks for one), then the

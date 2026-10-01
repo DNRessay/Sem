@@ -219,3 +219,25 @@ async def test_code_agent_opens_a_pr_only_with_a_token(monkeypatch):
     assert "open_pr" in [t["function"]["name"] for t in agent.tools()]
     result = await agent.dispatch("open_pr", {"title": "Add about page"})
     assert result["url"].endswith("/pull/1") and calls == {"token": "tok", "title": "Add about page"}
+
+
+def test_execute_runs_only_the_saved_approval_once(client, monkeypatch):
+    from cache import ddb_backend
+    c, _ = client
+    ran = []
+
+    async def fake_token(account_id, provider):
+        return "tok"
+
+    async def fake_action(ws, token, name, args):
+        ran.append((name, args, token))
+        return {"ok": True, "status": "merged"}
+
+    monkeypatch.setattr("gateway.code_router.connector_token", fake_token)
+    monkeypatch.setattr("gateway.code_router.run_code_action", fake_action)
+    ddb_backend.set("code_approval", "owner:call9", json.dumps(
+        {"name": "merge_pr", "args": {"number": 1}, "provider": "gitlab", "repo": "me/app"}), ttl=60)
+    assert c.post("/code/execute", json={"id": "call9"}).json()["status"] == "merged"
+    assert ran == [("merge_pr", {"number": 1}, "tok")]
+    assert c.post("/code/execute", json={"id": "call9"}).status_code == 404
+    assert c.post("/code/execute", json={"id": "never-approved"}).status_code == 404
