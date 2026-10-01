@@ -99,6 +99,24 @@ function ToolChip({ tool }) {
     );
 }
 
+function AwsBill({ token, visible }) {
+    const [bill, setBill] = useState(null);
+    useEffect(() => {
+        fetch(`${API}/settings/aws-cost`, { headers: { Authorization: `Bearer ${token}` } })
+            .then(r => (r.ok ? r.json() : null)).then(setBill).catch(() => {});
+    }, [token]);
+    if (!bill?.ok) return null;
+    const amount = bill.zar != null ? `R${bill.zar.toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : `$${bill.usd.toFixed(2)}`;
+    return (
+        <div style={{ position: "absolute", top: "8px", left: 0, right: 0, display: "flex", justifyContent: "center", pointerEvents: "none", zIndex: 4,
+                      opacity: visible ? 1 : 0, transform: visible ? "translateY(0)" : "translateY(-6px)", transition: "opacity 0.35s ease, transform 0.35s ease" }}>
+            <span style={{ fontSize: "12px", color: "var(--text-muted)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "999px", padding: "3px 10px" }}>
+                AWS this month: <strong style={{ color: "var(--gold-text)" }}>{amount}</strong>
+            </span>
+        </div>
+    );
+}
+
 export default function ChatWindow({ sessionId = "default", initialHistory = [], onStreamChange, onTitle, token, onUnauthorized, onHandoff, draft }) {
     const [input, setInput] = useState("");
     useEffect(() => { if (draft?.task) setInput(draft.task); }, [draft?.at]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -139,6 +157,15 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
         setPendingReply(null);
     }, [pendingReply, revealed, fullResponse, sessionId, onTitle]);
 
+    // The month's AWS bill fades in when you scroll up and out when you scroll down.
+    const [billVisible, setBillVisible] = useState(false);
+    const lastTop = useRef(0);
+    const onScroll = (e) => {
+        const top = e.currentTarget.scrollTop;
+        if (Math.abs(top - lastTop.current) > 8) setBillVisible(top < lastTop.current && top > 0);
+        lastTop.current = top;
+    };
+
     const submit = async (retry = null, useModel = model) => {
         if (streaming) return;
         if (!retry && !input.trim() && attachments.length === 0) return;
@@ -161,7 +188,8 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                     <ChatMenu title="SEMBLANCE chat" messages={history.map(m => ({ role: m.role, text: m.content || "" }))} />
                 </div>
             )}
-            <div style={{ flex: 1, overflowY: "auto", padding: "20px 16px", display: "flex", flexDirection: "column", gap: "18px" }}>
+            <AwsBill token={token} visible={billVisible} />
+            <div onScroll={onScroll} style={{ flex: 1, overflowY: "auto", padding: "20px 16px", display: "flex", flexDirection: "column", gap: "18px" }}>
                 {history.map((m, i) => (
                     m.role === "user" ? (
                         <div key={i} style={{ alignSelf: "flex-end", maxWidth: "80%", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px" }}>

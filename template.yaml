@@ -276,6 +276,7 @@ Resources:
                 - lambda:GetFunctionConfiguration
                 - logs:FilterLogEvents
                 - logs:GetLogEvents
+                - cloudwatch:GetMetricStatistics   # AWS/Billing EstimatedCharges, for the bill in chat
               Resource: "*"
 
   ChatFunctionLogGroup:

@@ -156,6 +156,8 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
         persist: c => ({ ...c, items: (c.items || []).slice(-200) }),
     });
     const { provider, repo, items } = chat;
+    // One working branch per chat: every run, PR and push from this chat goes to it.
+    const branch = chat.branch || `sem/${(repo.split("/")[1] || "work").toLowerCase().replace(/[^a-z0-9-]/g, "-")}-${chat.id.slice(-6)}`;
     const [menuOpen, setMenuOpen] = useState(false);
     const [repos, setRepos] = useState([]);
     const [reposError, setReposError] = useState("");
@@ -209,7 +211,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
     }, [provider]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const post = async (path, body) => {
-        const r = await fetch(`${API}${path}`, { method: "POST", headers, body: JSON.stringify({ provider, repo, ...body }) });
+        const r = await fetch(`${API}${path}`, { method: "POST", headers, body: JSON.stringify({ provider, repo, branch, ...body }) });
         if (r.status === 401) { onUnauthorized(); throw new Error("Session expired"); }
         const data = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(data.detail || `Request failed: ${r.status}`);
@@ -262,7 +264,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
         const add = (fn) => updateChat(chatId, c => ({ items: fn(c.items) }));
         const prior = history();
         add(it => [...it, { kind: "user", text: attached.length ? `${message}\n📎 ${attached.join(", ")}` : message, mode: runMode }]);
-        if (!items.length) updateChat(chatId, () => ({ title: message.slice(0, 60) }));
+        if (!items.length) updateChat(chatId, () => ({ title: message.slice(0, 60), branch }));
         setInput("");
         if (!ready && !(await openRepo())) return;
         setBusy(runMode === "plan" ? "Planning…" : "Working…"); setNotice("");
@@ -270,7 +272,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
         try {
             const res = await fetch(`${API}/code/run`, {
                 method: "POST", headers, signal: abortRef.current.signal,
-                body: JSON.stringify({ provider, repo, message: sent, history: prior, mode: runMode, model: useModel }),
+                body: JSON.stringify({ provider, repo, branch, message: sent, history: prior, mode: runMode, model: useModel }),
             });
             if (res.status === 401) { onUnauthorized(); return; }
             if (!res.ok || !res.body) throw new Error(`Request failed: ${res.status}`);
@@ -348,7 +350,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
             <TabDrawer open={menuOpen} onClose={() => setMenuOpen(false)} title="Sem Code" current="code"
                 onNavigate={onNavigate} onNew={() => newChat()} chats={chats} activeId={chat.id} disabled={!!busy}
                 onSelect={id => { selectChat(id); setOpened(null); setNotice(""); }} onDelete={deleteChat}
-                subtitle={c => c.repo || "no repo"} />
+                subtitle={c => [c.repo || "no repo", c.branch].filter(Boolean).join(" · ")} />
 
             {repo && (ready || items.length > 0) && (
                 <div style={{ display: "flex", gap: "6px", padding: "8px 16px", borderBottom: "1px solid var(--border)", overflowX: "auto" }}>

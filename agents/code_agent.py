@@ -24,7 +24,7 @@ concrete implementation plan: which files change and how, and how you'll verify 
 
 # Code-tab actions that change things outside the workspace: queued for a
 # one-tap approval in the UI, then run here by /code/execute.
-APPROVAL_ACTIONS = {"merge_pr", "push_branch", "run_workflow", "rerun_ci", "set_secret"}
+APPROVAL_ACTIONS = {"merge_pr", "push_branch", "run_workflow", "rerun_ci", "set_secret", "aws_action"}
 
 
 def describe_action(name: str, args: dict, repo: str) -> str:
@@ -38,6 +38,11 @@ def describe_action(name: str, args: dict, repo: str) -> str:
         return f"Re-run CI run {args.get('run_id')} in {repo}"
     if name == "set_secret":
         return f"Set secret {args.get('name')} in {repo} (value hidden)"
+    if name == "aws_action":
+        from tools.aws_action import classify
+        flags = classify(args.get("service", ""), args.get("operation", ""))
+        where = f" in {args['region']}" if args.get("region") else ""
+        return " ".join([*flags, f"AWS {args.get('service')} {args.get('operation')}{where}"])
     return name
 
 
@@ -79,6 +84,12 @@ TOOLS = {
                         {"run_id": {"type": "integer"}}, ["run_id"]),
     "set_secret": fn_tool("set_secret", "Create or update a CI secret/variable. Only with a value the user gave you. "
                           "Waits for the user's approval.", {"name": _S, "value": _S}, ["name", "value"]),
+    "aws_action": fn_tool(
+        "aws_action", "Change something in AWS (any boto3 write operation, e.g. lambda UpdateFunctionConfiguration). "
+        "Always waits for the user's approval; say what it costs if it creates anything that runs or bills monthly, "
+        "and prefer the cheapest option.",
+        {"service": _S, "operation": _S, "params": {"type": "object"}, "region": _S}, ["service", "operation"],
+    ),
     "aws": fn_tool(
         "aws", "Read-only AWS call via boto3 (Describe*/List*/Get* only), e.g. service='lambda', operation='ListFunctions'.",
         {"service": _S, "operation": _S, "params": {"type": "object"}, "region": _S}, ["service", "operation"],
@@ -141,6 +152,13 @@ class CodeAgent(ToolLoopAgent):
                                            bool(args.get("replace_all")))
         if name == "bash":
             return await self.ws.bash(args.get("command", ""), int(args.get("timeout") or 60))
+        if name == "aws_action":
+            from tools.aws_action import check
+            problem = check(args.get("service", ""), args.get("operation", ""))
+            if problem:
+                return {"ok": False, "error": problem}
+            return {"ok": True, "status": "waiting for the user's approval",
+                    "summary": describe_action(name, args, self.ws.repo)}
         if name in APPROVAL_ACTIONS:
             if not self.pr_token:
                 return {"ok": False, "error": f"connect {self.ws.provider} in Connectors first"}

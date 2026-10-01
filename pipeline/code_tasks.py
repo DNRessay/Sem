@@ -96,6 +96,12 @@ async def push_branch(ws: CodeWorkspace, token: str, branch: str, message: str) 
 
 
 async def run_code_action(ws: CodeWorkspace, token: str, name: str, args: dict) -> dict:
+    if name == "aws_action":
+        from tools import aws_action
+        problem = aws_action.check(args.get("service", ""), args.get("operation", ""))
+        if problem:
+            return {"ok": False, "error": problem}
+        return await aws_action.run(args["service"], args["operation"], args.get("params") or {}, args.get("region", ""))
     from tools.git_host import GitHost, GitHostError
     host = GitHost(ws.provider, ws.repo, token)
     try:

@@ -83,7 +83,7 @@ async def execute(request: Request, account: dict = Depends(require_account)):
         raise HTTPException(400, "not an approvable action")
     ws = CodeWorkspace(action["provider"], action["repo"])
     token = await connector_token(account["account_id"], ws.provider)
-    if not token:
+    if not token and action["name"] != "aws_action":
         raise HTTPException(400, f"Connect {ws.provider} first")
     ddb_backend.delete(_APPROVALS, key)  # one approval, one run
     result = await run_code_action(ws, token, action["name"], action["args"])

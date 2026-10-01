@@ -138,3 +138,9 @@ async def usage(account: dict = Depends(require_account)):
         "mcp_servers": len(await db.list_mcp_servers(account["account_id"])),
         "video": {k: video.get(k) for k in ("used_usd", "cap_usd")} if video.get("ok") else None,
     }
+
+
+@router.get("/aws-cost")
+async def aws_cost(_account: dict = Depends(require_account)):
+    from tools.aws_cost import month_to_date
+    return await month_to_date()
