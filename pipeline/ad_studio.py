@@ -25,7 +25,7 @@ Return ONLY a JSON array. Each item:
 and any short on-image text in quotes (keep on-image text under 6 words)}}
 
 Vary the angles (benefit, social proof, urgency/offer, problem/solution, local pride). Write for the audience and
-location in the brief; South African English and Rand pricing if the business is in South Africa. No false claims."""
+location in the brief; South African English and Rand pricing if the business is in South Africa. No false claims.{style}"""
 
 
 def parse_variants(text: str) -> list[dict]:
@@ -46,11 +46,14 @@ def parse_variants(text: str) -> list[dict]:
     return out
 
 
-async def write_variants(brief: str, campaign: str, placements: list[str], count: int, model: str) -> dict:
+async def write_variants(brief: str, campaign: str, placements: list[str], count: int, model: str,
+                         style: str = "") -> dict:
     placements = [p for p in placements if p in PLACEMENTS] or ["fb_ig_feed"]
     count = max(1, min(int(count or 1), 3))
     prompt = _PROMPT.format(
         brief=brief.strip()[:2000], campaign=campaign.strip()[:1000], count=count,
+        style=f"\n\nVisual style to match (from the user's inspiration images) — reflect it in every image_prompt:\n{style[:1500]}"
+        if style else "",
         placements=", ".join(f"{p} ({PLACEMENTS[p][0]})" for p in placements), keys=list(placements),
     )
     result = await llm_providers.complete(model, [{"role": "user", "content": prompt}], max_tokens=4096)

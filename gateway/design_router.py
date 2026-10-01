@@ -36,9 +36,18 @@ async def ads(request: Request, _account: dict = Depends(require_account)):
     if not brief or not campaign:
         raise HTTPException(400, "brief and campaign required")
 
+    refs = gemini_media.clean_references(body.get("references"))
+
     async def stream():
+        style = ""
+        if refs:
+            yield f"data: {json.dumps({'type': 'status', 'text': 'Studying your inspiration…'})}\n\n"
+            described = await gemini_media.describe_style(refs)
+            if described["ok"]:
+                style = described["text"]
+                yield f"data: {json.dumps({'type': 'style', 'text': style})}\n\n"
         written = await write_variants(brief, campaign, body.get("placements") or [], body.get("count") or 2,
-                                       body.get("model") or "auto")
+                                       body.get("model") or "auto", style=style)
         if not written["ok"]:
             yield f"data: {json.dumps({'type': 'error', 'text': written['error']})}\n\n"
             yield "data: [DONE]\n\n"
@@ -47,7 +56,7 @@ async def ads(request: Request, _account: dict = Depends(require_account)):
         yield f"data: {json.dumps({'type': 'variants', 'variants': variants})}\n\n"
         if body.get("images", True):
             for i, v in enumerate(variants):
-                img = await gemini_media.generate_image(v["image_prompt"], v["aspect_ratio"])
+                img = await gemini_media.generate_image(v["image_prompt"], v["aspect_ratio"], references=refs)
                 if img["ok"]:
                     yield f"data: {json.dumps({'type': 'image', 'index': i, 'mime': img['mime'], 'base64': img['base64']})}\n\n"
                 else:
@@ -62,7 +71,8 @@ async def ads(request: Request, _account: dict = Depends(require_account)):
 @router.post("/image")
 async def regenerate_image(request: Request, _account: dict = Depends(require_account)):
     body = await request.json()
-    result = await gemini_media.generate_image((body.get("prompt") or "").strip(), body.get("aspect_ratio") or "1:1")
+    result = await gemini_media.generate_image((body.get("prompt") or "").strip(), body.get("aspect_ratio") or "1:1",
+                                               references=body.get("references"))
     if not result["ok"]:
         raise HTTPException(429 if result.get("rate_limited") else 400, result["error"])
     return result

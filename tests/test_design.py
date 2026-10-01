@@ -65,13 +65,13 @@ def client():
 
 
 def test_ads_stream_sends_copy_then_images(client, monkeypatch):
-    async def fake_write(brief, campaign, placements, count, model):
+    async def fake_write(brief, campaign, placements, count, model, style=""):
         return {"ok": True, "variants": [
             {"placement": "square", "headline": "A", "image_prompt": "a", "aspect_ratio": "1:1"},
             {"placement": "story_reel", "headline": "B", "image_prompt": "b", "aspect_ratio": "9:16"},
         ]}
 
-    async def fake_image(prompt, aspect_ratio="1:1"):
+    async def fake_image(prompt, aspect_ratio="1:1", references=None):
         if prompt == "b":
             return {"ok": False, "error": "blocked"}
         return {"ok": True, "mime": "image/png", "base64": "QUJD"}
@@ -93,3 +93,28 @@ def test_video_without_modal_is_a_clear_error(client, monkeypatch):
     monkeypatch.setattr(settings, "MODAL_VIDEO_URL", "")
     r = client.post("/design/video", json={"prompt": "bread rising"})
     assert r.status_code == 400 and "modal_app/video.py" in r.json()["detail"]
+
+
+def test_inspiration_images_shape_the_copy_and_the_images(client, monkeypatch):
+    seen = {}
+
+    async def fake_describe(refs):
+        seen["described"] = len(refs)
+        return {"ok": True, "text": "warm terracotta palette, hand-drawn type"}
+
+    async def fake_write(brief, campaign, placements, count, model, style=""):
+        seen["style"] = style
+        return {"ok": True, "variants": [{"placement": "square", "headline": "A", "image_prompt": "a", "aspect_ratio": "1:1"}]}
+
+    async def fake_image(prompt, aspect_ratio="1:1", references=None):
+        seen["refs"] = len(references or [])
+        return {"ok": True, "mime": "image/png", "base64": "QUJD"}
+
+    monkeypatch.setattr("gateway.design_router.gemini_media.describe_style", fake_describe)
+    monkeypatch.setattr("gateway.design_router.write_variants", fake_write)
+    monkeypatch.setattr("gateway.design_router.gemini_media.generate_image", fake_image)
+    refs = [{"mime": "image/jpeg", "base64": "QUJD"}] * 6 + [{"mime": "text/html", "base64": "x"}]
+    r = client.post("/design/ads", json={"brief": "bakery", "campaign": "weekend", "references": refs})
+    types = [json.loads(line[6:])["type"] for line in r.text.split("\n") if line.startswith("data: {")]
+    assert types == ["status", "style", "variants", "image"]
+    assert seen == {"described": 4, "style": "warm terracotta palette, hand-drawn type", "refs": 4}

@@ -28,6 +28,93 @@ function loadSaved() {
     try { return JSON.parse(localStorage.getItem(OLD_KEY)) || {}; } catch { return {}; }
 }
 
+const MAX_REFS = 4;
+
+function canvasJpeg(source, w, h) {
+    const scale = Math.min(1, 1024 / Math.max(w, h));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(w * scale); canvas.height = Math.round(h * scale);
+    canvas.getContext("2d").drawImage(source, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
+}
+
+function imageToRef(file) {
+    return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => { resolve([{ mime: "image/jpeg", base64: canvasJpeg(img, img.naturalWidth, img.naturalHeight), name: file.name }]); URL.revokeObjectURL(url); };
+        img.onerror = () => { reject(new Error(`Couldn't read ${file.name}`)); URL.revokeObjectURL(url); };
+        img.src = url;
+    });
+}
+
+// A video becomes three still frames (start, middle, end) — enough to read its look.
+function videoToRefs(file) {
+    return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const v = document.createElement("video");
+        v.muted = true; v.preload = "auto"; v.src = url;
+        const frames = [];
+        const fail = () => { reject(new Error(`Couldn't read ${file.name} — try an MP4 or a screenshot of it`)); URL.revokeObjectURL(url); };
+        const timer = setTimeout(fail, 20000); // some phone videos never decode in the browser
+        v.onerror = () => { clearTimeout(timer); fail(); };
+        v.onloadedmetadata = () => {
+            const times = [0.1, 0.5, 0.85].map(f => f * (v.duration || 1));
+            const next = () => {
+                if (!times.length) { clearTimeout(timer); resolve(frames); URL.revokeObjectURL(url); return; }
+                v.currentTime = times.shift();
+            };
+            v.onseeked = () => { frames.push({ mime: "image/jpeg", base64: canvasJpeg(v, v.videoWidth, v.videoHeight), name: `${file.name} @${Math.round(v.currentTime)}s` }); next(); };
+            next();
+        };
+    });
+}
+
+function Inspiration({ refs, setRefs, style, disabled }) {
+    const [error, setError] = useState("");
+    const add = async (files) => {
+        setError("");
+        try {
+            let added = [];
+            for (const f of files) added = added.concat(f.type.startsWith("video/") ? await videoToRefs(f) : await imageToRef(f));
+            setRefs(r => [...r, ...added].slice(0, MAX_REFS));
+            if (refs.length + added.length > MAX_REFS) setError(`Kept the first ${MAX_REFS} — that's all the image model takes.`);
+        } catch (e) { setError(e.message); }
+    };
+    return (
+        <div>
+            <div style={label}>INSPIRATION (OPTIONAL)</div>
+            <div style={{ fontSize: "12px", color: "var(--text-muted)", marginBottom: "6px" }}>
+                Ads, posts, photos or a video you like. Sem copies the look (colours, layout, mood), not the content.
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center" }}>
+                {refs.map((r, i) => (
+                    <div key={i} style={{ position: "relative" }}>
+                        <img src={`data:${r.mime};base64,${r.base64}`} alt={r.name} title={r.name}
+                            style={{ width: "64px", height: "64px", objectFit: "cover", borderRadius: "8px", border: "1px solid var(--border)" }} />
+                        <button onClick={() => setRefs(x => x.filter((_, j) => j !== i))} aria-label="Remove"
+                            style={{ position: "absolute", top: "-6px", right: "-6px", width: "20px", height: "20px", borderRadius: "50%", border: "none", background: "var(--text)", color: "var(--bg)", fontSize: "11px", cursor: "pointer" }}>✕</button>
+                    </div>
+                ))}
+                {refs.length < MAX_REFS && (
+                    <label style={{ ...btn, display: "inline-flex", alignItems: "center", height: "64px", boxSizing: "border-box", opacity: disabled ? 0.5 : 1 }}>
+                        + Images / video
+                        <input type="file" accept="image/*,video/*" multiple disabled={disabled} style={{ display: "none" }}
+                            onChange={e => { add([...e.target.files]); e.target.value = ""; }} />
+                    </label>
+                )}
+            </div>
+            {error && <div style={{ fontSize: "12px", color: "var(--danger)", marginTop: "4px" }}>{error}</div>}
+            {style && (
+                <details style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "6px" }}>
+                    <summary style={{ cursor: "pointer" }}>Style Sem picked up</summary>
+                    <div style={{ whiteSpace: "pre-wrap", marginTop: "4px" }}>{style}</div>
+                </details>
+            )}
+        </div>
+    );
+}
+
 function AdCard({ ad, onRetry }) {
     const text = `${ad.headline}\n\n${ad.primary_text}\n\n${(ad.hashtags || []).join(" ")}`;
     return (
@@ -143,6 +230,10 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
     const setPlacements = field$("placements");
     const setCount = field$("count");
     const [menuOpen, setMenuOpen] = useState(false);
+    // Inspiration images stay in memory only (too big for phone storage); the style text they produced is saved.
+    const [refs, setRefs] = useState([]);
+    useEffect(() => { setRefs([]); }, [chat.id]);
+    const references = refs.map(({ mime, base64 }) => ({ mime, base64 }));
     const takenHandoff = useRef(0);
     useEffect(() => {
         if (handoff?.view !== "design" || takenHandoff.current === handoff.at) return;
@@ -172,11 +263,13 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
     const create = async () => {
         setBusy("Writing ads…"); setNotice(""); setAds([]);
         try {
-            const r = await fetch(`${API}/design/ads`, { method: "POST", headers, body: JSON.stringify({ brief, campaign, placements, count, model }) });
+            const r = await fetch(`${API}/design/ads`, { method: "POST", headers, body: JSON.stringify({ brief, campaign, placements, count, model, references }) });
             if (r.status === 401) { onUnauthorized(); return; }
             if (!r.ok || !r.body) throw new Error((await r.json().catch(() => ({}))).detail || `Failed (${r.status})`);
             await readEvents(r, (ev) => {
-                if (ev.type === "variants") {
+                if (ev.type === "status") setBusy(ev.text);
+                else if (ev.type === "style") updateChat(chat.id, () => ({ style: ev.text }));
+                else if (ev.type === "variants") {
                     setAds(ev.variants.map(v => ({ ...v, placementLabel: (PLACEMENTS.find(p => p[0] === v.placement) || [])[1] })));
                     setBusy("Making images…");
                 } else if (ev.type === "image") setAds(a => a.map((ad, i) => (i === ev.index ? { ...ad, image: { mime: ev.mime, base64: ev.base64 } } : ad)));
@@ -192,7 +285,7 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
         const ad = ads[index];
         setAds(a => a.map((x, i) => (i === index ? { ...x, image: null, imageError: "" } : x)));
         try {
-            const r = await fetch(`${API}/design/image`, { method: "POST", headers, body: JSON.stringify({ prompt: ad.image_prompt, aspect_ratio: ad.aspect_ratio }) });
+            const r = await fetch(`${API}/design/image`, { method: "POST", headers, body: JSON.stringify({ prompt: ad.image_prompt, aspect_ratio: ad.aspect_ratio, references }) });
             const d = await r.json();
             if (!r.ok) throw new Error(d.detail || `Failed (${r.status})`);
             setAds(a => a.map((x, i) => (i === index ? { ...x, image: { mime: d.mime, base64: d.base64 } } : x)));
@@ -222,6 +315,8 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
                 </div>
                 <textarea value={brief} onChange={e => setBrief(e.target.value)} rows={brief ? 9 : 3} style={{ ...field, marginTop: "8px" }}
                     placeholder="Or describe the business: what you sell, who to, where, your tone…" />
+
+                <Inspiration refs={refs} setRefs={setRefs} style={chat.style} disabled={!!busy} />
 
                 <div style={label}>CAMPAIGN</div>
                 <textarea value={campaign} onChange={e => setCampaign(e.target.value)} rows={2} style={field}
