@@ -4,6 +4,7 @@ import StatusBar from "./components/StatusBar";
 import Drawer from "./components/Drawer";
 import AgentFeedPanel from "./components/AgentFeedPanel";
 import AllChatsPage from "./components/AllChatsPage";
+import CodePage from "./components/CodePage";
 import Login from "./components/Login";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { turnsToHistory } from "./utils/toolMarker";
@@ -30,7 +31,7 @@ export default function App() {
     const [sessionTitle, setSessionTitle] = useState("");
     const [menuOpen, setMenuOpen] = useState(false);
     const [agentFeedOpen, setAgentFeedOpen] = useState(false);
-    const [view, setView] = useState("chat"); // "chat" | "allChats"
+    const [view, setView] = useState("chat"); // "chat" | "allChats" | "code"
     const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || "");
     const [restoring, setRestoring] = useState(true);
     const sessionIdRef = useRef(sessionId);
@@ -153,6 +154,7 @@ export default function App() {
                 token={token}
                 onLogout={logout}
                 onViewAllChats={() => { setMenuOpen(false); setView("allChats"); }}
+                onOpenCode={() => { setMenuOpen(false); setView("code"); }}
                 onSessionRenamed={handleSessionRenamed}
                 onSessionDeleted={handleSessionDeleted}
             />
@@ -161,6 +163,11 @@ export default function App() {
                 onClose={() => setAgentFeedOpen(false)}
                 events={agentEvents}
             />
+            {view === "code" && (
+                <ErrorBoundary>
+                    <CodePage token={token} onBack={() => setView("chat")} onUnauthorized={logout} />
+                </ErrorBoundary>
+            )}
             {view === "allChats" && (
                 <AllChatsPage
                     token={token}

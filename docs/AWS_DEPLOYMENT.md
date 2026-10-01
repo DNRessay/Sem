@@ -121,6 +121,16 @@ Copy the printed URL into `LOCAL_LLM_URL` and the random string into
 settings: at roughly $0.80/hour awake, the $30 credit buys about 35 GPU
 hours a month, shared with embeddings.
 
+### 2d. Code tab (optional)
+
+The Code tab works in an editable clone on the same Modal repo service from
+step 2b, so redeploy that after pulling: `modal deploy modal_app/repo_tool.py`.
+It uses the backup model from step 2c when configured (no per-minute token
+cap), otherwise Groq. Opening PRs uses your GitHub/GitLab connector token.
+The agent's read-only `aws` tool uses the chat Lambda's own role: attach
+AWS's `ViewOnlyAccess` managed policy to that role if you want it to see more
+than Sem's own resources.
+
 ### 3. First deploy (local, guided)
 
 ```bash
