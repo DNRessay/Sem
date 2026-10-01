@@ -43,6 +43,34 @@ class Settings(BaseSettings):
     LOCAL_LLM_MODEL: str = "bonsai-2-27b"
     LOCAL_LLM_MAX_TOKENS: int = 4096
 
+    # Model picker (pipeline/llm_providers.py). Free options first; each
+    # provider shows up in the picker only once its key is set. Model IDs
+    # are settings so a newer release is a config change, not a code change.
+    # Google AI Studio key — Gemini's free tier (Flash models), plus Nano
+    # Banana images and Gemini TTS for the Design tab.
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-flash-latest"
+    GEMINI_IMAGE_MODEL: str = "gemini-2.5-flash-image"
+    GEMINI_TTS_MODEL: str = "gemini-2.5-flash-preview-tts"
+    # Paid options.
+    ANTHROPIC_API_KEY: str = ""
+    ANTHROPIC_MODEL: str = "claude-opus-5-5"
+    OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-6.1-sol"
+    # Alibaba Cloud Model Studio (DashScope), international endpoint.
+    QWEN_API_KEY: str = ""
+    QWEN_MODEL: str = "qwen-max"
+    QWEN_BASE_URL: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    DEEPSEEK_API_KEY: str = ""
+    DEEPSEEK_MODEL: str = "deepseek-chat"
+    KIMI_API_KEY: str = ""
+    KIMI_MODEL: str = "kimi-latest"
+    # Hugging Face Inference Providers router: any chat model HF serves,
+    # picked by its repo id ("hf:owner/model" in the picker). A free HF
+    # account gets a small monthly credit; beyond that it's pay-as-you-go.
+    HF_TOKEN: str = ""
+    HF_MODEL: str = "openai/gpt-oss-120b"
+
     # Storage — Neon serverless Postgres (+ pgvector) replaces Aiven MySQL + ChromaDB.
     # One database, two roles: raw records and vector search over the same rows.
     NEON_DATABASE_URL: str = "postgresql://user:pass@host/semblance?sslmode=require"

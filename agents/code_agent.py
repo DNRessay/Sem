@@ -4,16 +4,12 @@ import time
 import httpx
 
 from config import settings
-from pipeline.query_engine import wait_for_local_llm
+from pipeline import llm_providers
 from tools.aws_read_tool import AwsReadTool
 from tools.code_workspace import CodeWorkspace
 
 _MAX_TOOL_RESULT_CHARS = 8000
 _PREVIEW_CHARS = 1500
-_GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-# Groq's per-minute output cap on this account (see query_engine's
-# _DEFAULT_MAX_TOKENS) — only used when Bonsai isn't configured.
-_GROQ_MAX_TOKENS = 800
 
 _SYSTEM = """You are Sem Code, SEMBLANCE's coding agent. You work inside a git clone of {repo} ({provider}).
 Every path is relative to the repo root; bash runs with the repo root as its working directory.
@@ -78,13 +74,14 @@ def _preview(result: dict) -> str:
 
 class CodeAgent:
     """Tool-calling loop for the Code tab. Yields event dicts as it goes:
-    {"type": "text"|"tool"|"result"|"error"|"done", ...}. Runs on the
-    self-hosted Bonsai endpoint (no per-minute token cap) and falls back to
-    Groq when it isn't configured."""
+    {"type": "text"|"tool"|"result"|"error"|"done", ...}. `provider` is a
+    model-picker id (pipeline/llm_providers.py); "auto" walks the free
+    models — self-hosted Bonsai first, since it has no per-minute token cap."""
 
     def __init__(self, workspace: CodeWorkspace, mode: str = "act", max_steps: int = 30,
-                 deadline_seconds: float = 780, aws: AwsReadTool | None = None):
+                 deadline_seconds: float = 780, aws: AwsReadTool | None = None, provider: str = "auto"):
         self.ws = workspace
+        self.provider = provider
         self.mode = "plan" if mode == "plan" else "act"
         self.max_steps = max_steps
         self.deadline = time.monotonic() + deadline_seconds
@@ -106,24 +103,10 @@ class CodeAgent:
         return msgs
 
     async def _complete(self, client: httpx.AsyncClient, messages: list[dict]) -> dict:
-        if settings.LOCAL_LLM_URL:
-            if not await wait_for_local_llm(client, min(self.deadline, time.monotonic() + 110)):
-                return {"error": "the self-hosted model didn't come up in time"}
-            url = settings.LOCAL_LLM_URL.rstrip("/") + "/v1/chat/completions"
-            key, model, max_tokens = settings.LOCAL_LLM_API_KEY, settings.LOCAL_LLM_MODEL, settings.LOCAL_LLM_MAX_TOKENS
-        else:
-            url, key, model, max_tokens = _GROQ_URL, settings.GROQ_API_KEY, settings.GROQ_MODEL, _GROQ_MAX_TOKENS
-        r = await client.post(
-            url, headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json={"model": model, "messages": messages, "tools": self._tools(), "max_tokens": max_tokens},
+        return await llm_providers.complete(
+            self.provider, messages, self._tools(), max_tokens=settings.LOCAL_LLM_MAX_TOKENS,
+            deadline=self.deadline, client=client,
         )
-        try:
-            data = r.json()
-        except ValueError:
-            data = {}
-        if r.status_code != 200 or "choices" not in data:
-            return {"error": f"model error {r.status_code}: {str(data or r.text)[:300]}"}
-        return data["choices"][0]["message"]
 
     async def _dispatch(self, name: str, args: dict) -> dict:
         if self.mode == "plan" and name not in _READ_ONLY:
@@ -169,7 +152,7 @@ class CodeAgent:
                     yield {"type": "done", "steps": step}
                     return
 
-                messages.append({"role": "assistant", "content": content, "tool_calls": calls})
+                messages.append({**msg, "role": "assistant", "content": content, "tool_calls": calls})
                 for call in calls:
                     fn = call.get("function") or {}
                     name = fn.get("name", "")

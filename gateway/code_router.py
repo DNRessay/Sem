@@ -37,7 +37,7 @@ async def run(request: Request, _account: dict = Depends(require_account)):
     message = (body.get("message") or "").strip()
     if not message:
         raise HTTPException(400, "message required")
-    agent = CodeAgent(ws, mode=body.get("mode") or "act")
+    agent = CodeAgent(ws, mode=body.get("mode") or "act", provider=body.get("model") or "auto")
 
     async def stream():
         try:

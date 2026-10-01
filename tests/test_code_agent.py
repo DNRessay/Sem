@@ -101,7 +101,7 @@ async def test_model_error_ends_the_run_with_an_error_event():
     with respx.mock:
         respx.post(GROQ_URL).mock(return_value=Response(500, json={"error": "boom"}))
         events = [e async for e in CodeAgent(FakeWorkspace()).run("go")]
-    assert events == [{"type": "error", "text": "model error 500: {'error': 'boom'}"}]
+    assert events == [{"type": "error", "text": "Qwen 27B on Groq error 500: {'error': 'boom'}"}]
 
 
 @pytest.mark.asyncio

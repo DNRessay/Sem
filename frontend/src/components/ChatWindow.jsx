@@ -4,12 +4,12 @@ import DOMPurify from "dompurify";
 import { useStream } from "../hooks/useStream";
 import { useTypewriter } from "../hooks/useTypewriter";
 import VoiceInput from "./VoiceInput";
+import ModelPicker, { loadModel } from "./ModelPicker";
 import AttachMenu, { GitHubIcon, GitLabIcon, AttachFileIcon, ImageIcon } from "./AttachMenu";
 import { copyToClipboard } from "../utils/clipboard";
 import { extractCodeBlocks, filenameFor, downloadText, downloadAllAsZip } from "../utils/codeBlocks";
 
 const API = import.meta.env.VITE_API_URL || "";
-const MODEL_LABEL = "Qwen";
 const THINKING_WORDS = ["Thinking", "Pondering", "Mulling it over", "Sleuthing", "Working on it", "Piecing it together"];
 
 function escapeHtml(s) {
@@ -217,6 +217,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
     const [history, setHistory] = useState(initialHistory);
     const [attachments, setAttachments] = useState([]);
     const [webSearchEnabled, setWebSearchEnabled] = useState(true);
+    const [model, setModel] = useState(() => loadModel("semblance_chat_model"));
     const { chunks, streaming, error, status, tool, send, abort } = useStream(API, token, onUnauthorized);
     const bottomRef = useRef(null);
     // Set once send() resolves and cleared once the typewriter below has
@@ -255,7 +256,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
         setInput("");
         setAttachments([]);
         setHistory(h => [...h, { role: "user", content: msg, files: files.map(f => ({ name: f.name, source: f.source, mime: f.mime })) }]);
-        const { reply, tool: toolResult, title } = await send(msg, sessionId, history, files, webSearchEnabled);
+        const { reply, tool: toolResult, title } = await send(msg, sessionId, history, files, webSearchEnabled, model);
         if (reply) setPendingReply({ reply, tool: toolResult, title });
         else if (title) onTitle?.(sessionId, title);
     };
@@ -360,9 +361,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                             token={token} sessionId={sessionId} onAttach={addAttachment}
                             webSearchEnabled={webSearchEnabled} onToggleWebSearch={setWebSearchEnabled}
                         />
-                        <span style={{ display: "flex", alignItems: "center", gap: "3px", border: "1px solid var(--border)", borderRadius: "999px", padding: "5px 10px", fontSize: "12px", color: "var(--text-muted)" }}>
-                            {MODEL_LABEL} <span style={{ fontSize: "9px" }}>▾</span>
-                        </span>
+                        <ModelPicker token={token} value={model} onChange={setModel} storageKey="semblance_chat_model" />
                         <span style={{ flex: 1 }} />
                         <VoiceInput onTranscript={text => setInput(prev => (prev ? `${prev} ${text}` : text))} />
                         <button

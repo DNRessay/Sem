@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
+import ModelPicker, { loadModel } from "./ModelPicker";
 
 const API = import.meta.env.VITE_API_URL || "";
 const STORE_KEY = "semblance_code_state";
@@ -126,6 +127,7 @@ export default function CodePage({ token, onBack, onUnauthorized }) {
     const [items, setItems] = useState(saved.items || []);
     const [input, setInput] = useState("");
     const [mode, setMode] = useState("act");
+    const [model, setModel] = useState(() => loadModel("semblance_code_model"));
     const [busy, setBusy] = useState("");
     const [notice, setNotice] = useState("");
     const [showAutomations, setShowAutomations] = useState(false);
@@ -174,7 +176,7 @@ export default function CodePage({ token, onBack, onUnauthorized }) {
         try {
             const res = await fetch(`${API}/code/run`, {
                 method: "POST", headers, signal: abortRef.current.signal,
-                body: JSON.stringify({ provider, repo, message, history: prior, mode: runMode }),
+                body: JSON.stringify({ provider, repo, message, history: prior, mode: runMode, model }),
             });
             if (res.status === 401) { onUnauthorized(); return; }
             if (!res.ok || !res.body) throw new Error(`Request failed: ${res.status}`);
@@ -307,6 +309,7 @@ export default function CodePage({ token, onBack, onUnauthorized }) {
                                 }}>{m === "plan" ? "Plan" : "Act"}</button>
                             ))}
                         </div>
+                        <ModelPicker token={token} value={model} onChange={setModel} storageKey="semblance_code_model" />
                         <span style={{ flex: 1 }} />
                         <button
                             onClick={busy && abortRef.current ? () => abortRef.current.abort() : () => run(input)}

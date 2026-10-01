@@ -6,6 +6,7 @@ from cache.conv_cache import ConvCache
 from cache.sys_cache import SysCache
 from config import settings
 from memory.sem_retrieval import SEMRetrieval
+from pipeline import llm_providers
 from pipeline.ctx_assembly import CTXAssembly
 from pipeline.ctx_pressure import CTXPressure
 from pipeline.query_engine import QueryEngine, RateLimitError
@@ -54,7 +55,7 @@ class Bootstrap:
 
     async def run(
         self, query: str, session_id: str, history: list, images: list | None = None,
-        display_query: str | None = None, assistant_prefix: str = "",
+        display_query: str | None = None, assistant_prefix: str = "", provider: str = "auto",
     ) -> AsyncIterator[str]:
         """`query` is what actually reaches the model — it may have
         attachments or fetched/searched web content folded into it.
@@ -106,9 +107,19 @@ class Bootstrap:
 
         reply_parts = []
         try:
-            async for piece in self.query_engine.stream_llm(messages, session_id=session_id, model=model):
-                reply_parts.append(piece)
-                yield piece
+            if provider != "groq" and (provider in llm_providers.PROVIDERS or provider.startswith(llm_providers.HF_PREFIX)):
+                # A model picked explicitly in the UI (Gemini, Claude, GPT,
+                # Qwen, ...) answers in one piece; "auto" keeps the streamed
+                # Groq path with its own Bonsai/Cohere overflow.
+                result = await llm_providers.complete(provider, messages, max_tokens=4096)
+                if "error" in result:
+                    raise RuntimeError(result["error"])
+                reply_parts.append(result.get("content") or "")
+                yield result.get("content") or ""
+            else:
+                async for piece in self.query_engine.stream_llm(messages, session_id=session_id, model=model):
+                    reply_parts.append(piece)
+                    yield piece
         except RateLimitError as e:
             # A real one dumped Groq's raw error JSON straight into the chat
             # ("Rate limit reached for model... on tokens per day (TPD):

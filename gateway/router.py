@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 
 from config import settings
 from gateway.auth import issue_token, require_account, verify_passphrase
+from pipeline import llm_providers
 from pipeline.agent_intent import (
     detect_explore_intent,
     detect_plan_intent,
@@ -510,7 +511,7 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
         reply_parts = []
         async for chunk in bootstrap.run(
             msg, session_id, history, images=images,
-            display_query=raw_msg, assistant_prefix=tool_marker,
+            display_query=raw_msg, assistant_prefix=tool_marker, provider=body.get("model") or "auto",
         ):
             reply_parts.append(chunk)
             yield f"data: {json.dumps({'chunk': chunk})}\n\n"
@@ -588,6 +589,11 @@ async def rename_session(session_id: str, request: Request, _account: dict = Dep
     db = await get_store()
     await db.set_session_title(session_id, title[:80])
     return {"session_id": session_id, "title": title[:80]}
+
+
+@router.get("/models")
+async def models(_account: dict = Depends(require_account)):
+    return {"models": llm_providers.available()}
 
 
 @router.get("/health")

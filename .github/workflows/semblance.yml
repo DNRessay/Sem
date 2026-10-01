@@ -87,6 +87,13 @@ jobs:
           COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
           LOCAL_LLM_URL: ${{ secrets.LOCAL_LLM_URL }}
           LOCAL_LLM_API_KEY: ${{ secrets.LOCAL_LLM_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
           NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
           MODAL_EMBEDDINGS_URL: ${{ secrets.MODAL_EMBEDDINGS_URL }}
           MODAL_REPO_URL: ${{ secrets.MODAL_REPO_URL }}
@@ -120,6 +127,13 @@ jobs:
           cohere_api_key=$(printf '%s' "$COHERE_API_KEY" | tr -d '\r\n')
           local_llm_url=$(printf '%s' "$LOCAL_LLM_URL" | tr -d '\r\n')
           local_llm_api_key=$(printf '%s' "$LOCAL_LLM_API_KEY" | tr -d '\r\n')
+          gemini_api_key=$(printf '%s' "$GEMINI_API_KEY" | tr -d '\r\n')
+          anthropic_api_key=$(printf '%s' "$ANTHROPIC_API_KEY" | tr -d '\r\n')
+          openai_api_key=$(printf '%s' "$OPENAI_API_KEY" | tr -d '\r\n')
+          qwen_api_key=$(printf '%s' "$QWEN_API_KEY" | tr -d '\r\n')
+          deepseek_api_key=$(printf '%s' "$DEEPSEEK_API_KEY" | tr -d '\r\n')
+          kimi_api_key=$(printf '%s' "$KIMI_API_KEY" | tr -d '\r\n')
+          hf_token=$(printf '%s' "$HF_TOKEN" | tr -d '\r\n')
           neon_database_url=$(printf '%s' "$NEON_DATABASE_URL" | tr -d '\r\n')
           modal_embeddings_url=$(printf '%s' "$MODAL_EMBEDDINGS_URL" | tr -d '\r\n')
           modal_repo_url=$(printf '%s' "$MODAL_REPO_URL" | tr -d '\r\n')
@@ -166,6 +180,13 @@ jobs:
           [ -n "$cohere_api_key" ] && params+=("CohereApiKey=${cohere_api_key}")
           [ -n "$local_llm_url" ] && params+=("LocalLlmUrl=${local_llm_url}")
           [ -n "$local_llm_api_key" ] && params+=("LocalLlmApiKey=${local_llm_api_key}")
+          [ -n "$gemini_api_key" ] && params+=("GeminiApiKey=${gemini_api_key}")
+          [ -n "$anthropic_api_key" ] && params+=("AnthropicApiKey=${anthropic_api_key}")
+          [ -n "$openai_api_key" ] && params+=("OpenaiApiKey=${openai_api_key}")
+          [ -n "$qwen_api_key" ] && params+=("QwenApiKey=${qwen_api_key}")
+          [ -n "$deepseek_api_key" ] && params+=("DeepseekApiKey=${deepseek_api_key}")
+          [ -n "$kimi_api_key" ] && params+=("KimiApiKey=${kimi_api_key}")
+          [ -n "$hf_token" ] && params+=("HfToken=${hf_token}")
           [ -n "$modal_embeddings_url" ] && params+=("ModalEmbeddingsUrl=${modal_embeddings_url}")
           [ -n "$modal_repo_url" ] && params+=("ModalRepoUrl=${modal_repo_url}")
           [ -n "$modal_repo_secret" ] && params+=("ModalRepoSecret=${modal_repo_secret}")

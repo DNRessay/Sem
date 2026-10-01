@@ -9,7 +9,7 @@ class FakeBootstrap:
     def __init__(self, trust_mode="AUTO", tau_context=""):
         pass
 
-    async def run(self, query, session_id, history, images=None, display_query=None, assistant_prefix=""):
+    async def run(self, query, session_id, history, images=None, display_query=None, assistant_prefix="", provider="auto"):
         yield "ok"
 
 

@@ -38,6 +38,41 @@ Parameters:
     NoEcho: true
     Default: ""
     Description: Must match the LLM_API_KEY value in the semblance-llm-secret Modal secret
+  GeminiApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Optional - Google AI Studio key: Gemini free tier, Nano Banana images, Gemini TTS
+  AnthropicApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Optional - Paid: Claude in the model picker
+  OpenaiApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Optional - Paid: GPT in the model picker
+  QwenApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Optional - Paid: Qwen via Alibaba Cloud Model Studio (DashScope)
+  DeepseekApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Optional - Paid: DeepSeek in the model picker
+  KimiApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Optional - Paid: Kimi (Moonshot) in the model picker
+  HfToken:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Optional - Hugging Face token: any model on HF's Inference Providers router
   NeonDatabaseUrl:
     Type: String
     NoEcho: true
@@ -141,6 +176,13 @@ Globals:
         COHERE_MODEL: !Ref CohereModel
         LOCAL_LLM_URL: !Ref LocalLlmUrl
         LOCAL_LLM_API_KEY: !Ref LocalLlmApiKey
+        GEMINI_API_KEY: !Ref GeminiApiKey
+        ANTHROPIC_API_KEY: !Ref AnthropicApiKey
+        OPENAI_API_KEY: !Ref OpenaiApiKey
+        QWEN_API_KEY: !Ref QwenApiKey
+        DEEPSEEK_API_KEY: !Ref DeepseekApiKey
+        KIMI_API_KEY: !Ref KimiApiKey
+        HF_TOKEN: !Ref HfToken
         NEON_DATABASE_URL: !Ref NeonDatabaseUrl
         MODAL_EMBEDDINGS_URL: !Ref ModalEmbeddingsUrl
         MODAL_REPO_URL: !Ref ModalRepoUrl

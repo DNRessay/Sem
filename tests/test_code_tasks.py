@@ -166,7 +166,7 @@ def test_run_streams_agent_events(client, monkeypatch):
     c, _ = client
 
     class FakeAgent:
-        def __init__(self, ws, mode="act"):
+        def __init__(self, ws, mode="act", provider="auto"):
             self.mode = mode
 
         async def run(self, message, history):
