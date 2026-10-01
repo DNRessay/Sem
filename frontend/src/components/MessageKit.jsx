@@ -304,3 +304,8 @@ export function withAttachments(message, files) {
     if (!files.length) return message;
     return `${message}\n\n` + files.map(f => `Attached file \`${f.name}\`:\n\`\`\`\n${f.text}\n\`\`\``).join("\n\n");
 }
+
+// Colour coding for problems: limits/overloads amber (wait or switch model), everything else red.
+export function errorClass(text = "") {
+    return /limit|rate|quota|429|credits|overload|high demand|503|time limit|try again/i.test(text) ? "msg-warning" : "msg-error";
+}

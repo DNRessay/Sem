@@ -51,7 +51,7 @@ export default function Login({ onLoggedIn }) {
                 )}
                 <button
                     onClick={submit}
-                    disabled={busy}
+                    disabled={busy} className="btn-primary"
                     style={{ width: "100%", marginTop: "14px", padding: "12px", background: "var(--accent)", border: "none", borderRadius: "10px", color: "var(--accent-contrast)", fontSize: "15px", fontWeight: "600", cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1 }}
                 >
                     {busy ? "Checking…" : "Continue"}

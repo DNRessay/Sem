@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import ModelPicker, { loadModel } from "./ModelPicker";
 import { ToolStep, md } from "./CodePage";
 import { readEvents } from "../utils/sse";
+import { errorClass } from "./MessageKit";
 import TabDrawer, { HandoffCard, MenuButton } from "./TabDrawer";
 import useTabChats from "../hooks/useTabChats";
 
@@ -42,7 +43,7 @@ function ApprovalCard({ item, onDecide }) {
             )}
             {state === "pending" && (
                 <div style={{ display: "flex", gap: "8px", marginTop: "6px" }}>
-                    <button onClick={() => decide(true)} style={{ ...btn, background: "var(--accent)", color: "var(--accent-contrast)" }}>Approve</button>
+                    <button className="btn-primary" onClick={() => decide(true)} style={btn}>Approve</button>
                     <button onClick={() => decide(false)} style={btn}>Dismiss</button>
                 </div>
             )}
@@ -169,7 +170,7 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized, handoff,
                         </div>
                     );
                     if (item.kind === "handoff") return <HandoffCard key={i} tab={item.tab} task={item.task} onHandoff={onHandoff} />;
-                    if (item.kind === "error") return <div key={i} style={{ color: "var(--danger)", fontSize: "13px", margin: "6px 0" }}>{item.text}</div>;
+                    if (item.kind === "error") return <div key={i} className={errorClass(item.text)}>{item.text}</div>;
                     return <div key={i} className="md-content" style={{ fontSize: "14px", color: "var(--text)", margin: "6px 0" }} dangerouslySetInnerHTML={md(item.text)} />;
                 })}
                 {busy && <div style={{ color: "var(--text-muted)", fontSize: "13px", margin: "8px 0" }}>Working…</div>}
@@ -190,7 +191,7 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized, handoff,
                         <span style={{ flex: 1 }} />
                         <button
                             onClick={busy ? () => abortRef.current?.abort() : () => run(input)}
-                            aria-label={busy ? "Stop" : "Send"}
+                            aria-label={busy ? "Stop" : "Send"} className={busy ? "" : "btn-gold"}
                             style={{ width: "32px", height: "32px", borderRadius: "50%", border: "none", cursor: "pointer",
                                 background: busy ? "var(--danger)" : "var(--accent)", color: "var(--accent-contrast)", fontSize: "15px" }}
                         >{busy ? "■" : "↑"}</button>

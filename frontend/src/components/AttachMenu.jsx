@@ -385,7 +385,7 @@ function RepoForm({ provider, token, sessionId, onAttach, onNeedConnector, onClo
                             {branches.map(b => <option key={b} value={b}>{b}</option>)}
                         </select>
                     )}
-                    <button onClick={submitRepo} disabled={repoBusy} style={smallButtonStyle}>
+                    <button onClick={submitRepo} disabled={repoBusy} className="btn-primary" style={smallButtonStyle}>
                         {repoBusy ? "Adding repo…" : `Add ${repo}`}
                     </button>
                     <div style={{ fontSize: "11px", color: "var(--text-muted)", textAlign: "center" }}>or pick a single file</div>
@@ -430,7 +430,7 @@ function RepoForm({ provider, token, sessionId, onAttach, onNeedConnector, onClo
                 </>
             )}
             {error && <div style={{ color: "var(--danger)", fontSize: "12px" }}>{error}</div>}
-            <button onClick={submit} disabled={busy || !selected} style={smallButtonStyle}>
+            <button onClick={submit} disabled={busy || !selected} className="btn-primary" style={smallButtonStyle}>
                 {busy ? "Fetching…" : "Fetch file"}
             </button>
         </div>
@@ -488,7 +488,7 @@ function ConnectorTokenForm({ provider, token, onSaved }) {
             </div>
             {!manual ? (
                 <>
-                    <button onClick={connectViaOAuth} disabled={busy} style={smallButtonStyle}>
+                    <button onClick={connectViaOAuth} disabled={busy} className="btn-primary" style={smallButtonStyle}>
                         {busy ? "Opening…" : `Connect ${provider}`}
                     </button>
                     {error && <div style={{ color: "var(--text-muted)", fontSize: "12px" }}>{error}</div>}
@@ -502,7 +502,7 @@ function ConnectorTokenForm({ provider, token, onSaved }) {
                     <input value={value} onChange={e => setValue(e.target.value)} type="password"
                         placeholder={provider === "github" ? "ghp_..." : "glpat-..."} style={inputStyle} />
                     {error && <div style={{ color: "var(--danger)", fontSize: "12px" }}>{error}</div>}
-                    <button onClick={save} disabled={busy} style={smallButtonStyle}>
+                    <button onClick={save} disabled={busy} className="btn-primary" style={smallButtonStyle}>
                         {busy ? "Saving…" : "Save token"}
                     </button>
                 </>

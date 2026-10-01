@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import ModelPicker, { loadModel } from "./ModelPicker";
 import { ToolStep, md } from "./CodePage";
 import { readEvents } from "../utils/sse";
+import { errorClass } from "./MessageKit";
 import TabDrawer, { HandoffCard, MenuButton } from "./TabDrawer";
 import useTabChats from "../hooks/useTabChats";
 
@@ -50,7 +51,7 @@ function Connect({ headers, onConnected }) {
             </div>
             <input value={url} onChange={e => setUrl(e.target.value)} placeholder="C-Lab address, e.g. https://….lambda-url.eu-west-1.on.aws/mcp" style={field} />
             <input value={key} onChange={e => setKey(e.target.value)} placeholder="clab_… key" type="password" style={field} />
-            <button onClick={connect} disabled={busy || !url || !key} style={{ ...btn, alignSelf: "flex-start", background: "var(--accent)", color: "var(--accent-contrast)", border: "none" }}>Connect C-Lab</button>
+            <button className="btn-primary" onClick={connect} disabled={busy || !url || !key} style={{ ...btn, alignSelf: "flex-start", background: "var(--accent)", color: "var(--accent-contrast)", border: "none" }}>Connect C-Lab</button>
             {msg && <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>{msg}</div>}
         </div>
     );
@@ -150,7 +151,7 @@ export default function FinancePage({ token, onNavigate, onUnauthorized, handoff
                         </div>
                     );
                     if (item.kind === "handoff") return <HandoffCard key={i} tab={item.tab} task={item.task} onHandoff={onHandoff} />;
-                    if (item.kind === "error") return <div key={i} style={{ color: "var(--danger)", fontSize: "13px", margin: "6px 0" }}>{item.text}</div>;
+                    if (item.kind === "error") return <div key={i} className={errorClass(item.text)}>{item.text}</div>;
                     return <div key={i} className="md-content" style={{ fontSize: "14px", color: "var(--text)", margin: "6px 0" }} dangerouslySetInnerHTML={md(item.text)} />;
                 })}
                 {busy && <div style={{ color: "var(--text-muted)", fontSize: "13px", margin: "8px 0" }}>Looking at your numbers…</div>}
@@ -167,7 +168,7 @@ export default function FinancePage({ token, onNavigate, onUnauthorized, handoff
                         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                             <ModelPicker token={token} value={model} onChange={setModel} storageKey="semblance_finance_model" />
                             <span style={{ flex: 1 }} />
-                            <button onClick={busy ? () => abortRef.current?.abort() : () => run(input)} aria-label={busy ? "Stop" : "Send"}
+                            <button onClick={busy ? () => abortRef.current?.abort() : () => run(input)} aria-label={busy ? "Stop" : "Send"} className={busy ? "" : "btn-gold"}
                                 style={{ width: "32px", height: "32px", borderRadius: "50%", border: "none", cursor: "pointer",
                                     background: busy ? "var(--danger)" : "var(--accent)", color: "var(--accent-contrast)", fontSize: "15px" }}>
                                 {busy ? "■" : "↑"}

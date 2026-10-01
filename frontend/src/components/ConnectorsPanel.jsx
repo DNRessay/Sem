@@ -114,7 +114,7 @@ export default function ConnectorsPanel({ token }) {
                 ) : (
                     <div style={{ marginTop: "6px" }}>
                         <button onClick={() => connectViaOAuth(provider)} disabled={busy === provider}
-                            style={{ width: "100%", fontSize: "12px", fontWeight: "600", background: "var(--accent)", color: "var(--accent-contrast)", border: "none", borderRadius: "6px", padding: "8px 10px", cursor: "pointer" }}>
+                            className="btn-primary" style={{ width: "100%", fontSize: "12px", fontWeight: "600", background: "var(--accent)", color: "var(--accent-contrast)", border: "none", borderRadius: "6px", padding: "8px 10px", cursor: "pointer" }}>
                             {busy === provider ? "Opening…" : `Connect ${p.label}`}
                         </button>
                         {oauthError[provider] && (
@@ -135,7 +135,7 @@ export default function ConnectorsPanel({ token }) {
                                     style={{ flex: 1, minWidth: 0, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "6px", padding: "6px 8px", color: "var(--text)", fontSize: "12px", outline: "none" }}
                                 />
                                 <button onClick={() => save(provider)} disabled={busy === provider}
-                                    style={{ fontSize: "12px", background: "var(--accent)", color: "var(--accent-contrast)", border: "none", borderRadius: "6px", padding: "6px 10px", cursor: "pointer" }}>
+                                    className="btn-primary" style={{ fontSize: "12px", background: "var(--accent)", color: "var(--accent-contrast)", border: "none", borderRadius: "6px", padding: "6px 10px", cursor: "pointer" }}>
                                     {busy === provider ? "…" : "Save"}
                                 </button>
                             </div>

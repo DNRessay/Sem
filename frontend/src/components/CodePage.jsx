@@ -4,6 +4,7 @@ import DOMPurify from "dompurify";
 import ModelPicker, { loadModel } from "./ModelPicker";
 import { readEvents } from "../utils/sse";
 import { RepoPicker } from "./AttachMenu";
+import { errorClass } from "./MessageKit";
 import TabDrawer, { HandoffCard, MenuButton } from "./TabDrawer";
 import useTabChats from "../hooks/useTabChats";
 
@@ -308,12 +309,12 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
                         </div>
                     );
                     if (item.kind === "handoff") return <HandoffCard key={i} tab={item.tab} task={item.task} onHandoff={onHandoff} />;
-                    if (item.kind === "error") return <div key={i} style={{ color: "var(--danger)", fontSize: "13px", margin: "6px 0" }}>{item.text}</div>;
+                    if (item.kind === "error") return <div key={i} className={errorClass(item.text)}>{item.text}</div>;
                     return <div key={i} className="md-content" style={{ fontSize: "14px", color: "var(--text)", margin: "6px 0" }} dangerouslySetInnerHTML={md(item.text)} />;
                 })}
                 {busy && <div style={{ color: "var(--text-muted)", fontSize: "13px", margin: "8px 0" }}>{busy}</div>}
                 {lastIsPlan && (
-                    <button onClick={() => run("Go ahead and implement the plan above.", "act")} style={{ ...btn, margin: "8px 0", background: "var(--accent)", color: "var(--accent-contrast)" }}>
+                    <button className="btn-primary" onClick={() => run("Go ahead and implement the plan above.", "act")} style={{ ...btn, margin: "8px 0", background: "var(--accent)", color: "var(--accent-contrast)" }}>
                         Approve plan &amp; run
                     </button>
                 )}
@@ -334,7 +335,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
                             {["plan", "act"].map(m => (
                                 <button key={m} onClick={() => setMode(m)} style={{
                                     padding: "5px 12px", border: "none", fontSize: "12px", cursor: "pointer",
-                                    background: mode === m ? "var(--accent)" : "transparent",
+                                    background: mode === m ? "var(--accent)" : "transparent", boxShadow: mode === m ? "inset 0 0 0 1.5px var(--gold)" : "none",
                                     color: mode === m ? "var(--accent-contrast)" : "var(--text-muted)",
                                 }}>{m === "plan" ? "Plan" : "Act"}</button>
                             ))}
@@ -344,7 +345,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
                         <button
                             onClick={busy && abortRef.current ? () => abortRef.current.abort() : () => run(input)}
                             disabled={!repo}
-                            aria-label={busy ? "Stop" : "Send"}
+                            aria-label={busy ? "Stop" : "Send"} className={busy ? "" : "btn-gold"}
                             style={{ width: "32px", height: "32px", borderRadius: "50%", border: "none", cursor: "pointer",
                                 background: busy ? "var(--danger)" : "var(--accent)", color: "var(--accent-contrast)", fontSize: "15px" }}
                         >{busy ? "■" : "↑"}</button>

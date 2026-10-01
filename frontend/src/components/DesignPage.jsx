@@ -123,7 +123,7 @@ function AdCard({ ad, onRetry }) {
                 {ad.image ? (
                     <img src={`data:${ad.image.mime};base64,${ad.image.base64}`} alt={ad.headline} style={{ width: "100%", display: "block" }} />
                 ) : (
-                    <span style={{ fontSize: "12px", color: ad.imageError ? "var(--danger)" : "var(--text-muted)", padding: "16px", textAlign: "center" }}>
+                    <span style={{ fontSize: "12px", color: !ad.imageError ? "var(--text-muted)" : /limit|not kept/i.test(ad.imageError) ? "var(--warning)" : "var(--danger)", padding: "16px", textAlign: "center" }}>
                         {ad.imageError || "Making image…"}
                     </span>
                 )}
@@ -197,7 +197,7 @@ function VideoStudio({ token, seedPrompt }) {
                     <option value="16:9">16:9 YouTube</option>
                     <option value="1:1">1:1 Feed</option>
                 </select>
-                <button onClick={submit} disabled={!prompt.trim() || !!job} style={primary}>{job ? "Rendering…" : "Render video"}</button>
+                <button onClick={submit} disabled={!prompt.trim() || !!job} className="btn-primary" style={primary}>{job ? "Rendering…" : "Render video"}</button>
                 {budget && <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>Budget ${Number(budget.used_usd).toFixed(2)} / ${Number(budget.cap_usd).toFixed(2)} this month</span>}
             </div>
             {status && <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "8px" }}>{status}</div>}
@@ -324,7 +324,7 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "8px" }}>
                     {PLACEMENTS.map(([id, name]) => (
                         <button key={id} onClick={() => toggle(id)} aria-pressed={placements.includes(id)}
-                            style={{ ...btn, fontSize: "12px", fontWeight: 500, ...(placements.includes(id) ? { background: "var(--accent)", color: "var(--accent-contrast)" } : {}) }}>
+                            className={placements.includes(id) ? "is-selected" : ""} style={{ ...btn, fontSize: "12px", fontWeight: 500 }}>
                             {name}
                         </button>
                     ))}
@@ -333,7 +333,7 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
                     <select value={count} onChange={e => setCount(Number(e.target.value))} style={{ ...field, width: "auto" }}>
                         {[1, 2, 3].map(n => <option key={n} value={n}>{n} per placement</option>)}
                     </select>
-                    <button onClick={create} disabled={!brief.trim() || !campaign.trim() || !placements.length || !!busy} style={primary}>Create ads</button>
+                    <button onClick={create} disabled={!brief.trim() || !campaign.trim() || !placements.length || !!busy} className="btn-primary" style={primary}>Create ads</button>
                 </div>
                 {(busy || notice) && <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "8px" }}>{busy || notice}</div>}
 

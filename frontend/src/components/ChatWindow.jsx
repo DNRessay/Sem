@@ -3,7 +3,7 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { useStream } from "../hooks/useStream";
 import { HandoffCard } from "./TabDrawer";
-import { CopyButton, DownloadAllButton, SpeakButton, handleCodeCardClick, renderMarkdown } from "./MessageKit";
+import { CopyButton, DownloadAllButton, SpeakButton, errorClass, handleCodeCardClick, renderMarkdown } from "./MessageKit";
 import { useTypewriter } from "../hooks/useTypewriter";
 import VoiceInput from "./VoiceInput";
 import ModelPicker, { loadModel } from "./ModelPicker";
@@ -181,7 +181,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                         <div key={i} style={{ alignSelf: "flex-start", maxWidth: "88%" }}>
                             {m.tool && <ToolChip tool={m.tool} />}
                             <div
-                                className="md-content"
+                                className={/^(Something went wrong|I've hit)/.test(m.content) ? `md-content ${errorClass(m.content)}` : "md-content"}
                                 style={{ padding: "0 2px", fontSize: "15px", lineHeight: "1.7" }}
                                 onClick={handleCodeCardClick}
                                 dangerouslySetInnerHTML={renderMarkdown(m.content)}
@@ -213,7 +213,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                     </div>
                 )}
                 {error && (
-                    <div style={{ alignSelf: "flex-start", maxWidth: "80%", background: "rgba(196,69,58,0.08)", border: "1px solid var(--danger)", padding: "10px 14px", borderRadius: "12px", fontSize: "13px", lineHeight: "1.6", color: "var(--danger)" }}>
+                    <div className={errorClass(error)} style={{ alignSelf: "flex-start", maxWidth: "80%", lineHeight: "1.6" }}>
                         {error}
                     </div>
                 )}
@@ -268,7 +268,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                         <VoiceInput onTranscript={text => setInput(prev => (prev ? `${prev} ${text}` : text))} />
                         <button
                             onClick={streaming ? abort : submit}
-                            aria-label={streaming ? "Stop" : "Send"}
+                            aria-label={streaming ? "Stop" : "Send"} className={streaming ? "" : "btn-gold"}
                             style={{
                                 width: "32px", height: "32px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
                                 background: streaming ? "var(--danger)" : "var(--accent)", border: "none", borderRadius: "50%",

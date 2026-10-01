@@ -30,7 +30,7 @@ export function HandoffCard({ tab, task, onHandoff }) {
     return (
         <div style={{ margin: "8px 0", padding: "10px 12px", border: "1px solid var(--border)", borderRadius: "12px", background: "var(--surface)" }}>
             <div style={{ fontSize: "12px", color: "var(--text-muted)", marginBottom: "6px", whiteSpace: "pre-wrap", maxHeight: "6em", overflow: "hidden" }}>{task}</div>
-            <button onClick={() => onHandoff(tab, task)} style={{
+            <button className="btn-primary" onClick={() => onHandoff(tab, task)} style={{
                 padding: "7px 12px", borderRadius: "10px", border: "none", background: "var(--accent)",
                 color: "var(--accent-contrast)", fontSize: "13px", fontWeight: 600, cursor: "pointer",
             }}>Open in {TAB_NAMES[tab]} →</button>
@@ -76,6 +76,7 @@ export default function TabDrawer({ open, onClose, title, current, onNavigate, o
                         <div key={c.id} onClick={() => { onSelect(c.id); onClose(); }} style={{
                             display: "flex", alignItems: "center", gap: "6px", cursor: "pointer", borderRadius: "8px",
                             padding: "8px", marginBottom: "2px", background: c.id === activeId ? "var(--surface)" : "none",
+                            boxShadow: c.id === activeId ? "inset 3px 0 0 var(--gold)" : "none",
                         }}>
                             <div style={{ minWidth: 0, flex: 1 }}>
                                 <div style={{ color: "var(--text)", fontSize: "13px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>

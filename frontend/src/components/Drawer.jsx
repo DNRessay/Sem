@@ -122,6 +122,7 @@ export default function Drawer({ open, onClose, currentSessionId, onNewChat, onO
                             style={{
                                 display: "flex", alignItems: "center", justifyContent: "space-between",
                                 background: s.session_id === currentSessionId ? "var(--surface)" : "none",
+                                boxShadow: s.session_id === currentSessionId ? "inset 3px 0 0 var(--gold)" : "none",
                                 borderRadius: "8px", padding: "8px 8px", marginBottom: "2px", cursor: "pointer",
                             }}
                         >
