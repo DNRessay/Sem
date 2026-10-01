@@ -29,11 +29,11 @@ def classify(service: str, operation: str) -> list[str]:
     op = _to_pascal(operation or "")
     flags = []
     if service in _PERMISSION_SERVICES or _PERMISSION_WORDS.search(op):
-        flags.append("⚠ changes permissions")
+        flags.append("PERMISSIONS:")
     if service in _COSTLY_SERVICES and op.startswith(_CREATE_WORDS):
-        flags.append("💸 may add a monthly cost")
+        flags.append("COSTS MONEY (monthly):")
     if op.startswith(_DELETE_WORDS):
-        flags.append("🗑 deletes or stops something")
+        flags.append("DELETES/STOPS:")
     return flags
 
 

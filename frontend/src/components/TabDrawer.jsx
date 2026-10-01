@@ -1,11 +1,13 @@
+import { CloseIcon, GearIcon, MenuIcon, TAB_ICONS } from "./Icons";
+
 // The side menu for Code, Co-work, Design and Finance: same shape as the main
 // chat's Drawer, titled for the tab, with that tab's own chat history.
 const TABS = [
-    { view: "chat", label: "◎ Chat" },
-    { view: "code", label: "</> Code" },
-    { view: "cowork", label: "✦ Co-work" },
-    { view: "design", label: "◐ Design & ads" },
-    { view: "finance", label: "R Finance" },
+    { view: "chat", label: "Chat" },
+    { view: "code", label: "Code" },
+    { view: "cowork", label: "Co-work" },
+    { view: "design", label: "Design & ads" },
+    { view: "finance", label: "Finance" },
 ];
 
 const navBtn = {
@@ -40,7 +42,7 @@ export function HandoffCard({ tab, task, onHandoff }) {
 
 export function MenuButton({ onClick }) {
     return (
-        <button onClick={onClick} aria-label="Menu" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "20px", color: "var(--text)", padding: "0 4px" }}>☰</button>
+        <button onClick={onClick} aria-label="Menu" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text)", padding: "6px", display: "inline-flex" }}><MenuIcon size={20} /></button>
     );
 }
 
@@ -60,13 +62,15 @@ export default function TabDrawer({ open, onClose, title, current, onNavigate, o
             }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
                     <span style={{ fontWeight: "700", color: "var(--text)" }}>{title}</span>
-                    <button onClick={onClose} aria-label="Close menu" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "18px", color: "var(--text-muted)" }}>✕</button>
+                    <button onClick={onClose} aria-label="Close menu" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", display: "inline-flex", padding: "4px" }}><CloseIcon size={18} /></button>
                 </div>
 
                 <div style={{ padding: "4px 16px 12px" }}>
                     <button onClick={() => { onNew(); onClose(); }} disabled={disabled} style={navBtn}>{newLabel}</button>
                     {TABS.filter(t => t.view !== current).map(t => (
-                        <button key={t.view} onClick={() => go(t.view)} style={navBtn}>{t.label}</button>
+                        <button key={t.view} onClick={() => go(t.view)} style={{ ...navBtn, display: "flex", alignItems: "center", gap: "10px" }}>
+                            {(() => { const Icon = TAB_ICONS[t.view]; return <Icon size={16} />; })()} {t.label}
+                        </button>
                     ))}
                 </div>
 
@@ -90,7 +94,7 @@ export default function TabDrawer({ open, onClose, title, current, onNavigate, o
                                 onClick={e => { e.stopPropagation(); if (window.confirm(`Delete "${c.title || "New chat"}"?`)) onDelete(c.id); }}
                                 disabled={disabled && c.id === activeId} aria-label="Delete chat"
                                 style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", fontSize: "14px", padding: "4px" }}
-                            >✕</button>
+                            ><CloseIcon size={14} /></button>
                         </div>
                     ))}
                 </div>
@@ -98,7 +102,7 @@ export default function TabDrawer({ open, onClose, title, current, onNavigate, o
                 <button onClick={() => go("settings")} style={{
                     padding: "12px 16px", background: "none", border: "none", borderTop: "1px solid var(--border)",
                     width: "100%", cursor: "pointer", textAlign: "left", fontSize: "13px", color: "var(--text)",
-                }}>⚙ Settings &amp; MCP</button>
+                display: "flex", alignItems: "center", gap: "10px" }}><GearIcon size={16} /> Settings &amp; MCP</button>
             </div>
         </>
     );

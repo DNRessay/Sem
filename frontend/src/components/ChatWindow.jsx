@@ -3,6 +3,7 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { useStream } from "../hooks/useStream";
 import { HandoffCard } from "./TabDrawer";
+import { SendIcon, StopIcon } from "./Icons";
 import { ChatMenu, CopyButton, DownloadAllButton, SpeakButton, SuggestModel, errorClass, handleCodeCardClick, renderMarkdown } from "./MessageKit";
 import { useTypewriter } from "../hooks/useTypewriter";
 import VoiceInput from "./VoiceInput";
@@ -284,7 +285,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                                 color: "var(--accent-contrast)", cursor: "pointer", fontSize: "15px",
                             }}
                         >
-                            {streaming ? "■" : "↑"}
+                            {streaming ? <StopIcon size={14} /> : <SendIcon size={16} />}
                         </button>
                     </div>
                 </div>

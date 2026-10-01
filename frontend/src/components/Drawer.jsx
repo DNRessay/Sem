@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import SessionMenu from "./SessionMenu";
+import { BrushIcon, CloseIcon, CodeIcon, GearIcon, SparkleIcon, UserIcon, WalletIcon } from "./Icons";
 
 const API = import.meta.env.VITE_API_URL || "";
 const RECENT_LIMIT = 5;
@@ -73,7 +74,7 @@ export default function Drawer({ open, onClose, currentSessionId, onNewChat, onO
             >
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
                     <span style={{ fontWeight: "700", color: "var(--text)" }}>SEMBLANCE</span>
-                    <button onClick={onClose} aria-label="Close menu" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "18px", color: "var(--text-muted)" }}>✕</button>
+                    <button onClick={onClose} aria-label="Close menu" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", display: "inline-flex", padding: "4px" }}><CloseIcon size={18} /></button>
                 </div>
 
                 <div style={{ padding: "12px 16px" }}>
@@ -87,25 +88,25 @@ export default function Drawer({ open, onClose, currentSessionId, onNewChat, onO
                         onClick={onOpenCode}
                         style={{ width: "100%", textAlign: "left", padding: "10px 14px", marginTop: "8px", borderRadius: "10px", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: "14px", fontWeight: "600", cursor: "pointer" }}
                     >
-                        {"</>"} Code
+                        <span style={{ display: "flex", alignItems: "center", gap: "10px" }}><CodeIcon size={16} /> Code</span>
                     </button>
                     <button
                         onClick={onOpenCowork}
                         style={{ width: "100%", textAlign: "left", padding: "10px 14px", marginTop: "8px", borderRadius: "10px", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: "14px", fontWeight: "600", cursor: "pointer" }}
                     >
-                        ✦ Co-work
+                        <span style={{ display: "flex", alignItems: "center", gap: "10px" }}><SparkleIcon size={16} /> Co-work</span>
                     </button>
                     <button
                         onClick={onOpenDesign}
                         style={{ width: "100%", textAlign: "left", padding: "10px 14px", marginTop: "8px", borderRadius: "10px", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: "14px", fontWeight: "600", cursor: "pointer" }}
                     >
-                        ◐ Design &amp; ads
+                        <span style={{ display: "flex", alignItems: "center", gap: "10px" }}><BrushIcon size={16} /> Design &amp; ads</span>
                     </button>
                     <button
                         onClick={onOpenFinance}
                         style={{ width: "100%", textAlign: "left", padding: "10px 14px", marginTop: "8px", borderRadius: "10px", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: "14px", fontWeight: "600", cursor: "pointer" }}
                     >
-                        R Finance
+                        <span style={{ display: "flex", alignItems: "center", gap: "10px" }}><WalletIcon size={16} /> Finance</span>
                     </button>
                 </div>
 
@@ -150,14 +151,14 @@ export default function Drawer({ open, onClose, currentSessionId, onNewChat, onO
                     onClick={onOpenSettings}
                     style={{ borderTop: "1px solid var(--border)", padding: "12px 16px", display: "flex", alignItems: "center", gap: "10px", background: "none", border: "none", borderTopWidth: "1px", borderTopStyle: "solid", borderTopColor: "var(--border)", width: "100%", cursor: "pointer", textAlign: "left", fontSize: "13px", color: "var(--text)" }}
                 >
-                    ⚙ Settings &amp; MCP
+                    <GearIcon size={16} /> Settings &amp; MCP
                 </button>
                 <button
                     onClick={onLogout}
                     style={{ borderTop: "1px solid var(--border)", padding: "12px 16px", display: "flex", alignItems: "center", gap: "10px", background: "none", border: "none", borderTopWidth: "1px", borderTopStyle: "solid", borderTopColor: "var(--border)", width: "100%", cursor: "pointer", textAlign: "left" }}
                 >
                     <div style={{ width: "28px", height: "28px", borderRadius: "50%", background: "var(--surface-2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "13px", color: "var(--text-muted)" }}>
-                        👤
+                        <UserIcon size={15} />
                     </div>
                     <div style={{ fontSize: "13px", color: "var(--text)" }}>Log out</div>
                 </button>

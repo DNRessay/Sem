@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { LockIcon } from "./Icons";
 
 const API = import.meta.env.VITE_API_URL || "";
 
@@ -47,7 +48,7 @@ export default function SkillsPanel({ token }) {
                     {s.source === "repo" ? (
                         <span title="Edit skills/*.md in the repo and redeploy to change this — editing or deleting it here won't stick"
                             style={{ fontSize: "10px", color: "var(--text-muted)", flexShrink: 0 }}>
-                            🔒
+                            <LockIcon size={12} />
                         </span>
                     ) : (
                         <button onClick={() => removeSkill(s.id)} aria-label={`Delete ${s.name}`} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: "13px", flexShrink: 0 }}>✕</button>

@@ -6,7 +6,8 @@ import { readEvents } from "../utils/sse";
 import { RepoPicker } from "./AttachMenu";
 import { AssistantText, AttachedChips, CLEAR_COMMAND, ChatMenu, ConnectorsSheet, HELP_COMMAND, NEW_COMMAND, PlusMenu, SuggestModel, errorClass, helpText, parseSlash, readTextFiles, withAttachments } from "./MessageKit";
 import { ApprovalCard } from "./CoworkPage";
-import { HeaderStatus } from "./StatusBar";
+import { HeaderStatus, iconBtn } from "./StatusBar";
+import { PlusIcon, SendIcon, StopIcon } from "./Icons";
 import TabDrawer, { HandoffCard, MenuButton } from "./TabDrawer";
 import useTabChats from "../hooks/useTabChats";
 
@@ -264,7 +265,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, onFeed, fe
         const chatId = chat.id;
         const add = (fn) => updateChat(chatId, c => ({ items: fn(c.items) }));
         const prior = history();
-        add(it => [...it, { kind: "user", text: attached.length ? `${message}\n📎 ${attached.join(", ")}` : message, mode: runMode }]);
+        add(it => [...it, { kind: "user", text: attached.length ? `${message}\nAttached: ${attached.join(", ")}` : message, mode: runMode }]);
         if (!items.length) updateChat(chatId, () => ({ title: message.slice(0, 60), branch }));
         setInput("");
         if (!ready && !(await openRepo())) return;
@@ -331,20 +332,40 @@ export default function CodePage({ token, onNavigate, onUnauthorized, onFeed, fe
         try { await post("/code/discard", {}); setNotice("Workspace reset to the last pulled state."); } catch (e) { setNotice(e.message); }
     };
 
+    const hasRepoWork = !!repo && (ready || items.length > 0);
+    const codeActions = [
+        { label: "New chat, same repo", onClick: () => newChat(), disabled: !!busy },
+        { label: "New chat, another repo", onClick: () => newChat(provider, ""), disabled: !!busy },
+        { label: "Pull latest", onClick: openRepo, disabled: !repo || !!busy },
+        { label: "Changes", onClick: showChanges, disabled: !hasRepoWork },
+        { label: `Open PR on ${branch}`, onClick: openPr, disabled: !hasRepoWork || opened?.canOpenPr === false || !!busy },
+        { label: "Discard changes", onClick: discard, disabled: !hasRepoWork || !!busy },
+        { label: showAutomations ? "Hide automations" : "Automations", onClick: () => setShowAutomations(x => !x), disabled: !repo },
+        ...(onHandoff ? [{ label: "Make ads from this", disabled: !items.length, onClick: () => {
+            const done = items.filter(i => i.kind === "text").slice(-1)[0]?.text || items.filter(i => i.kind === "user").slice(-1)[0]?.text || "";
+            onHandoff("design", `Make ads announcing this from ${repo}:\n${done.slice(0, 1200)}`);
+        } }] : []),
+    ];
     const lastIsPlan = !busy && items.length > 0 && items[items.length - 1].kind === "text" && items[items.length - 1].mode === "plan";
 
     return (
         <div style={{ position: "fixed", inset: 0, background: "var(--bg)", zIndex: 25, display: "flex", flexDirection: "column" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "12px 16px", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 8px 6px" }}>
                 <MenuButton onClick={() => setMenuOpen(true)} />
-                <span style={{ fontWeight: 700, color: "var(--text)" }}>Sem Code</span>
-                <ChatMenu title={chat.title || "Sem Code"} messages={transcript} />
-                <HeaderStatus token={token} onFeed={onFeed} hasError={feedError} />
+                <span style={{ fontWeight: 700, color: "var(--text)", fontSize: "15px" }}>Sem Code</span>
+                <span style={{ flex: 1 }} />
+                <HeaderStatus token={token} onFeed={onFeed} hasError={feedError} busy={!!busy} />
+                <button onClick={() => newChat(provider, "")} disabled={!!busy} aria-label="New chat with another repo" title="New chat with another repo" style={iconBtn}>
+                    <PlusIcon size={18} />
+                </button>
+                <ChatMenu title={chat.title || "Sem Code"} messages={transcript} extra={codeActions} />
+            </div>
+            <div style={{ display: "flex", gap: "8px", padding: "0 12px 10px", borderBottom: "1px solid var(--border)" }}>
                 <select value={provider} onChange={e => pickRepo(e.target.value, "")} style={field}>
                     <option value="github">GitHub</option>
                     <option value="gitlab">GitLab</option>
                 </select>
-                <div style={{ flex: 1, minWidth: "160px" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
                     <RepoPicker floating repos={repos} value={repo} placeholder="Select a repository"
                         onChange={v => pickRepo(provider, v)} />
                 </div>
@@ -354,19 +375,6 @@ export default function CodePage({ token, onNavigate, onUnauthorized, onFeed, fe
                 onSelect={id => { selectChat(id); setOpened(null); setNotice(""); }} onDelete={deleteChat}
                 subtitle={c => [c.repo || "no repo", c.branch].filter(Boolean).join(" · ")} />
 
-            {repo && (ready || items.length > 0) && (
-                <div style={{ display: "flex", gap: "6px", padding: "8px 16px", borderBottom: "1px solid var(--border)", overflowX: "auto" }}>
-                    <button onClick={openRepo} disabled={!!busy} style={btn}>Pull</button>
-                    <button onClick={showChanges} style={btn}>Changes</button>
-                    <button onClick={openPr} disabled={opened?.canOpenPr === false || !!busy} title={opened?.canOpenPr === false ? `Connect ${provider} to open PRs` : ""} style={btn}>Open PR</button>
-                    <button onClick={discard} disabled={!!busy} style={btn}>Discard</button>
-                    <button onClick={() => setShowAutomations(s => !s)} style={btn}>Automations</button>
-                    {onHandoff && <button onClick={() => {
-                        const done = items.filter(i => i.kind === "text").slice(-1)[0]?.text || items.filter(i => i.kind === "user").slice(-1)[0]?.text || "";
-                        onHandoff("design", `Make ads announcing this from ${repo}:\n${done.slice(0, 1200)}`);
-                    }} disabled={!items.length} style={btn}>Make ads →</button>}
-                </div>
-            )}
             {repo && showAutomations && <Automations token={token} provider={provider} repo={repo} onUnauthorized={onUnauthorized} />}
             {reposError && <div style={{ padding: "8px 16px", fontSize: "12px", color: "var(--danger)", borderBottom: "1px solid var(--border)" }}>{reposError}</div>}
             {notice && <div style={{ padding: "8px 16px", fontSize: "12px", color: "var(--text-muted)", borderBottom: "1px solid var(--border)", whiteSpace: "pre-wrap" }}>{notice}</div>}
@@ -434,9 +442,9 @@ export default function CodePage({ token, onNavigate, onUnauthorized, onFeed, fe
                             onClick={busy && abortRef.current ? () => abortRef.current.abort() : () => run(input)}
                             disabled={!repo}
                             aria-label={busy ? "Stop" : "Send"} className={busy ? "" : "btn-gold"}
-                            style={{ width: "32px", height: "32px", borderRadius: "50%", border: "none", cursor: "pointer",
+                            style={{ width: "32px", height: "32px", borderRadius: "50%", border: "none", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center",
                                 background: busy ? "var(--danger)" : "var(--accent)", color: "var(--accent-contrast)", fontSize: "15px" }}
-                        >{busy ? "■" : "↑"}</button>
+                        >{busy ? <StopIcon size={14} /> : <SendIcon size={16} />}</button>
                     </div>
                 </div>
             </div>

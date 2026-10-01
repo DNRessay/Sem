@@ -21,7 +21,7 @@ export default function AgentFeed({ events }) {
                     <div key={e.id ?? i} style={{ color: blocked ? "#c0392b" : (COLORS[e.agent] || "var(--text-muted)"), marginBottom: "6px", lineHeight: "1.4" }}>
                         <span style={{ opacity: 0.5 }}>{new Date(e.ts * 1000).toLocaleTimeString()} </span>
                         <span style={{ fontWeight: "700" }}>{e.agent}</span>
-                        {blocked && <span style={{ marginLeft: "6px", fontSize: "10px", fontWeight: "700" }}>⚠ error</span>}
+                        {blocked && <span style={{ marginLeft: "6px", fontSize: "10px", fontWeight: "700" }}>error</span>}
                         <div style={{ opacity: 0.7, paddingLeft: "8px" }}>{detail}</div>
                     </div>
                 );

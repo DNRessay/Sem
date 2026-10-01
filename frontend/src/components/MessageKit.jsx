@@ -4,6 +4,7 @@ import DOMPurify from "dompurify";
 import { copyToClipboard } from "../utils/clipboard";
 import { downloadAllAsZip, downloadText, extractCodeBlocks, filenameFor } from "../utils/codeBlocks";
 import ConnectorsPanel from "./ConnectorsPanel";
+import { FileIcon, MoreIcon, PaperclipIcon, PlugIcon, PlusIcon, SlashIcon } from "./Icons";
 
 const API = import.meta.env.VITE_API_URL || "";
 
@@ -262,18 +263,26 @@ function ArtifactsDrawer({ open, onClose, artifacts }) {
 }
 
 // The ⋯ menu on top of every chat: artifacts drawer, download all, export.
-export function ChatMenu({ title, messages }) {
+export function ChatMenu({ title, messages, extra = [] }) {
     const [open, setOpen] = useState(false);
     const [drawer, setDrawer] = useState(false);
     const artifacts = allArtifacts(messages);
     const item = { display: "block", width: "100%", textAlign: "left", padding: "10px 14px", background: "none", border: "none", color: "var(--text)", fontSize: "13px", cursor: "pointer" };
     return (
         <div style={{ position: "relative" }}>
-            <button onClick={() => setOpen(o => !o)} aria-label="Chat options" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "20px", color: "var(--text)", padding: "0 6px" }}>⋯</button>
+            <button onClick={() => setOpen(o => !o)} aria-label="Chat options"
+                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: "6px", display: "inline-flex", borderRadius: "8px" }}>
+                <MoreIcon size={18} />
+            </button>
             {open && (
                 <>
                     <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 30 }} />
                     <div style={{ position: "absolute", right: 0, top: "100%", zIndex: 31, minWidth: "220px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "12px", boxShadow: "0 8px 24px rgba(0,0,0,0.18)", overflow: "hidden" }}>
+                        {extra.map(x => (
+                            <button key={x.label} style={{ ...item, opacity: x.disabled ? 0.5 : 1 }} disabled={x.disabled}
+                                onClick={() => { setOpen(false); x.onClick(); }}>{x.label}</button>
+                        ))}
+                        {extra.length > 0 && <div style={{ borderTop: "1px solid var(--border)" }} />}
                         <button style={item} onClick={() => { setOpen(false); setDrawer(true); }}>Artifacts ({artifacts.length})</button>
                         <button style={{ ...item, opacity: artifacts.length ? 1 : 0.5 }} disabled={!artifacts.length} onClick={() => { setOpen(false); downloadAllAsZip(artifacts); }}>Download all artifacts (.zip)</button>
                         <button style={{ ...item, opacity: messages.length ? 1 : 0.5 }} disabled={!messages.length} onClick={() => { setOpen(false); exportChat(title, messages); }}>Export chat (.md)</button>
@@ -304,7 +313,7 @@ export function AttachedChips({ files, setFiles }) {
         <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginBottom: "6px" }}>
             {files.map((f, i) => (
                 <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "11px", color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: "6px", padding: "2px 6px" }}>
-                    📄 {f.name}
+                    <FileIcon size={12} /> {f.name}
                     <button onClick={() => setFiles(x => x.filter((_, j) => j !== i))} aria-label={`Remove ${f.name}`} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 0 }}>✕</button>
                 </span>
             ))}
@@ -326,7 +335,7 @@ export function PlusMenu({ commands = [], onCommand, onFiles, onConnectors, disa
     return (
         <>
             <button onClick={() => setOpen(true)} disabled={disabled} aria-label="More" title="Files, commands, connectors"
-                style={{ width: "30px", height: "30px", borderRadius: "50%", border: "1px solid var(--border)", background: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "var(--text-muted)", fontSize: "18px", flexShrink: 0 }}>+</button>
+                style={{ width: "30px", height: "30px", borderRadius: "50%", border: "1px solid var(--border)", background: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "var(--text-muted)", fontSize: "18px", flexShrink: 0 }}><PlusIcon size={16} /></button>
             <input ref={fileRef} type="file" multiple style={{ display: "none" }} onChange={e => { onFiles([...e.target.files]); e.target.value = ""; }} />
             {open && (
                 <>
@@ -335,9 +344,9 @@ export function PlusMenu({ commands = [], onCommand, onFiles, onConnectors, disa
                         <div style={{ width: "40px", height: "4px", borderRadius: "2px", background: "var(--border)", margin: "0 auto 8px" }} />
                         {!showCommands ? (
                             <>
-                                <button style={row} onClick={() => { setOpen(false); fileRef.current?.click(); }}>📎 Add files</button>
-                                {commands.length > 0 && <button style={row} onClick={() => setShowCommands(true)}>⌘ Slash commands</button>}
-                                {onConnectors && <button style={row} onClick={() => { setOpen(false); onConnectors(); }}>🔌 Connectors <span style={{ marginLeft: "auto", color: "var(--text-muted)" }}>›</span></button>}
+                                <button style={row} onClick={() => { setOpen(false); fileRef.current?.click(); }}><PaperclipIcon size={18} /> Add files</button>
+                                {commands.length > 0 && <button style={row} onClick={() => setShowCommands(true)}><SlashIcon size={18} /> Slash commands</button>}
+                                {onConnectors && <button style={row} onClick={() => { setOpen(false); onConnectors(); }}><PlugIcon size={18} /> Connectors <span style={{ marginLeft: "auto", color: "var(--text-muted)" }}>›</span></button>}
                             </>
                         ) : (
                             <>

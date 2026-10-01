@@ -4,6 +4,7 @@ import { ToolStep, md } from "./CodePage";
 import { readEvents } from "../utils/sse";
 import { AssistantText, AttachedChips, CLEAR_COMMAND, ChatMenu, ConnectorsSheet, HELP_COMMAND, NEW_COMMAND, PlusMenu, SuggestModel, errorClass, helpText, parseSlash, readTextFiles, withAttachments } from "./MessageKit";
 import { HeaderStatus } from "./StatusBar";
+import { SendIcon, StopIcon } from "./Icons";
 import TabDrawer, { HandoffCard, MenuButton } from "./TabDrawer";
 import useTabChats from "../hooks/useTabChats";
 
@@ -50,7 +51,7 @@ export function ApprovalCard({ item, onDecide }) {
             )}
             {state !== "pending" && (
                 <div style={{ fontSize: "12px", marginTop: "6px", color: state === "done" ? "var(--ready)" : state === "running" ? "var(--text-muted)" : "var(--danger)" }}>
-                    {state === "done" ? "✓ Done" : state === "running" ? "Working…" : state === "dismissed" ? "Dismissed" : state}
+                    {state === "done" ? "Done" : state === "running" ? "Working…" : state === "dismissed" ? "Dismissed" : state}
                 </div>
             )}
         </div>
@@ -118,7 +119,7 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized, onFeed, 
         if (!items.length) updateChat(chatId, () => ({ title: message.slice(0, 60) }));
         const history = items.filter(i => i.kind === "user" || i.kind === "text")
             .map(i => ({ role: i.kind === "user" ? "user" : "assistant", content: i.text })).slice(-20);
-        add(it => [...it, { kind: "user", text: attached.length ? `${message}\n📎 ${attached.join(", ")}` : message }]);
+        add(it => [...it, { kind: "user", text: attached.length ? `${message}\nAttached: ${attached.join(", ")}` : message }]);
         setInput(""); setBusy(true);
         abortRef.current = new AbortController();
         try {
@@ -162,8 +163,8 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized, onFeed, 
             <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
                 <MenuButton onClick={() => setMenuOpen(true)} />
                 <span style={{ fontWeight: 700, color: "var(--text)", flex: 1 }}>Sem Co-work</span>
+                <HeaderStatus token={token} onFeed={onFeed} hasError={feedError} busy={busy} />
                 <ChatMenu title={chat.title || "Sem Co-work"} messages={transcript} />
-                <HeaderStatus token={token} onFeed={onFeed} hasError={feedError} />
             </div>
 
             <TabDrawer open={menuOpen} onClose={() => setMenuOpen(false)} title="Sem Co-work" current="cowork"
@@ -230,9 +231,9 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized, onFeed, 
                         <button
                             onClick={busy ? () => abortRef.current?.abort() : () => run(input)}
                             aria-label={busy ? "Stop" : "Send"} className={busy ? "" : "btn-gold"}
-                            style={{ width: "32px", height: "32px", borderRadius: "50%", border: "none", cursor: "pointer",
+                            style={{ width: "32px", height: "32px", borderRadius: "50%", border: "none", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center",
                                 background: busy ? "var(--danger)" : "var(--accent)", color: "var(--accent-contrast)", fontSize: "15px" }}
-                        >{busy ? "■" : "↑"}</button>
+                        >{busy ? <StopIcon size={14} /> : <SendIcon size={16} />}</button>
                     </div>
                 </div>
             </div>

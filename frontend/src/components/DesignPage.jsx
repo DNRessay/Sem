@@ -350,7 +350,7 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, onFeed, 
             <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
                 <MenuButton onClick={() => setMenuOpen(true)} />
                 <span style={{ fontWeight: 700, color: "var(--text)", flex: 1 }}>Sem Design</span>
-                <HeaderStatus token={token} onFeed={onFeed} hasError={feedError} />
+                <HeaderStatus token={token} onFeed={onFeed} hasError={feedError} busy={!!busy} />
                 <ModelPicker token={token} value={model} onChange={setModel} storageKey="semblance_design_model" />
             </div>
             <TabDrawer open={menuOpen} onClose={() => setMenuOpen(false)} title="Sem Design" current="design"
