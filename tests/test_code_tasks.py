@@ -170,7 +170,7 @@ def test_run_streams_agent_events(client, monkeypatch):
     c, _ = client
 
     class FakeAgent:
-        def __init__(self, ws, mode="act", provider="auto", mcp=None, pr_token=None):
+        def __init__(self, ws, mode="act", provider="auto", mcp=None, pr_token=None, branch=""):
             self.mode = mode
 
         async def run(self, message, history):
@@ -210,7 +210,7 @@ async def test_code_agent_opens_a_pr_only_with_a_token(monkeypatch):
 
     calls = {}
 
-    async def fake_open_pr(workspace, token, title, body=""):
+    async def fake_open_pr(workspace, token, title, body="", branch=""):
         calls.update(token=token, title=title)
         return {"ok": True, "url": "https://github.com/me/app/pull/1"}
 
@@ -241,3 +241,43 @@ def test_execute_runs_only_the_saved_approval_once(client, monkeypatch):
     assert ran == [("merge_pr", {"number": 1}, "tok")]
     assert c.post("/code/execute", json={"id": "call9"}).status_code == 404
     assert c.post("/code/execute", json={"id": "never-approved"}).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_open_pr_reuses_the_chat_branch_and_its_pr(monkeypatch):
+    from pipeline import code_tasks
+
+    class WS:
+        provider, repo = "github", "me/app"
+
+        async def changes(self):
+            return {"ok": True, "files": {"a.py": "x"}, "deleted": []}
+
+    made = []
+
+    class Writer:
+        async def get_default_branch(self, *a):
+            return "main"
+
+        async def create_branch(self, provider, repo, branch, base, token):
+            return {"ok": False, "error": "Reference already exists"}
+
+        async def commit_file(self, *a):
+            return {"ok": True}
+
+        async def create_pull_request(self, *a):
+            made.append(a)
+            return {"ok": True, "url": "new"}
+
+    class Host:
+        def __init__(self, *a):
+            pass
+
+        async def list_prs(self, state):
+            return [{"branch": "sem/chat-1", "url": "https://x/pull/4", "number": 4}]
+
+    monkeypatch.setattr(code_tasks, "RepoWriteTool", Writer)
+    monkeypatch.setattr("tools.git_host.GitHost", Host)
+    result = await code_tasks.open_pr(WS(), "t", "More", branch="sem/chat-1")
+    assert result["updated"] and result["number"] == 4 and made == []
+    assert not (await code_tasks.open_pr(WS(), "t", "x", branch="main"))["ok"]

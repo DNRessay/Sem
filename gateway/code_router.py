@@ -1,4 +1,5 @@
 import json
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -24,6 +25,11 @@ async def _target(request: Request) -> tuple[dict, CodeWorkspace]:
     return body, CodeWorkspace(provider, repo)
 
 
+def _branch(body: dict) -> str:
+    branch = (body.get("branch") or "").strip()
+    return branch if re.fullmatch(r"[A-Za-z0-9._/-]{1,100}", branch) and ".." not in branch else ""
+
+
 @router.post("/open")
 async def open_repo(request: Request, account: dict = Depends(require_account)):
     body, ws = await _target(request)
@@ -43,7 +49,8 @@ async def run(request: Request, account: dict = Depends(require_account)):
         raise HTTPException(400, "message required")
     mcp = await MCPToolset.for_account(account["account_id"])
     token = await connector_token(account["account_id"], ws.provider)
-    agent = CodeAgent(ws, mode=body.get("mode") or "act", provider=body.get("model") or "auto", mcp=mcp, pr_token=token)
+    agent = CodeAgent(ws, mode=body.get("mode") or "act", provider=body.get("model") or "auto", mcp=mcp, pr_token=token,
+                      branch=_branch(body))
     agent.user_context = await TAUEngine().owner_context()
 
     async def stream():
@@ -106,7 +113,7 @@ async def pull_request(request: Request, account: dict = Depends(require_account
     token = await connector_token(account["account_id"], ws.provider)
     if not token:
         raise HTTPException(400, f"Connect {ws.provider} first — opening a PR needs its token")
-    result = await open_pr(ws, token, body.get("title") or "", body.get("body") or "")
+    result = await open_pr(ws, token, body.get("title") or "", body.get("body") or "", _branch(body))
     if not result.get("ok"):
         raise HTTPException(400, result.get("error") or "PR failed")
     return result

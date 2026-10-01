@@ -96,7 +96,7 @@ class CodeAgent(ToolLoopAgent):
 
     def __init__(self, workspace: CodeWorkspace, mode: str = "act", max_steps: int | None = None,
                  deadline_seconds: float | None = None, aws: AwsReadTool | None = None, provider: str = "auto",
-                 mcp=None, pr_token: str | None = None):
+                 mcp=None, pr_token: str | None = None, branch: str = ""):
         # MCP tools have unknown side effects, so plan mode never gets them.
         super().__init__(provider, max_steps or settings.CODE_MAX_STEPS,
                          deadline_seconds or settings.AGENT_TIMEOUT_SECONDS, mcp=None if mode == "plan" else mcp)
@@ -105,7 +105,8 @@ class CodeAgent(ToolLoopAgent):
         self.mode = "plan" if mode == "plan" else "act"
         self.aws = aws or AwsReadTool()
         self.pending: dict[str, dict] = {}  # approval id -> real action, for /code/execute
-        self.pr_token = pr_token  # the connected GitHub/GitLab token; open_pr is only offered when set
+        self.pr_token = pr_token
+        self.branch = branch  # this chat's working branch: every PR/push from it goes here  # the connected GitHub/GitLab token; open_pr is only offered when set
 
     def tools(self) -> list[dict]:
         names = _READ_ONLY if self.mode == "plan" else tuple(TOOLS)
@@ -118,6 +119,9 @@ class CodeAgent(ToolLoopAgent):
                    "it's waiting for them." if self.pr_token else
                    f"Opening a PR needs {self.ws.provider} connected in Connectors; until then the user can review "
                    "your changes with the Changes button.")
+        if self.branch:
+            pr_line += (f" This chat's work branch is {self.branch}: open_pr commits there and reuses its PR, and "
+                        "push_branch with no branch pushes there too.")
         system = _SYSTEM.format(repo=self.ws.repo, provider=self.ws.provider, pr_line=pr_line)
         return system + _PLAN_SUFFIX if self.mode == "plan" else system
 
@@ -148,7 +152,7 @@ class CodeAgent(ToolLoopAgent):
             if not self.pr_token:
                 return {"ok": False, "error": f"connect {self.ws.provider} in Connectors to open PRs"}
             from pipeline.code_tasks import open_pr
-            return await open_pr(self.ws, self.pr_token, args.get("title", ""), args.get("body", ""))
+            return await open_pr(self.ws, self.pr_token, args.get("title", ""), args.get("body", ""), self.branch)
         if name == "aws":
             return await self.aws.call(args.get("service", ""), args.get("operation", ""),
                                        args.get("params") or {}, args.get("region", ""))
@@ -178,6 +182,8 @@ class CodeAgent(ToolLoopAgent):
 
     def extra_events(self, call_id: str, name: str, args: dict, result: dict) -> list[dict]:
         if name in APPROVAL_ACTIONS and result.get("status") == "waiting for the user's approval":
+            if name == "push_branch" and not args.get("branch") and self.branch:
+                args = {**args, "branch": self.branch}
             self.pending[call_id] = {"name": name, "args": args}  # the real args stay server-side
             shown = {**args, "value": "••••••"} if name == "set_secret" else args
             return [{"type": "approval", "id": call_id, "name": name, "args": shown, "summary": result["summary"]}]

@@ -29,10 +29,11 @@ async def connector_token(account_id: str, provider: str) -> str | None:
     return connector["token"]
 
 
-async def open_pr(ws: CodeWorkspace, token: str, title: str, body: str = "") -> dict:
-    """Commits every changed file in the workspace to a fresh branch off the
-    default branch and opens a PR/MR back to it — the only way Code mode's
-    work ever reaches the repo, so a human always reviews it first."""
+async def open_pr(ws: CodeWorkspace, token: str, title: str, body: str = "", branch: str = "") -> dict:
+    """Commits every changed file in the workspace to a branch and opens a
+    PR/MR back to the default branch — the only way Code mode's work reaches
+    the repo, so a human reviews it first. With `branch` (one per Code chat)
+    later calls keep committing to that same branch and reuse its open PR."""
     changes = await ws.changes()
     if not changes.get("ok"):
         return changes
@@ -43,14 +44,25 @@ async def open_pr(ws: CodeWorkspace, token: str, title: str, body: str = "") -> 
     writer = RepoWriteTool()
     title = title.strip() or "Changes from Sem Code"
     base = await writer.get_default_branch(ws.provider, ws.repo, token)
-    branch = f"sem-code/{slugify(title)}-{int(time.time())}"
+    branch = branch.strip() or f"sem-code/{slugify(title)}-{int(time.time())}"
+    if branch == base:
+        return {"ok": False, "error": f"{branch} is the default branch — use push_branch to commit there"}
     created = await writer.create_branch(ws.provider, ws.repo, branch, base, token)
-    if not created.get("ok"):
+    if not created.get("ok") and "exist" not in created.get("error", "").lower():
         return created
     for path, content in files.items():
         committed = await writer.commit_file(ws.provider, ws.repo, branch, path, content, f"{title}: {path}", token)
         if not committed.get("ok"):
             return committed
+
+    from tools.git_host import GitHost, GitHostError
+    try:
+        existing = next((p for p in await GitHost(ws.provider, ws.repo, token).list_prs("open") if p["branch"] == branch), None)
+    except GitHostError:
+        existing = None
+    if existing:
+        return {"ok": True, "url": existing["url"], "number": existing["number"], "branch": branch,
+                "files": sorted(files), "updated": True}
 
     deleted = changes.get("deleted") or []
     if deleted:
