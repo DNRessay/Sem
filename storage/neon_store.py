@@ -322,6 +322,28 @@ class NeonStore:
                     PRIMARY KEY (account_id, name)
                 )
             """)
+            # Reminders (Co-work's set_reminder, ProactiveAgent) — sent by the
+            # KAIROS tick once due, so they survive between Lambda invocations.
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS reminders (
+                    id BIGSERIAL PRIMARY KEY,
+                    account_id TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    due_at BIGINT NOT NULL,
+                    sent_at BIGINT,
+                    created_at BIGINT NOT NULL
+                )
+            """)
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_reminders_due ON reminders (due_at) WHERE sent_at IS NULL")
+            # Small named values background jobs need to remember (e.g. the
+            # date KAIROS last sent the morning brief).
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS kv_state (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at BIGINT NOT NULL
+                )
+            """)
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS dream_state (
                     id TEXT PRIMARY KEY DEFAULT 'global',
@@ -616,6 +638,53 @@ class NeonStore:
             if not row:
                 return None
             return {"goal": row["goal"], "steps": json.loads(row["steps"])}
+
+    async def add_reminder(self, account_id: str, message: str, due_at: int) -> dict:
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "INSERT INTO reminders (account_id, message, due_at, created_at) VALUES ($1, $2, $3, $4) RETURNING *",
+                account_id, message, due_at, int(time.time()),
+            )
+            return dict(row)
+
+    async def list_reminders(self, account_id: str, include_sent: bool = False) -> list[dict]:
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM reminders WHERE account_id=$1 AND ($2 OR sent_at IS NULL) ORDER BY due_at LIMIT 100",
+                account_id, include_sent,
+            )
+            return [dict(r) for r in rows]
+
+    async def delete_reminder(self, account_id: str, reminder_id: int) -> bool:
+        async with self._pool.acquire() as conn:
+            result = await conn.execute("DELETE FROM reminders WHERE id=$1 AND account_id=$2", reminder_id, account_id)
+            return result.endswith("1")
+
+    async def claim_due_reminders(self, limit: int = 20) -> list[dict]:
+        """Marks due reminders sent in the same statement that returns them,
+        so overlapping ticks can't deliver one twice."""
+        now = int(time.time())
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """UPDATE reminders SET sent_at=$1 WHERE id IN (
+                       SELECT id FROM reminders WHERE sent_at IS NULL AND due_at <= $1
+                       ORDER BY due_at LIMIT $2 FOR UPDATE SKIP LOCKED
+                   ) RETURNING *""",
+                now, limit,
+            )
+            return [dict(r) for r in rows]
+
+    async def get_state(self, key: str) -> str | None:
+        async with self._pool.acquire() as conn:
+            return await conn.fetchval("SELECT value FROM kv_state WHERE key=$1", key)
+
+    async def set_state(self, key: str, value: str):
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO kv_state (key, value, updated_at) VALUES ($1, $2, $3)
+                   ON CONFLICT (key) DO UPDATE SET value=$2, updated_at=$3""",
+                key, value, int(time.time()),
+            )
 
     async def list_mcp_servers(self, account_id: str) -> list[dict]:
         async with self._pool.acquire() as conn:

@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from agents.tool_loop import ToolLoopAgent, fn_tool
+from config import settings
 from storage.neon_store import get_store
 from tools import gemini_media
 from tools.google.calendar_tool import CalendarTool
@@ -48,6 +49,11 @@ TOOLS = {
                                  {"title": _S, "content": _S}, ["title", "content"]),
     "drive_append_note": fn_tool("drive_append_note", "Append text to an existing Drive note.",
                                  {"file_id": _S, "content": _S}, ["file_id", "content"]),
+    "set_reminder": fn_tool(
+        "set_reminder", "Remind the user later. `when` is RFC3339 with offset (+02:00). Delivered in the app (and "
+        "WhatsApp if set up) within ~15 minutes of that time.", {"message": _S, "when": _S}, ["message", "when"],
+    ),
+    "list_reminders": fn_tool("list_reminders", "List the user's upcoming reminders.", {}, []),
     "contacts_search": fn_tool("contacts_search", "Find a person in Google Contacts.", {"query": _S}, ["query"]),
     "generate_image": fn_tool(
         "generate_image", "Create an image with Gemini (Nano Banana). It's shown to the user directly.",
@@ -71,9 +77,10 @@ async def run_approved(name: str, args: dict, account_id: str) -> dict:
 
 
 class CoworkAgent(ToolLoopAgent):
-    def __init__(self, account_id: str, provider: str = "auto", max_steps: int = 25, deadline_seconds: float = 780,
-                 mcp=None):
-        super().__init__(provider, max_steps, deadline_seconds, mcp=mcp, allow_approvals=True)
+    def __init__(self, account_id: str, provider: str = "auto", max_steps: int | None = None,
+                 deadline_seconds: float | None = None, mcp=None):
+        super().__init__(provider, max_steps or settings.COWORK_MAX_STEPS,
+                         deadline_seconds or settings.AGENT_TIMEOUT_SECONDS, mcp=mcp, allow_approvals=True)
         self.account_id = account_id
 
     def system_prompt(self) -> str:
@@ -113,6 +120,23 @@ class CoworkAgent(ToolLoopAgent):
         if name == "drive_append_note":
             return await DriveTool().query("append_note", account_id=acct, file_id=args.get("file_id"),
                                            content=args.get("content", ""))
+        if name == "set_reminder":
+            try:
+                due = datetime.fromisoformat(args.get("when", "").replace("Z", "+00:00"))
+            except ValueError:
+                return {"ok": False, "error": "when must be an RFC3339 datetime, e.g. 2026-10-02T09:00:00+02:00"}
+            if due.tzinfo is None:
+                due = due.replace(tzinfo=_SAST)
+            db = await get_store()
+            row = await db.add_reminder(acct, args.get("message", ""), int(due.timestamp()))
+            return {"ok": True, "id": row["id"], "due": due.astimezone(_SAST).strftime("%a %d %b %H:%M")}
+        if name == "list_reminders":
+            db = await get_store()
+            return {"reminders": [
+                {"id": r["id"], "message": r["message"],
+                 "due": datetime.fromtimestamp(r["due_at"], _SAST).strftime("%a %d %b %H:%M")}
+                for r in await db.list_reminders(acct)
+            ]}
         if name == "contacts_search":
             return await ContactsTool().query("search_contacts", account_id=acct, query=args.get("query", ""))
         if name == "generate_image":

@@ -105,6 +105,15 @@ class Settings(BaseSettings):
     WHATSAPP_PHONE_ID: str = ""
     WHATSAPP_VERIFY_TOKEN: str = ""  # arbitrary string you also enter in the Meta App Dashboard webhook config
     OPENCLAW_URL: str = ""  # optional self-hosted WhatsApp/Telegram/Slack bridge
+    # KAIROS (agents/kairos.py, every EventBridge tick): delivers due
+    # reminders and a once-a-day morning brief (calendar + unread email +
+    # today's reminders). Both always land in the app as a chat; set
+    # OWNER_WHATSAPP_NUMBER (international format, no +) to also get them
+    # on WhatsApp via the Cloud API credentials above.
+    OWNER_ACCOUNT_ID: str = "owner"
+    OWNER_WHATSAPP_NUMBER: str = ""
+    KAIROS_MORNING_BRIEF: bool = True
+    KAIROS_BRIEF_HOUR: int = 7  # South Africa time
     # Optional: JSON object of name -> base_url, e.g.
     # {"slack": "https://my-slack-mcp.example.com"} — each gets registered
     # with the shared MCPTool instance (tools/mcp_tool.py) at startup, so
@@ -112,6 +121,16 @@ class Settings(BaseSettings):
     # unset, "mcp" stays registered but every call returns a clear "not
     # registered" error, same as any other unconfigured optional tool here.
     MCP_SERVERS: str = ""
+
+    # Agent limits (Code, Co-work, Research, scheduled automations). The chat
+    # Lambda's own ceiling is 900s (template.yaml), so keep timeouts under it.
+    CODE_MAX_STEPS: int = 30
+    COWORK_MAX_STEPS: int = 25
+    RESEARCH_MAX_STEPS: int = 16
+    AGENT_TIMEOUT_SECONDS: int = 780
+    RESEARCH_TIMEOUT_SECONDS: int = 600
+    AUTOMATION_MAX_STEPS: int = 20
+    AUTOMATION_TIMEOUT_SECONDS: int = 600
 
     SECRET_KEY: str = "change-me"
     TRUST_MODE: str = "AUTO"  # BYPASS | ALLOW_EDITS | AUTO

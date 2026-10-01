@@ -50,20 +50,15 @@ class ProactiveAgent(BaseAgent):
         except Exception as e:
             return {"error": str(e)}
 
-    def schedule_reminder(self, message: str, channel: str, delay_seconds: int) -> dict:
-        """Register a future reminder. KAIROS picks these up on next tick."""
-        entry = {
-            "message": message,
-            "channel": channel,
-            "send_at": time.time() + delay_seconds,
-            "sent": False,
-        }
-        self._sent.append(entry)
-        return {"scheduled": True, "send_at": entry["send_at"]}
+    async def schedule_reminder(self, message: str, delay_seconds: int, account_id: str = "") -> dict:
+        """Persisted, so it survives between Lambda invocations; the KAIROS
+        tick (agents/kairos.py) delivers it once due."""
+        from config import settings
+        from storage.neon_store import get_store
 
-    def get_pending_reminders(self) -> list[dict]:
-        now = time.time()
-        return [r for r in self._sent if not r.get("sent") and r.get("send_at", 0) <= now]
+        db = await get_store()
+        row = await db.add_reminder(account_id or settings.OWNER_ACCOUNT_ID, message, int(time.time()) + delay_seconds)
+        return {"scheduled": True, "id": row["id"], "send_at": row["due_at"]}
 
     def get_history(self) -> list[dict]:
         return list(self._sent)

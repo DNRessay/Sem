@@ -54,8 +54,15 @@ class CTXPressure:
         return "\n".join(out)
 
     def autocompact(self, ctx: str) -> str:
-        # In production: LLM-assisted summarisation via Groq
-        return ctx[:SUMMARY_TARGET]
+        """Keeps the start (identity/system prompt) and the end (memories and
+        skills are appended last) and drops the middle. An LLM summary here
+        would add a model call to every chat turn on the free-tier quota."""
+        if len(ctx) <= SUMMARY_TARGET:
+            return ctx
+        marker = "\n\n[…context trimmed…]\n\n"
+        head = (SUMMARY_TARGET - len(marker)) * 2 // 3
+        tail = SUMMARY_TARGET - len(marker) - head
+        return ctx[:head] + marker + ctx[-tail:]
 
     def prune_and_index(self, ctx: str) -> str:
         return ctx[:SUMMARY_TARGET]

@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from agents.cowork_agent import TOOLS as COWORK_TOOLS
 from agents.tool_loop import ToolLoopAgent
+from config import settings
 from storage.neon_store import get_store
 from tools.web.fetch_tool import FetchTool
 from tools.web.search import web_search
@@ -22,8 +23,9 @@ _TOOLS = ("web_search", "fetch_url", "search_memory")
 class ResearchAgent(ToolLoopAgent):
     """Chat's "Deep research" toggle: search, read, cross-check, then a cited answer."""
 
-    def __init__(self, provider: str = "auto", max_steps: int = 16, deadline_seconds: float = 600):
-        super().__init__(provider, max_steps, deadline_seconds)
+    def __init__(self, provider: str = "auto", max_steps: int | None = None, deadline_seconds: float | None = None):
+        super().__init__(provider, max_steps or settings.RESEARCH_MAX_STEPS,
+                         deadline_seconds or settings.RESEARCH_TIMEOUT_SECONDS)
 
     def system_prompt(self) -> str:
         return _SYSTEM.format(now=datetime.now(_SAST).strftime("%A %d %B %Y, %H:%M"))

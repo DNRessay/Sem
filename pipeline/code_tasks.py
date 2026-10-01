@@ -2,6 +2,7 @@ import re
 import time
 
 from agents.code_agent import CodeAgent
+from config import settings
 from gateway.connectors import _ensure_fresh_gitlab_token
 from storage.neon_store import get_store
 from tools.code_workspace import CodeWorkspace
@@ -58,7 +59,7 @@ async def open_pr(ws: CodeWorkspace, token: str, title: str, body: str = "") -> 
     return {**pr, "branch": branch, "files": sorted(files)}
 
 
-async def run_due_automation(deadline_seconds: float = 600) -> dict | None:
+async def run_due_automation() -> dict | None:
     """Runs at most one due automation per tick: fresh pull, agent run, PR if
     it changed anything (and the automation asks for one), then the
     workspace is reset so the next run starts clean."""
@@ -77,7 +78,8 @@ async def run_due_automation(deadline_seconds: float = 600) -> dict | None:
         return {"id": job["id"], "result": result}
 
     texts, error = [], None
-    async for event in CodeAgent(ws, max_steps=20, deadline_seconds=deadline_seconds).run(job["prompt"]):
+    agent = CodeAgent(ws, max_steps=settings.AUTOMATION_MAX_STEPS, deadline_seconds=settings.AUTOMATION_TIMEOUT_SECONDS)
+    async for event in agent.run(job["prompt"]):
         if event["type"] == "text":
             texts.append(event["text"])
         elif event["type"] == "error":
