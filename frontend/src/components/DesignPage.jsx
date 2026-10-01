@@ -2,9 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import ModelPicker, { loadModel } from "./ModelPicker";
 import { readEvents } from "../utils/sse";
 import { copyToClipboard } from "../utils/clipboard";
+import TabDrawer, { MenuButton } from "./TabDrawer";
+import useTabChats from "../hooks/useTabChats";
 
 const API = import.meta.env.VITE_API_URL || "";
-const STORE_KEY = "semblance_design";
+const STORE_KEY = "semblance_design_campaigns";
+const OLD_KEY = "semblance_design";
 const PLACEMENTS = [
     ["fb_ig_feed", "FB/IG feed"], ["square", "Square"], ["story_reel", "Story/Reel/TikTok"],
     ["google_display", "Google Display"], ["whatsapp_status", "WhatsApp Status"],
@@ -22,7 +25,7 @@ const field = {
 const label = { fontSize: "11px", fontWeight: 600, letterSpacing: "1px", color: "var(--text-muted)", margin: "14px 0 6px" };
 
 function loadSaved() {
-    try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch { return {}; }
+    try { return JSON.parse(localStorage.getItem(OLD_KEY)) || {}; } catch { return {}; }
 }
 
 function AdCard({ ad, onRetry }) {
@@ -124,22 +127,28 @@ function VideoStudio({ token, seedPrompt }) {
 // Design tab: digital-marketing assistant. Learns the business from its own
 // website, then writes ad copy and makes matching images per placement
 // (Nano Banana, free tier) and short video ads (Wan 2.1 on Modal, capped).
-export default function DesignPage({ token, onBack, onUnauthorized }) {
-    const saved = loadSaved();
-    const [site, setSite] = useState(saved.site || "");
-    const [brief, setBrief] = useState(saved.brief || "");
-    const [campaign, setCampaign] = useState(saved.campaign || "");
-    const [placements, setPlacements] = useState(saved.placements || ["fb_ig_feed", "story_reel"]);
-    const [count, setCount] = useState(saved.count || 2);
+export default function DesignPage({ token, onNavigate, onUnauthorized }) {
+    // Each campaign is a saved "chat": the business brief, the campaign and its ad copy (images aren't stored).
+    const { chats, chat, updateChat, newChat, selectChat, deleteChat } = useTabChats(STORE_KEY, {
+        blank: () => ({ site: "", brief: "", campaign: "", placements: ["fb_ig_feed", "story_reel"], count: 2, ads: [] }),
+        legacy: () => { const s = loadSaved(); return { ...s, title: (s.campaign || "").slice(0, 60) }; },
+        persist: c => ({ ...c, ads: (c.ads || []).map(({ image, ...ad }) => (image ? { ...ad, imageError: "Image not kept — tap New image" } : ad)) }),
+    });
+    const { site, brief, campaign, placements, count } = chat;
+    const field$ = key => v => updateChat(chat.id, c => ({ [key]: typeof v === "function" ? v(c[key]) : v,
+        ...(key === "campaign" ? { title: (typeof v === "function" ? v(c[key]) : v).slice(0, 60) } : {}) }));
+    const setSite = field$("site");
+    const setBrief = field$("brief");
+    const setCampaign = field$("campaign");
+    const setPlacements = field$("placements");
+    const setCount = field$("count");
+    const [menuOpen, setMenuOpen] = useState(false);
     const [model, setModel] = useState(() => loadModel("semblance_design_model"));
-    const [ads, setAds] = useState([]);
+    const ads = chat.ads || [];
+    const setAds = v => updateChat(chat.id, c => ({ ads: typeof v === "function" ? v(c.ads || []) : v }));
     const [busy, setBusy] = useState("");
     const [notice, setNotice] = useState("");
     const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
-
-    useEffect(() => {
-        try { localStorage.setItem(STORE_KEY, JSON.stringify({ site, brief, campaign, placements, count })); } catch {}
-    }, [site, brief, campaign, placements, count]);
 
     const learn = async () => {
         setBusy("Reading your website…"); setNotice("");
@@ -189,10 +198,15 @@ export default function DesignPage({ token, onBack, onUnauthorized }) {
     return (
         <div style={{ position: "fixed", inset: 0, background: "var(--bg)", zIndex: 25, display: "flex", flexDirection: "column" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
-                <button onClick={onBack} aria-label="Back" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "18px", color: "var(--text)" }}>←</button>
-                <span style={{ fontWeight: 700, color: "var(--text)", flex: 1 }}>Design</span>
+                <MenuButton onClick={() => setMenuOpen(true)} />
+                <span style={{ fontWeight: 700, color: "var(--text)", flex: 1 }}>Sem Design</span>
                 <ModelPicker token={token} value={model} onChange={setModel} storageKey="semblance_design_model" />
             </div>
+            <TabDrawer open={menuOpen} onClose={() => setMenuOpen(false)} title="Sem Design" current="design"
+                onNavigate={onNavigate} newLabel="+ New campaign" disabled={!!busy}
+                onNew={() => { newChat({ site, brief, placements, count }); setNotice(""); }}
+                chats={chats} activeId={chat.id} onSelect={id => { selectChat(id); setNotice(""); }} onDelete={deleteChat}
+                subtitle={c => c.site || ""} />
 
             <div style={{ flex: 1, overflowY: "auto", padding: "4px 16px 32px" }}>
                 <div style={label}>YOUR BUSINESS</div>

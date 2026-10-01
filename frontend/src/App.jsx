@@ -173,7 +173,7 @@ export default function App() {
             />
             {view === "finance" && (
                 <ErrorBoundary>
-                    <FinancePage token={token} onBack={() => setView("chat")} onUnauthorized={logout} />
+                    <FinancePage token={token} onNavigate={setView} onUnauthorized={logout} />
                 </ErrorBoundary>
             )}
             {view === "settings" && (
@@ -183,17 +183,17 @@ export default function App() {
             )}
             {view === "design" && (
                 <ErrorBoundary>
-                    <DesignPage token={token} onBack={() => setView("chat")} onUnauthorized={logout} />
+                    <DesignPage token={token} onNavigate={setView} onUnauthorized={logout} />
                 </ErrorBoundary>
             )}
             {view === "cowork" && (
                 <ErrorBoundary>
-                    <CoworkPage token={token} onBack={() => setView("chat")} onUnauthorized={logout} />
+                    <CoworkPage token={token} onNavigate={setView} onUnauthorized={logout} />
                 </ErrorBoundary>
             )}
             {view === "code" && (
                 <ErrorBoundary>
-                    <CodePage token={token} onBack={() => setView("chat")} onUnauthorized={logout} />
+                    <CodePage token={token} onNavigate={setView} onUnauthorized={logout} />
                 </ErrorBoundary>
             )}
             {view === "allChats" && (

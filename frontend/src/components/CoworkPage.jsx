@@ -2,9 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import ModelPicker, { loadModel } from "./ModelPicker";
 import { ToolStep, md } from "./CodePage";
 import { readEvents } from "../utils/sse";
+import TabDrawer, { MenuButton } from "./TabDrawer";
+import useTabChats from "../hooks/useTabChats";
 
 const API = import.meta.env.VITE_API_URL || "";
-const STORE_KEY = "semblance_cowork_items";
+const STORE_KEY = "semblance_cowork_chats";
+const OLD_KEY = "semblance_cowork_items";
 
 const btn = {
     padding: "7px 12px", borderRadius: "10px", border: "1px solid var(--border)", background: "var(--surface)",
@@ -19,8 +22,7 @@ const SUGGESTIONS = [
 ];
 
 function loadItems() {
-    // Images are dropped from the saved transcript — base64 would blow past localStorage limits.
-    try { return JSON.parse(localStorage.getItem(STORE_KEY)) || []; } catch { return []; }
+    try { return JSON.parse(localStorage.getItem(OLD_KEY)) || []; } catch { return []; }
 }
 
 function ApprovalCard({ item, onDecide }) {
@@ -56,8 +58,15 @@ function ApprovalCard({ item, onDecide }) {
 // Full-screen Co-work tab: an assistant that does the work (research, email,
 // calendar, Drive notes, images) instead of only advising. Anything that
 // leaves SEMBLANCE — sending email, adding events — waits for Approve.
-export default function CoworkPage({ token, onBack, onUnauthorized }) {
-    const [items, setItems] = useState(loadItems);
+export default function CoworkPage({ token, onNavigate, onUnauthorized }) {
+    const { chats, chat, updateChat, newChat, selectChat, deleteChat } = useTabChats(STORE_KEY, {
+        blank: () => ({ items: [] }),
+        legacy: () => { const items = loadItems(); return { items, title: items.find(i => i.kind === "user")?.text.slice(0, 60) || "" }; },
+        persist: c => ({ ...c, items: (c.items || []).filter(i => i.kind !== "image").slice(-200) }),
+    });
+    const items = chat.items;
+    const setItems = fn => updateChat(chat.id, x => ({ items: fn(x.items) }));
+    const [menuOpen, setMenuOpen] = useState(false);
     const [input, setInput] = useState("");
     const [busy, setBusy] = useState(false);
     const [model, setModel] = useState(() => loadModel("semblance_cowork_model"));
@@ -65,16 +74,16 @@ export default function CoworkPage({ token, onBack, onUnauthorized }) {
     const endRef = useRef(null);
     const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
 
-    useEffect(() => {
-        try { localStorage.setItem(STORE_KEY, JSON.stringify(items.filter(i => i.kind !== "image").slice(-200))); } catch {}
-    }, [items]);
     useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [items, busy]);
 
     const run = async (message) => {
         if (!message.trim() || busy) return;
+        const chatId = chat.id;
+        const add = fn => updateChat(chatId, x => ({ items: fn(x.items) }));
+        if (!items.length) updateChat(chatId, () => ({ title: message.slice(0, 60) }));
         const history = items.filter(i => i.kind === "user" || i.kind === "text")
             .map(i => ({ role: i.kind === "user" ? "user" : "assistant", content: i.text })).slice(-20);
-        setItems(it => [...it, { kind: "user", text: message }]);
+        add(it => [...it, { kind: "user", text: message }]);
         setInput(""); setBusy(true);
         abortRef.current = new AbortController();
         try {
@@ -85,15 +94,15 @@ export default function CoworkPage({ token, onBack, onUnauthorized }) {
             if (res.status === 401) { onUnauthorized(); return; }
             if (!res.ok || !res.body) throw new Error(`Request failed: ${res.status}`);
             await readEvents(res, (ev) => {
-                if (ev.type === "text") setItems(it => [...it, { kind: "text", text: ev.text }]);
-                else if (ev.type === "tool") setItems(it => [...it, { kind: "tool", id: ev.id, name: ev.name, args: ev.args }]);
-                else if (ev.type === "result") setItems(it => it.map(i => (i.kind === "tool" && i.id === ev.id && i.ok === undefined ? { ...i, ok: ev.ok, output: ev.output } : i)));
-                else if (ev.type === "approval") setItems(it => [...it, { kind: "approval", id: ev.id, name: ev.name, args: ev.args, summary: ev.summary, state: "pending" }]);
-                else if (ev.type === "image") setItems(it => [...it, { kind: "image", id: ev.id, mime: ev.mime, base64: ev.base64, prompt: ev.prompt }]);
-                else if (ev.type === "error") setItems(it => [...it, { kind: "error", text: ev.text }]);
+                if (ev.type === "text") add(it => [...it, { kind: "text", text: ev.text }]);
+                else if (ev.type === "tool") add(it => [...it, { kind: "tool", id: ev.id, name: ev.name, args: ev.args }]);
+                else if (ev.type === "result") add(it => it.map(i => (i.kind === "tool" && i.id === ev.id && i.ok === undefined ? { ...i, ok: ev.ok, output: ev.output } : i)));
+                else if (ev.type === "approval") add(it => [...it, { kind: "approval", id: ev.id, name: ev.name, args: ev.args, summary: ev.summary, state: "pending" }]);
+                else if (ev.type === "image") add(it => [...it, { kind: "image", id: ev.id, mime: ev.mime, base64: ev.base64, prompt: ev.prompt }]);
+                else if (ev.type === "error") add(it => [...it, { kind: "error", text: ev.text }]);
             });
         } catch (e) {
-            if (e.name !== "AbortError") setItems(it => [...it, { kind: "error", text: e.message }]);
+            if (e.name !== "AbortError") add(it => [...it, { kind: "error", text: e.message }]);
         }
         setBusy(false);
     };
@@ -115,10 +124,13 @@ export default function CoworkPage({ token, onBack, onUnauthorized }) {
     return (
         <div style={{ position: "fixed", inset: 0, background: "var(--bg)", zIndex: 25, display: "flex", flexDirection: "column" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
-                <button onClick={onBack} aria-label="Back" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "18px", color: "var(--text)" }}>←</button>
-                <span style={{ fontWeight: 700, color: "var(--text)", flex: 1 }}>Co-work</span>
-                <button onClick={() => setItems([])} disabled={busy} style={btn}>Clear</button>
+                <MenuButton onClick={() => setMenuOpen(true)} />
+                <span style={{ fontWeight: 700, color: "var(--text)", flex: 1 }}>Sem Co-work</span>
             </div>
+
+            <TabDrawer open={menuOpen} onClose={() => setMenuOpen(false)} title="Sem Co-work" current="cowork"
+                onNavigate={onNavigate} onNew={() => newChat()} chats={chats} activeId={chat.id} disabled={busy}
+                onSelect={selectChat} onDelete={deleteChat} />
 
             <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px" }}>
                 {items.length === 0 && (

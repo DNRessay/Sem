@@ -4,6 +4,8 @@ import DOMPurify from "dompurify";
 import ModelPicker, { loadModel } from "./ModelPicker";
 import { readEvents } from "../utils/sse";
 import { RepoPicker } from "./AttachMenu";
+import TabDrawer, { MenuButton } from "./TabDrawer";
+import useTabChats from "../hooks/useTabChats";
 
 const API = import.meta.env.VITE_API_URL || "";
 const STORE_KEY = "semblance_code_state";
@@ -21,24 +23,8 @@ export function md(text) {
     return { __html: DOMPurify.sanitize(marked.parse(text || "", { breaks: true })) };
 }
 
-function blankChat(provider = "github", repo = "") {
-    return { id: `c${Date.now()}${Math.random().toString(36).slice(2, 6)}`, title: "", provider, repo, items: [], updated: Date.now() };
-}
-
-// Older saves held one chat as {provider, repo, items}; they become the first chat.
-function initialChats(saved) {
-    if (Array.isArray(saved.chats) && saved.chats.length) return saved.chats;
-    const c = blankChat(saved.provider || "github", saved.repo || "");
-    const items = saved.items || [];
-    return [{ ...c, id: "c0", items, title: items.find(i => i.kind === "user")?.text.slice(0, 60) || "" }];
-}
-
 function loadState() {
     try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch { return {}; }
-}
-
-function saveState(state) {
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch {}
 }
 
 function toolSummary(name, args) {
@@ -132,16 +118,22 @@ function Automations({ token, provider, repo, onUnauthorized }) {
 
 // Full-screen Code tab: a coding agent working in a clone of one repo on
 // Modal. Nothing reaches the repo until "Open PR" (or an automation) does.
-export default function CodePage({ token, onBack, onUnauthorized }) {
-    const saved = loadState();
-    const [chats, setChats] = useState(() => initialChats(saved));
-    const [activeId, setActiveId] = useState(saved.activeId || "");
-    const chat = chats.find(c => c.id === activeId) || chats[0];
+export default function CodePage({ token, onNavigate, onUnauthorized }) {
+    const { chats, chat, updateChat, newChat: addChat, selectChat, deleteChat } = useTabChats(STORE_KEY, {
+        blank: () => ({ provider: "github", repo: "", items: [] }),
+        legacy: () => {
+            const saved = loadState();
+            const items = saved.items || [];
+            return { provider: saved.provider || "github", repo: saved.repo || "", items,
+                     title: items.find(i => i.kind === "user")?.text.slice(0, 60) || "" };
+        },
+        persist: c => ({ ...c, items: (c.items || []).slice(-200) }),
+    });
     const { provider, repo, items } = chat;
+    const [menuOpen, setMenuOpen] = useState(false);
     const [repos, setRepos] = useState([]);
     const [reposError, setReposError] = useState("");
     const [opened, setOpened] = useState(null);
-    const [showChats, setShowChats] = useState(false);
     const [input, setInput] = useState("");
     const [mode, setMode] = useState("act");
     const [model, setModel] = useState(() => loadModel("semblance_code_model"));
@@ -152,14 +144,8 @@ export default function CodePage({ token, onBack, onUnauthorized }) {
     const endRef = useRef(null);
     const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
 
-    const updateChat = (id, fn) => setChats(cs => cs.map(c => (c.id === id ? { ...c, ...fn(c), updated: Date.now() } : c)));
     const setItems = (fn) => updateChat(chat.id, c => ({ items: typeof fn === "function" ? fn(c.items) : fn }));
-    const newChat = (p = provider, r = repo) => {
-        const c = blankChat(p, r);
-        setChats(cs => [c, ...cs].slice(0, 50));
-        setActiveId(c.id); setShowChats(false); setNotice("");
-        return c;
-    };
+    const newChat = (p = provider, r = repo) => { setOpened(null); setNotice(""); return addChat({ provider: p, repo: r, items: [] }); };
     // A chat belongs to one repo: picking another repo starts a new chat unless this one is still empty.
     const pickRepo = (p, r) => {
         setOpened(null);
@@ -167,7 +153,6 @@ export default function CodePage({ token, onBack, onUnauthorized }) {
         else updateChat(chat.id, () => ({ provider: p, repo: r }));
     };
 
-    useEffect(() => { saveState({ chats: chats.map(c => ({ ...c, items: c.items.slice(-200) })), activeId }); }, [chats, activeId]);
     useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [items, busy]);
     useEffect(() => {
         setReposError("");
@@ -266,8 +251,8 @@ export default function CodePage({ token, onBack, onUnauthorized }) {
     return (
         <div style={{ position: "fixed", inset: 0, background: "var(--bg)", zIndex: 25, display: "flex", flexDirection: "column" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "12px 16px", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
-                <button onClick={onBack} aria-label="Back" style={{ background: "none", border: "none", cursor: "pointer", fontSize: "18px", color: "var(--text)" }}>←</button>
-                <span style={{ fontWeight: 700, color: "var(--text)" }}>Code</span>
+                <MenuButton onClick={() => setMenuOpen(true)} />
+                <span style={{ fontWeight: 700, color: "var(--text)" }}>Sem Code</span>
                 <select value={provider} onChange={e => pickRepo(e.target.value, "")} style={field}>
                     <option value="github">GitHub</option>
                     <option value="gitlab">GitLab</option>
@@ -276,28 +261,11 @@ export default function CodePage({ token, onBack, onUnauthorized }) {
                     <RepoPicker floating repos={repos} value={repo} placeholder="Select a repository"
                         onChange={v => pickRepo(provider, v)} />
                 </div>
-                <button onClick={() => setShowChats(s => !s)} style={btn}>Chats ({chats.length})</button>
-                <button onClick={() => newChat()} disabled={!!busy} style={btn}>+ New</button>
             </div>
-            {showChats && (
-                <div style={{ maxHeight: "40vh", overflowY: "auto", borderBottom: "1px solid var(--border)", padding: "4px 16px" }}>
-                    {[...chats].sort((a, b) => b.updated - a.updated).map(c => (
-                        <div key={c.id} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
-                            <button onClick={() => { setActiveId(c.id); setShowChats(false); setOpened(null); setNotice(""); }}
-                                style={{ flex: 1, minWidth: 0, textAlign: "left", background: "none", border: "none", cursor: "pointer", color: "var(--text)", padding: 0 }}>
-                                <div style={{ fontSize: "14px", fontWeight: c.id === chat.id ? 700 : 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title || "New chat"}</div>
-                                <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>{c.repo || "no repo"} · {new Date(c.updated).toLocaleDateString()}</div>
-                            </button>
-                            <button onClick={() => {
-                                const rest = chats.filter(x => x.id !== c.id);
-                                const next = rest.length ? rest : [blankChat(provider, repo)];
-                                setChats(next);
-                                if (c.id === chat.id) setActiveId(next[0].id);
-                            }} disabled={!!busy && c.id === chat.id} aria-label="Delete chat" style={{ ...btn, padding: "4px 8px", color: "var(--danger)" }}>✕</button>
-                        </div>
-                    ))}
-                </div>
-            )}
+            <TabDrawer open={menuOpen} onClose={() => setMenuOpen(false)} title="Sem Code" current="code"
+                onNavigate={onNavigate} onNew={() => newChat()} chats={chats} activeId={chat.id} disabled={!!busy}
+                onSelect={id => { selectChat(id); setOpened(null); setNotice(""); }} onDelete={deleteChat}
+                subtitle={c => c.repo || "no repo"} />
 
             {ready && (
                 <div style={{ display: "flex", gap: "6px", padding: "8px 16px", borderBottom: "1px solid var(--border)", overflowX: "auto" }}>
