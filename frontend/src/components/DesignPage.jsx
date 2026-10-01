@@ -115,6 +115,56 @@ function Inspiration({ refs, setRefs, style, disabled }) {
     );
 }
 
+// Vicinic customer sites (DNRessay/Digital over MCP): pick one to fill the business brief.
+function VicinicPicker({ headers, onBrief, disabled }) {
+    const [state, setState] = useState(null); // {connected, sites}
+    const [slug, setSlug] = useState("");
+    const [form, setForm] = useState({ url: "", key: "" });
+    const [msg, setMsg] = useState("");
+    const load = () => fetch(`${API}/design/vicinic/sites`, { headers }).then(r => r.json())
+        .then(d => setState(d)).catch(() => setState({ connected: false, sites: [] }));
+    useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const connect = async () => {
+        setMsg("Connecting…");
+        const r = await fetch(`${API}/design/vicinic/connect`, { method: "POST", headers, body: JSON.stringify(form) });
+        const d = await r.json().catch(() => ({}));
+        setMsg(r.ok ? `Connected — ${d.tools.length} tools (also available in Co-work and Code).` : (d.detail || `Failed (${r.status})`));
+        if (r.ok) load();
+    };
+    const use = async () => {
+        setMsg("Reading the site…");
+        const r = await fetch(`${API}/design/vicinic/brief/${encodeURIComponent(slug)}`, { headers });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { setMsg(d.detail || `Failed (${r.status})`); return; }
+        onBrief(d);
+        setMsg("");
+    };
+
+    if (!state) return null;
+    if (!state.connected) return (
+        <details style={{ marginTop: "8px", fontSize: "12px", color: "var(--text-muted)" }}>
+            <summary style={{ cursor: "pointer" }}>Connect Vicinic (use a customer site's details)</summary>
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "6px" }}>
+                <input value={form.url} onChange={e => setForm({ ...form, url: e.target.value })} placeholder="https://… Vicinic backend address" style={field} />
+                <input value={form.key} onChange={e => setForm({ ...form, key: e.target.value })} placeholder="vic_… key (Vicinic Admin → Connect apps)" type="password" style={field} />
+                <button className="btn-primary" onClick={connect} disabled={!form.url || !form.key} style={{ ...btn, alignSelf: "flex-start" }}>Connect</button>
+                {msg && <div>{msg}</div>}
+            </div>
+        </details>
+    );
+    return (
+        <div style={{ display: "flex", gap: "8px", marginTop: "8px", alignItems: "center", flexWrap: "wrap" }}>
+            <select value={slug} onChange={e => setSlug(e.target.value)} style={{ ...field, flex: 1, minWidth: "160px" }}>
+                <option value="">Vicinic customer site…</option>
+                {state.sites.map(x => <option key={x.slug} value={x.slug}>{x.name} ({x.package})</option>)}
+            </select>
+            <button onClick={use} disabled={!slug || disabled} style={btn}>Use its details</button>
+            {msg && <div style={{ fontSize: "12px", color: "var(--text-muted)", width: "100%" }}>{msg}</div>}
+        </div>
+    );
+}
+
 function AdCard({ ad, onRetry }) {
     const text = `${ad.headline}\n\n${ad.primary_text}\n\n${(ad.hashtags || []).join(" ")}`;
     return (
@@ -313,6 +363,12 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
                     <input value={site} onChange={e => setSite(e.target.value)} placeholder="yourwebsite.co.za" style={{ ...field, flex: 1 }} />
                     <button onClick={learn} disabled={!site.trim() || !!busy} style={btn}>Learn from site</button>
                 </div>
+                <VicinicPicker headers={headers} disabled={!!busy} onBrief={d => {
+                    setBrief([d.brief, d.phone && `Phone: ${d.phone}`, d.whatsapp && `WhatsApp: ${d.whatsapp}`,
+                        d.primary_color && `Brand colour: ${d.primary_color}`].filter(Boolean).join("\n"));
+                    if (d.domain) setSite(d.domain);
+                    setNotice(`Using ${d.slug}'s details from Vicinic. Edit anything that's off.`);
+                }} />
                 <textarea value={brief} onChange={e => setBrief(e.target.value)} rows={brief ? 9 : 3} style={{ ...field, marginTop: "8px" }}
                     placeholder="Or describe the business: what you sell, who to, where, your tone…" />
 

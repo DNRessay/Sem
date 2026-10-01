@@ -6,7 +6,9 @@ from fastapi.responses import StreamingResponse
 from gateway.auth import require_account
 from pipeline.ad_studio import PLACEMENTS, write_variants
 from pipeline.site_brief import learn_site
+from storage.neon_store import get_store
 from tools import gemini_media
+from tools.mcp_client import MCPClient
 from tools.video_tool import video_call
 
 router = APIRouter(prefix="/design")
@@ -99,3 +101,60 @@ async def video_status(job_id: str, _account: dict = Depends(require_account)):
     if not result.get("ok") and result.get("status") != "failed":
         raise HTTPException(400, result.get("error") or "status check failed")
     return result
+
+
+# ── Vicinic (DNRessay/Digital) over MCP: pick a customer site, use its brief ──
+
+VICINIC_SERVER = "vicinic"
+
+
+async def _vicinic(account_id: str) -> dict | None:
+    db = await get_store()
+    return next((s for s in await db.list_mcp_servers(account_id) if s["name"] == VICINIC_SERVER), None)
+
+
+async def _vicinic_call(server: dict, tool: str, args: dict | None = None):
+    try:
+        result = await MCPClient(server["url"], server.get("auth", ""), timeout=40).call_tool(tool, args or {})
+    except Exception as e:
+        raise HTTPException(502, f"Vicinic didn't answer: {str(e)[:300]}")
+    if not result["ok"]:
+        raise HTTPException(400, result["text"][:300] or "Vicinic refused that")
+    try:
+        return json.loads(result["text"])
+    except ValueError:
+        return result["text"]
+
+
+@router.post("/vicinic/connect")
+async def vicinic_connect(request: Request, account: dict = Depends(require_account)):
+    """Saves Vicinic as the MCP server "vicinic" — also gives Co-work and Code its blog tools."""
+    body = await request.json()
+    url, key = (body.get("url") or "").strip().rstrip("/"), (body.get("key") or "").strip()
+    if not url.startswith("https://") or not key:
+        raise HTTPException(400, "Paste Vicinic's https:// backend address and a key from Vicinic Admin → Connect apps")
+    if not url.endswith("/mcp"):
+        url += "/mcp"
+    try:
+        tools = await MCPClient(url, key, timeout=30).list_tools(use_cache=False)
+    except Exception as e:
+        raise HTTPException(400, f"Couldn't connect to Vicinic: {str(e)[:300]}")
+    db = await get_store()
+    await db.upsert_mcp_server(account["account_id"], VICINIC_SERVER, url, key, False)
+    return {"connected": True, "tools": [t.get("name") for t in tools]}
+
+
+@router.get("/vicinic/sites")
+async def vicinic_sites(account: dict = Depends(require_account)):
+    server = await _vicinic(account["account_id"])
+    if not server:
+        return {"connected": False, "sites": []}
+    return {"connected": True, "sites": await _vicinic_call(server, "sites")}
+
+
+@router.get("/vicinic/brief/{slug}")
+async def vicinic_brief(slug: str, account: dict = Depends(require_account)):
+    server = await _vicinic(account["account_id"])
+    if not server:
+        raise HTTPException(400, "Connect Vicinic first")
+    return await _vicinic_call(server, "site_brief", {"slug": slug})

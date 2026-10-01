@@ -118,3 +118,29 @@ def test_inspiration_images_shape_the_copy_and_the_images(client, monkeypatch):
     types = [json.loads(line[6:])["type"] for line in r.text.split("\n") if line.startswith("data: {")]
     assert types == ["status", "style", "variants", "image"]
     assert seen == {"described": 4, "style": "warm terracotta palette, hand-drawn type", "refs": 4}
+
+
+def test_vicinic_site_brief_comes_over_mcp(client, monkeypatch):
+    class Store:
+        async def list_mcp_servers(self, account_id):
+            return [{"name": "vicinic", "url": "https://vic.example/mcp", "auth": "vic_k"}]
+
+    async def fake_store():
+        return Store()
+
+    calls = []
+
+    class FakeClient:
+        def __init__(self, url, auth, timeout=0):
+            calls.append((url, auth))
+
+        async def call_tool(self, name, args):
+            if name == "sites":
+                return {"ok": True, "text": json.dumps([{"slug": "bakes", "name": "Vicinic Bakes"}]), "images": []}
+            return {"ok": True, "text": json.dumps({"slug": args["slug"], "brief": "Business: Vicinic Bakes"}), "images": []}
+
+    monkeypatch.setattr("gateway.design_router.get_store", fake_store)
+    monkeypatch.setattr("gateway.design_router.MCPClient", FakeClient)
+    assert client.get("/design/vicinic/sites").json() == {"connected": True, "sites": [{"slug": "bakes", "name": "Vicinic Bakes"}]}
+    assert client.get("/design/vicinic/brief/bakes").json()["brief"] == "Business: Vicinic Bakes"
+    assert calls[0] == ("https://vic.example/mcp", "vic_k")
