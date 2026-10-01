@@ -1,6 +1,7 @@
 import asyncio
 import json
 import re
+import time
 
 import httpx
 
@@ -127,6 +128,52 @@ async def _cohere_fallback(messages: list, max_tokens: int) -> str | None:
     return None
 
 
+# Once Groq names a wait too long to sleep through, a warm Lambda container
+# remembers it and goes straight to the self-hosted model until then, instead
+# of paying a 429 round trip on every message. A cold container just learns
+# it again from the next 429.
+_groq_blocked_until = 0.0
+
+# Read timeout covers a cold start: Modal holds the request while the GPU
+# container boots and loads the weights. Kept under ChatFunction's Timeout.
+_LOCAL_TIMEOUT = httpx.Timeout(10.0, read=110.0)
+
+
+async def _stream_local(messages: list, max_tokens: int):
+    """Yields reply deltas from the self-hosted Bonsai endpoint
+    (modal_app/llm.py). Never raises — any failure just ends the stream, so
+    the caller can tell "nothing came back" from "answered" by whether
+    anything was yielded. Thinking tokens arrive as reasoning_content and are
+    left out; only the answer is yielded."""
+    if not settings.LOCAL_LLM_URL:
+        return
+    payload = {
+        "model": settings.LOCAL_LLM_MODEL,
+        "messages": messages,
+        "max_tokens": max(max_tokens, settings.LOCAL_LLM_MAX_TOKENS),
+        "stream": True,
+    }
+    headers = {"Authorization": f"Bearer {settings.LOCAL_LLM_API_KEY}", "Content-Type": "application/json"}
+    url = settings.LOCAL_LLM_URL.rstrip("/") + "/v1/chat/completions"
+    try:
+        async with httpx.AsyncClient(timeout=_LOCAL_TIMEOUT) as client:
+            async with client.stream("POST", url, json=payload, headers=headers) as r:
+                if r.status_code != 200:
+                    return
+                async for line in r.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data_str = line[len("data: "):]
+                    if data_str == "[DONE]":
+                        return
+                    choices = json.loads(data_str).get("choices") or []
+                    delta = choices[0].get("delta", {}).get("content") if choices else None
+                    if delta:
+                        yield delta
+    except (httpx.HTTPError, json.JSONDecodeError):
+        return
+
+
 class QueryEngine:
     def __init__(self):
         self.sys_cache = SysCache()
@@ -207,12 +254,27 @@ class QueryEngine:
         right after the thinking indicator, regardless of the transport
         already being SSE end-to-end.
         """
+        global _groq_blocked_until
         # See call_llm — hash the whole conversation, not just messages[:2].
         prefix_hash = self.cache_ctrl.compute_prefix_hash(str(messages))
         cached = self.cache_ctrl.read(prefix_hash)
         if cached and self.cache_ctrl.is_cache_valid(prefix_hash):
             yield cached
             return
+
+        if settings.LOCAL_LLM_URL and time.monotonic() < _groq_blocked_until:
+            answered = False
+            async for piece in self._overflow(messages, max_tokens, prefix_hash, session_id):
+                answered = True
+                yield piece
+            if answered:
+                return
+            # Retrying Groq here would only 429 again and spend the backup's
+            # cold-start timeout a second time, past ChatFunction's limit.
+            raise RateLimitError(
+                429, model, "Groq quota still exhausted; backup models unavailable",
+                _groq_blocked_until - time.monotonic(),
+            )
 
         headers = {
             "Authorization": f"Bearer {settings.GROQ_API_KEY}",
@@ -248,13 +310,13 @@ class QueryEngine:
                             retried = True
                             await asyncio.sleep(effective_wait)
                             continue
-                        fallback = await _cohere_fallback(messages, max_tokens)
-                        if fallback:
-                            note = "_(Groq's rate limit was hit — answered via Cohere fallback)_\n\n"
-                            full_reply = note + fallback
-                            yield full_reply
-                            self.cache_ctrl.write(prefix_hash, full_reply)
-                            self.conv_cache.append(session_id, {"role": "assistant", "content": full_reply})
+                        if wait is not None:
+                            _groq_blocked_until = time.monotonic() + wait
+                        answered = False
+                        async for piece in self._overflow(messages, max_tokens, prefix_hash, session_id):
+                            answered = True
+                            yield piece
+                        if answered:
                             return
                         raise RateLimitError(429, model, body.decode(errors="replace"), wait)
                     if r.status_code != 200:
@@ -289,6 +351,31 @@ class QueryEngine:
             yield note
 
         content = "".join(full_parts)
+        self.cache_ctrl.write(prefix_hash, content)
+        self.conv_cache.append(session_id, {"role": "assistant", "content": content})
+
+    async def _overflow(self, messages: list, max_tokens: int, prefix_hash: str, session_id: str):
+        """Answers a turn Groq can't: the self-hosted model first (streamed,
+        no per-minute token cap), then Cohere's trial key. Yields nothing if
+        neither answers, leaving the caller to raise its RateLimitError.
+        The note is held back until the first real token so a dead backup
+        never leaves a dangling "answered by..." line in the chat."""
+        parts = []
+        async for delta in _stream_local(messages, max_tokens):
+            if not parts:
+                note = "_(Groq's limit was hit — answered by the self-hosted backup model)_\n\n"
+                parts.append(note)
+                yield note
+            parts.append(delta)
+            yield delta
+        if not parts:
+            fallback = await _cohere_fallback(messages, max_tokens)
+            if not fallback:
+                return
+            full_reply = "_(Groq's rate limit was hit — answered via Cohere fallback)_\n\n" + fallback
+            parts.append(full_reply)
+            yield full_reply
+        content = "".join(parts)
         self.cache_ctrl.write(prefix_hash, content)
         self.conv_cache.append(session_id, {"role": "assistant", "content": content})
 

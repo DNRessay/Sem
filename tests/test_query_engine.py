@@ -14,6 +14,31 @@ from pipeline.query_engine import (
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 COHERE_URL = "https://api.cohere.com/v2/chat"
+LOCAL_BASE = "https://bonsai.example.modal.run"
+LOCAL_URL = LOCAL_BASE + "/v1/chat/completions"
+TPD_429 = b"...on tokens per day (TPD)... Please try again in 10m55.776s."
+
+
+def _sse(*deltas):
+    lines = [
+        "data: " + json.dumps({"choices": [{"delta": {"reasoning_content": "thinking..."}}]}),
+        *("data: " + json.dumps({"choices": [{"delta": {"content": d}}]}) for d in deltas),
+        "data: [DONE]",
+    ]
+    return ("\n\n".join(lines) + "\n\n").encode()
+
+
+@pytest.fixture
+def local_llm(monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "LOCAL_LLM_URL", LOCAL_BASE)
+    monkeypatch.setattr(settings, "LOCAL_LLM_API_KEY", "local-key")
+    monkeypatch.setattr("pipeline.query_engine._groq_blocked_until", 0.0)
+
+    async def fake_sleep(s):
+        pass
+
+    monkeypatch.setattr("pipeline.query_engine.asyncio.sleep", fake_sleep)
 
 
 def test_retry_after_seconds_prefers_the_header():
@@ -459,3 +484,88 @@ def test_fire_break_invalidates_known_vector_only(moto_cache_table):
     assert engine.cache_ctrl.read("k") == "v"
     engine.fire_break("model_switch")
     assert engine.cache_ctrl.check_break() is True
+
+
+@pytest.mark.asyncio
+async def test_stream_llm_uses_the_local_model_before_cohere(moto_cache_table, local_llm, monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "COHERE_API_KEY", "test-key")
+    engine = QueryEngine()
+
+    with respx.mock:
+        respx.post(GROQ_URL).mock(return_value=Response(429, content=TPD_429))
+        local = respx.post(LOCAL_URL).mock(return_value=Response(200, content=_sse("hello ", "from bonsai")))
+        cohere = respx.post(COHERE_URL).mock(return_value=Response(200, json={}))
+        pieces = [p async for p in engine.stream_llm([{"role": "user", "content": "hi"}], session_id="s1")]
+
+    full = "".join(pieces)
+    assert "hello from bonsai" in full
+    assert "self-hosted backup model" in full
+    assert "thinking..." not in full
+    assert cohere.call_count == 0
+    sent = json.loads(local.calls[0].request.content)
+    assert sent["max_tokens"] == settings.LOCAL_LLM_MAX_TOKENS
+    assert local.calls[0].request.headers["authorization"] == "Bearer local-key"
+
+
+@pytest.mark.asyncio
+async def test_stream_llm_skips_groq_while_its_quota_wait_is_still_running(moto_cache_table, local_llm):
+    engine = QueryEngine()
+
+    with respx.mock:
+        groq = respx.post(GROQ_URL).mock(return_value=Response(429, content=TPD_429))
+        respx.post(LOCAL_URL).mock(return_value=Response(200, content=_sse("one")))
+        [p async for p in engine.stream_llm([{"role": "user", "content": "first"}], session_id="s1")]
+        respx.post(LOCAL_URL).mock(return_value=Response(200, content=_sse("two")))
+        second = "".join([p async for p in engine.stream_llm([{"role": "user", "content": "second"}], session_id="s1")])
+
+    assert groq.call_count == 1
+    assert "two" in second
+
+
+@pytest.mark.asyncio
+async def test_stream_llm_falls_through_to_cohere_when_the_local_model_is_down(moto_cache_table, local_llm, monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "COHERE_API_KEY", "test-key")
+    engine = QueryEngine()
+
+    with respx.mock:
+        respx.post(GROQ_URL).mock(return_value=Response(429, content=TPD_429))
+        respx.post(LOCAL_URL).mock(return_value=Response(503, text="no capacity"))
+        respx.post(COHERE_URL).mock(return_value=Response(200, json={
+            "message": {"content": [{"type": "text", "text": "the cohere answer"}]},
+        }))
+        full = "".join([p async for p in engine.stream_llm([{"role": "user", "content": "hi"}], session_id="s1")])
+
+    assert "the cohere answer" in full
+    assert "self-hosted" not in full
+
+
+@pytest.mark.asyncio
+async def test_stream_llm_raises_when_every_backup_is_down(moto_cache_table, local_llm):
+    import httpx as httpx_mod
+    engine = QueryEngine()
+
+    with respx.mock:
+        respx.post(GROQ_URL).mock(return_value=Response(429, content=TPD_429))
+        respx.post(LOCAL_URL).mock(side_effect=httpx_mod.ReadTimeout("cold start too slow"))
+        with pytest.raises(RateLimitError):
+            async for _ in engine.stream_llm([{"role": "user", "content": "hi"}], session_id="s1"):
+                pass
+
+
+@pytest.mark.asyncio
+async def test_stream_llm_fails_fast_while_blocked_and_the_backup_is_down(moto_cache_table, local_llm, monkeypatch):
+    import time
+    monkeypatch.setattr("pipeline.query_engine._groq_blocked_until", time.monotonic() + 600)
+    engine = QueryEngine()
+
+    with respx.mock:
+        groq = respx.post(GROQ_URL).mock(return_value=Response(429, content=TPD_429))
+        respx.post(LOCAL_URL).mock(return_value=Response(503, text="no capacity"))
+        with pytest.raises(RateLimitError) as exc_info:
+            async for _ in engine.stream_llm([{"role": "user", "content": "hi"}], session_id="s1"):
+                pass
+
+    assert groq.call_count == 0
+    assert 590 < exc_info.value.retry_after <= 600

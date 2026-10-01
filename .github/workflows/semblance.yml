@@ -85,6 +85,8 @@ jobs:
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
+          LOCAL_LLM_URL: ${{ secrets.LOCAL_LLM_URL }}
+          LOCAL_LLM_API_KEY: ${{ secrets.LOCAL_LLM_API_KEY }}
           NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
           MODAL_EMBEDDINGS_URL: ${{ secrets.MODAL_EMBEDDINGS_URL }}
           MODAL_REPO_URL: ${{ secrets.MODAL_REPO_URL }}
@@ -116,6 +118,8 @@ jobs:
           # so sam deploy "succeeded" while quietly deploying nothing.
           groq_api_key=$(printf '%s' "$GROQ_API_KEY" | tr -d '\r\n')
           cohere_api_key=$(printf '%s' "$COHERE_API_KEY" | tr -d '\r\n')
+          local_llm_url=$(printf '%s' "$LOCAL_LLM_URL" | tr -d '\r\n')
+          local_llm_api_key=$(printf '%s' "$LOCAL_LLM_API_KEY" | tr -d '\r\n')
           neon_database_url=$(printf '%s' "$NEON_DATABASE_URL" | tr -d '\r\n')
           modal_embeddings_url=$(printf '%s' "$MODAL_EMBEDDINGS_URL" | tr -d '\r\n')
           modal_repo_url=$(printf '%s' "$MODAL_REPO_URL" | tr -d '\r\n')
@@ -160,6 +164,8 @@ jobs:
             "PublicApiUrl=https://sv2uw47le4udr57ojay37ey3ry0nssoa.lambda-url.eu-west-1.on.aws"
           )
           [ -n "$cohere_api_key" ] && params+=("CohereApiKey=${cohere_api_key}")
+          [ -n "$local_llm_url" ] && params+=("LocalLlmUrl=${local_llm_url}")
+          [ -n "$local_llm_api_key" ] && params+=("LocalLlmApiKey=${local_llm_api_key}")
           [ -n "$modal_embeddings_url" ] && params+=("ModalEmbeddingsUrl=${modal_embeddings_url}")
           [ -n "$modal_repo_url" ] && params+=("ModalRepoUrl=${modal_repo_url}")
           [ -n "$modal_repo_secret" ] && params+=("ModalRepoSecret=${modal_repo_secret}")

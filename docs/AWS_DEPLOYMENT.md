@@ -104,6 +104,23 @@ invented above into `MODAL_REPO_SECRET` — they must match, since (unlike the
 embeddings endpoint) this one can clone private repos and read arbitrary
 files out of them, so it needs real auth, not just an unguessable URL.
 
+### 2c. Deploy the self-hosted backup model to Modal (optional)
+
+Ternary Bonsai 2 27B (same Qwen3.8-27B base as the Groq chat model) on an L4
+GPU. Sem uses it when Groq's daily/hourly quota runs out, before the Cohere
+trial key. The same endpoint works for a coding CLI such as MiniMax Code. It
+scales to zero, so the first reply after an idle spell waits about a minute.
+
+```bash
+modal secret create semblance-llm-secret LLM_API_KEY=<invent-any-random-string>
+modal deploy modal_app/llm.py    # first deploy also downloads ~7 GB of weights into the image
+```
+
+Copy the printed URL into `LOCAL_LLM_URL` and the random string into
+`LOCAL_LLM_API_KEY`. Then set a hard spend limit in Modal's billing
+settings: at roughly $0.80/hour awake, the $30 credit buys about 35 GPU
+hours a month, shared with embeddings.
+
 ### 3. First deploy (local, guided)
 
 ```bash
@@ -274,6 +291,7 @@ aws cloudformation delete-stack --stack-name aws-sam-cli-managed-default --regio
 | Neon Postgres + pgvector | Free tier (0.5 GB, autosuspend) | $0 |
 | Modal embeddings | $30/month credit; single-user usage is a rounding error against it | $0 |
 | Groq (Qwen3.8-27B, GPT-OSS-120B) | Free tier | $0 |
+| Modal backup model (optional, step 2c) | ~$0.80/hour only while awake, capped at one GPU | $0 until Groq runs out |
 | Frontend (Cloudflare Pages) | Free (unlimited requests, 500 builds/mo) | $0 |
 | **Total** | | **~$0.00–0.05/month** |
 

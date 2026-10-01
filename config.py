@@ -32,6 +32,17 @@ class Settings(BaseSettings):
     COHERE_API_KEY: str = ""
     COHERE_MODEL: str = "command-a-03-2025"
 
+    # Self-hosted overflow brain — Ternary Bonsai 2 27B on Modal
+    # (modal_app/llm.py), tried before Cohere once Groq's quota isn't worth
+    # retrying through. Same Qwen3.8-27B base as GROQ_MODEL, no per-minute
+    # token cap, so replies from it get a much larger budget. Scales to zero:
+    # the first call after it's been idle waits ~1 minute for the GPU to wake.
+    # Left blank, this is a no-op.
+    LOCAL_LLM_URL: str = ""
+    LOCAL_LLM_API_KEY: str = ""
+    LOCAL_LLM_MODEL: str = "bonsai-2-27b"
+    LOCAL_LLM_MAX_TOKENS: int = 4096
+
     # Storage — Neon serverless Postgres (+ pgvector) replaces Aiven MySQL + ChromaDB.
     # One database, two roles: raw records and vector search over the same rows.
     NEON_DATABASE_URL: str = "postgresql://user:pass@host/semblance?sslmode=require"

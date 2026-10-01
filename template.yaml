@@ -27,6 +27,17 @@ Parameters:
   CohereModel:
     Type: String
     Default: command-a-03-2025
+  LocalLlmUrl:
+    Type: String
+    Default: ""
+    Description: >
+      Optional — URL of the self-hosted Bonsai 2 27B endpoint (modal_app/llm.py), tried before Cohere
+      when Groq's quota runs out. Blank disables it.
+  LocalLlmApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Must match the LLM_API_KEY value in the semblance-llm-secret Modal secret
   NeonDatabaseUrl:
     Type: String
     NoEcho: true
@@ -128,6 +139,8 @@ Globals:
         GROQ_PLANNING_MODEL: !Ref GroqPlanningModel
         COHERE_API_KEY: !Ref CohereApiKey
         COHERE_MODEL: !Ref CohereModel
+        LOCAL_LLM_URL: !Ref LocalLlmUrl
+        LOCAL_LLM_API_KEY: !Ref LocalLlmApiKey
         NEON_DATABASE_URL: !Ref NeonDatabaseUrl
         MODAL_EMBEDDINGS_URL: !Ref ModalEmbeddingsUrl
         MODAL_REPO_URL: !Ref ModalRepoUrl
@@ -167,6 +180,11 @@ Resources:
       # has a hard 256-char limit — CFN's early-validation hook was
       # correctly rejecting it at 622 chars, not a false positive.)
       Description: Light tier — FastAPI (chat/status/webhooks) via uvicorn + AWS Lambda Web Adapter, RESPONSE_STREAM invoke mode
+      # Above the Globals 30s so a reply from the self-hosted backup model
+      # (modal_app/llm.py) can wait out its ~1 minute GPU cold start. Lambda
+      # bills per millisecond actually run, so the higher ceiling costs
+      # nothing on normal Groq replies.
+      Timeout: 150
       Layers:
         - !Sub arn:aws:lambda:${AWS::Region}:753240598075:layer:LambdaAdapterLayerX86:28
       Environment:

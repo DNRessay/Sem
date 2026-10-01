@@ -243,6 +243,7 @@ DREAM consolidates memories on a 3-gate trigger (24hr + 5 sessions + lock), scor
 | Scheduled KAIROS tick | AWS Lambda + EventBridge (rate: 15 min) | Free |
 | LLM Backend | Groq (Qwen3.8-27B) | Free |
 | Planning LLM | Groq (GPT-OSS-120B) | Free |
+| Backup LLM (optional) | Modal (Ternary Bonsai 2 27B, scales to zero) | $30/mo Modal credit |
 | Persistent Storage + Vector Store | Neon Postgres + pgvector | Free |
 | Cache | DynamoDB (pay-per-request, TTL) | ~$0 |
 | Embeddings | Modal (sentence-transformers) | Free ($30/mo credit) |
