@@ -552,7 +552,13 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
         async for chunk in bootstrap.run(
             msg, session_id, history, images=images,
             display_query=raw_msg, assistant_prefix=tool_marker, provider=body.get("model") or "auto",
+            use_tools=True,
         ):
+            if isinstance(chunk, dict):
+                yield f"data: {json.dumps(chunk)}\n\n"
+                db = await get_store()
+                await db.save_agent_event(session_id, chunk["tool"]["kind"], f"ok:{chunk['tool']['label']}")
+                continue
             reply_parts.append(chunk)
             yield f"data: {json.dumps({'chunk': chunk})}\n\n"
 

@@ -6,6 +6,7 @@ from fastapi.responses import StreamingResponse
 from agents.cowork_agent import NEEDS_APPROVAL, CoworkAgent, run_approved
 from gateway.auth import require_account
 from pipeline.mcp_tools import MCPToolset
+from tau.tau_engine import TAUEngine
 
 router = APIRouter(prefix="/cowork")
 
@@ -18,6 +19,7 @@ async def run(request: Request, account: dict = Depends(require_account)):
         raise HTTPException(400, "message required")
     mcp = await MCPToolset.for_account(account["account_id"])
     agent = CoworkAgent(account["account_id"], provider=body.get("model") or "auto", mcp=mcp)
+    agent.user_context = await TAUEngine().owner_context()
 
     async def stream():
         try:

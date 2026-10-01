@@ -7,6 +7,7 @@ from agents.finance_agent import FINANCE_SERVER, FinanceAgent
 from gateway.auth import require_account
 from pipeline.mcp_tools import MCPToolset
 from storage.neon_store import get_store
+from tau.tau_engine import TAUEngine
 from tools.mcp_client import MCPClient
 
 router = APIRouter(prefix="/finance")
@@ -59,6 +60,7 @@ async def run(request: Request, account: dict = Depends(require_account)):
     if not toolset:
         raise HTTPException(400, "Connect C-Lab first")
     agent = FinanceAgent(provider=body.get("model") or "auto", mcp=toolset)
+    agent.user_context = await TAUEngine().owner_context()
 
     async def stream():
         if toolset.errors:

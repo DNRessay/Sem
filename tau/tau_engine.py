@@ -36,6 +36,16 @@ class TAUEngine:
         self.cache.set(session_id, ctx)
         return ctx
 
+    async def owner_context(self) -> str:
+        """The owner's saved profile for the tool agents (Code, Co-work, …),
+        so they know who they're working for."""
+        try:
+            db = await get_store()
+            profile = await db.get_user_model("owner") or {}
+        except Exception:  # no profile is better than a failed agent run
+            return ""
+        return self._build_context(profile, profile.get("ocean") or {}) if profile else ""
+
     def _build_context(self, user_model: dict, ocean: dict) -> str:
         parts = ["You are SEMBLANCE. You know this user well. Use everything below "
                  "without asking the user to repeat it."]

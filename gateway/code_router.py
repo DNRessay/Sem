@@ -8,6 +8,7 @@ from gateway.auth import require_account
 from pipeline.code_tasks import EVERY_SECONDS, connector_token, open_pr, valid_target
 from pipeline.mcp_tools import MCPToolset
 from storage.neon_store import get_store
+from tau.tau_engine import TAUEngine
 from tools.code_workspace import CodeWorkspace
 
 router = APIRouter(prefix="/code")
@@ -41,6 +42,7 @@ async def run(request: Request, account: dict = Depends(require_account)):
     mcp = await MCPToolset.for_account(account["account_id"])
     token = await connector_token(account["account_id"], ws.provider)
     agent = CodeAgent(ws, mode=body.get("mode") or "act", provider=body.get("model") or "auto", mcp=mcp, pr_token=token)
+    agent.user_context = await TAUEngine().owner_context()
 
     async def stream():
         try:

@@ -27,3 +27,6 @@ class RepoTool:
 
     async def grep(self, provider: str, repo: str, term: str) -> dict:
         return await self._call("grep", provider=provider, repo=repo, term=term)
+
+    async def list_dir(self, provider: str, repo: str, path: str = "") -> dict:
+        return await self._call("list_dir", provider=provider, repo=repo, path=path)

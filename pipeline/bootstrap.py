@@ -1,12 +1,15 @@
+import json
+import time
 from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator
 
+from agents.tool_loop import preview
 from cache.cache_ctrl import CacheController
 from cache.conv_cache import ConvCache
 from cache.sys_cache import SysCache
 from config import settings
 from memory.sem_retrieval import SEMRetrieval
-from pipeline import llm_providers
+from pipeline import chat_tools, llm_providers
 from pipeline.ctx_assembly import CTXAssembly
 from pipeline.ctx_pressure import CTXPressure
 from pipeline.query_engine import QueryEngine, RateLimitError
@@ -32,6 +35,9 @@ _MAX_HISTORY_CHARS = 3_000
 # injected for whatever matched this turn, same ITPM-budget reasoning.
 _MAX_SKILL_CONTENT_CHARS = 3_000
 
+# Tool calls per chat reply before the model must answer with what it has.
+_MAX_TOOL_STEPS = 5
+
 
 class Bootstrap:
     """
@@ -56,7 +62,8 @@ class Bootstrap:
     async def run(
         self, query: str, session_id: str, history: list, images: list | None = None,
         display_query: str | None = None, assistant_prefix: str = "", provider: str = "auto",
-    ) -> AsyncIterator[str]:
+        use_tools: bool = False,
+    ) -> AsyncIterator[str | dict]:
         """`query` is what actually reaches the model — it may have
         attachments or fetched/searched web content folded into it.
         `display_query` (defaults to `query` when omitted) is what gets
@@ -66,7 +73,9 @@ class Bootstrap:
         displayed as if the user had typed it. `assistant_prefix` is
         prepended only to the *persisted* assistant turn (not the streamed
         output) — used to carry a compact marker of which tool ran, so a
-        reloaded session can still show it."""
+        reloaded session can still show it. With `use_tools` the model can
+        call chat_tools itself; each call is yielded as a {"tool": ...} dict
+        between the text chunks."""
         save_query = display_query if display_query is not None else query
         # Step 2 - CTX assembly
         ctx = self.sys_cache.read("system_prompt") or self.ctx_assembly.load_hierarchy()
@@ -105,9 +114,16 @@ class Bootstrap:
             messages.append({"role": "user", "content": query})
             model = settings.GROQ_MODEL
 
-        reply_parts = []
+        reply_parts, tool_marker = [], None
         try:
-            if provider != "groq" and (provider in llm_providers.PROVIDERS or provider.startswith(llm_providers.HF_PREFIX)):
+            if use_tools and not images:
+                async for piece in self._tool_reply(messages, session_id, provider):
+                    if isinstance(piece, str):
+                        reply_parts.append(piece)
+                    elif not assistant_prefix:
+                        tool_marker = piece["tool"]
+                    yield piece
+            elif provider != "groq" and (provider in llm_providers.PROVIDERS or provider.startswith(llm_providers.HF_PREFIX)):
                 # A model picked explicitly in the UI (Gemini, Claude, GPT,
                 # Qwen, ...) answers in one piece; "auto" keeps the streamed
                 # Groq path with its own Bonsai/Cohere overflow.
@@ -143,6 +159,9 @@ class Bootstrap:
             reply_parts.append(error_msg)
             yield error_msg
         reply = "".join(reply_parts)
+        if tool_marker:
+            # Same marker shape the router writes for its own tool runs, so a reloaded chat still shows the chip.
+            assistant_prefix = f"[[SEMBLANCE_TOOL:{json.dumps({'kind': tool_marker['kind'], 'label': tool_marker['label']})}]]\n"
 
         db = await get_store()
         await db.save_turn(session_id, "user", save_query)
@@ -171,6 +190,34 @@ class Bootstrap:
         if reply and not assistant_prefix:
             reply_embedding = await embed_text(reply)
             await db.save_memory(session_id, reply, embedding=reply_embedding)
+
+    async def _tool_reply(self, messages: list[dict], session_id: str, provider: str):
+        tools, active = await chat_tools.available(session_id)
+        deadline = time.monotonic() + 240
+        used = []
+        for step in range(_MAX_TOOL_STEPS + 1):
+            result = await llm_providers.complete(
+                provider, messages, tools if step < _MAX_TOOL_STEPS else None, max_tokens=4096, deadline=deadline,
+            )
+            if "error" in result:
+                raise RuntimeError(result["error"])
+            calls = result.get("tool_calls") or []
+            if not calls:
+                yield result.get("content") or ""
+                return
+            messages.append({**result, "role": "assistant", "content": result.get("content") or "", "tool_calls": calls})
+            for call in calls:
+                fn = call.get("function") or {}
+                name = fn.get("name", "")
+                try:
+                    args = json.loads(fn.get("arguments") or "{}")
+                except json.JSONDecodeError:
+                    args = {}
+                output = await chat_tools.run(name, args if isinstance(args, dict) else {}, session_id, active)
+                messages.append(chat_tools.as_message(call.get("id"), output))
+                used.append(f"$ {chat_tools.label(name, args)}\n{preview(output)}")
+                yield {"tool": {"kind": chat_tools.KIND.get(name, "tool"), "label": chat_tools.label(name, args),
+                                "detail": "\n\n".join(used)[-6000:]}}
 
     def _rate_limit_message(self, retry_after: float | None) -> str:
         """Groq's own wording ranges from "13.86s" (a per-minute window)

@@ -41,7 +41,7 @@ class ToolLoopAgent:
     extra_events() adds (images, approval requests)."""
 
     def __init__(self, provider: str = "auto", max_steps: int = 30, deadline_seconds: float = 780,
-                 mcp=None, allow_approvals: bool = False):
+                 mcp=None, allow_approvals: bool = False, user_context: str = ""):
         self.provider = provider
         self.max_steps = max_steps
         self.deadline = time.monotonic() + deadline_seconds
@@ -50,6 +50,7 @@ class ToolLoopAgent:
         # be shown (Co-work), and their calls are queued, not run.
         self.mcp = mcp
         self.allow_approvals = allow_approvals
+        self.user_context = user_context  # the owner's profile (TAUEngine.owner_context)
 
     def system_prompt(self) -> str:
         raise NotImplementedError
@@ -71,7 +72,11 @@ class ToolLoopAgent:
         return result
 
     def _messages(self, task: str, history: list[dict]) -> list[dict]:
-        msgs = [{"role": "system", "content": self.system_prompt()}]
+        system = self.system_prompt()
+        if self.user_context:
+            system += "\n\nWho you're working for (the owner of SEMBLANCE):\n" + self.user_context.replace(
+                "You are SEMBLANCE. ", "")
+        msgs = [{"role": "system", "content": system}]
         for h in history[-20:]:
             if h.get("role") in ("user", "assistant") and isinstance(h.get("content"), str) and h["content"]:
                 msgs.append({"role": h["role"], "content": h["content"][:6000]})
