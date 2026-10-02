@@ -20,13 +20,14 @@ _DENIED = {
     "GetCredentialsForIdentity", "GetSessionToken", "GetFederationToken", "GetAuthorizationToken",
     "GetPasswordData", "GetQueueAttributes", "GetLoginProfile", "GetAccessKeyLastUsed",
 }
-_REDACT_KEYS = {"Environment", "Variables", "SecretString", "Password", "AccessKeyId", "SecretAccessKey", "SessionToken"}
+_REDACT_KEYS = {"environment", "variables", "secretstring", "secretbinary", "password", "accesskeyid", "secretaccesskey",
+                "sessiontoken", "secrets"}  # matched case-insensitively (ECS uses lower-case "environment")
 _MAX_OUTPUT = 8000
 
 
 def _redact(value):
     if isinstance(value, dict):
-        return {k: ("[redacted]" if k in _REDACT_KEYS else _redact(v)) for k, v in value.items()}
+        return {k: ("[redacted]" if str(k).lower() in _REDACT_KEYS else _redact(v)) for k, v in value.items()}
     if isinstance(value, list):
         return [_redact(v) for v in value]
     return value

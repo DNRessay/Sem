@@ -110,6 +110,10 @@ jobs:
           WHATSAPP_VERIFY_TOKEN: ${{ secrets.WHATSAPP_VERIFY_TOKEN }}
           GITHUB_WEBHOOK_SECRET: ${{ secrets.GH_WEBHOOK_SECRET }}
           OPENCLAW_URL: ${{ secrets.OPENCLAW_URL }}
+          OPENCLAW_WEBHOOK_SECRET: ${{ secrets.OPENCLAW_WEBHOOK_SECRET }}
+          WHATSAPP_APP_SECRET: ${{ secrets.WHATSAPP_APP_SECRET }}
+          RESET_EMAILS: ${{ secrets.RESET_EMAILS }}
+          SES_FROM_EMAIL: ${{ secrets.SES_FROM_EMAIL }}
           MCP_SERVERS: ${{ secrets.MCP_SERVERS }}
           # Secret name can't start with GITHUB_ — GitHub Actions reserves
           # that prefix for its own built-in secrets and refuses to save one.
@@ -156,6 +160,10 @@ jobs:
           whatsapp_verify_token=$(printf '%s' "$WHATSAPP_VERIFY_TOKEN" | tr -d '\r\n')
           github_webhook_secret=$(printf '%s' "$GITHUB_WEBHOOK_SECRET" | tr -d '\r\n')
           openclaw_url=$(printf '%s' "$OPENCLAW_URL" | tr -d '\r\n')
+          openclaw_webhook_secret=$(printf '%s' "$OPENCLAW_WEBHOOK_SECRET" | tr -d '\r\n')
+          whatsapp_app_secret=$(printf '%s' "$WHATSAPP_APP_SECRET" | tr -d '\r\n')
+          reset_emails=$(printf '%s' "$RESET_EMAILS" | tr -d '\r\n ' | tr ',' ';')
+          ses_from_email=$(printf '%s' "$SES_FROM_EMAIL" | tr -d '\r\n')
           mcp_servers=$(printf '%s' "$MCP_SERVERS" | tr -d '\r\n')
           github_oauth_client_id=$(printf '%s' "$GH_OAUTH_CLIENT_ID" | tr -d '\r\n')
           github_oauth_client_secret=$(printf '%s' "$GH_OAUTH_CLIENT_SECRET" | tr -d '\r\n')
@@ -213,6 +221,10 @@ jobs:
           [ -n "$whatsapp_verify_token" ] && params+=("WhatsappVerifyToken=${whatsapp_verify_token}")
           [ -n "$github_webhook_secret" ] && params+=("GithubWebhookSecret=${github_webhook_secret}")
           [ -n "$openclaw_url" ] && params+=("OpenclawUrl=${openclaw_url}")
+          [ -n "$openclaw_webhook_secret" ] && params+=("OpenclawWebhookSecret=${openclaw_webhook_secret}")
+          [ -n "$whatsapp_app_secret" ] && params+=("WhatsappAppSecret=${whatsapp_app_secret}")
+          [ -n "$reset_emails" ] && params+=("ResetEmails=${reset_emails}")
+          [ -n "$ses_from_email" ] && params+=("SesFromEmail=${ses_from_email}")
           [ -n "$mcp_servers" ] && params+=("McpServers=${mcp_servers}")
           [ -n "$github_oauth_client_id" ] && params+=("GithubClientId=${github_oauth_client_id}")
           [ -n "$github_oauth_client_secret" ] && params+=("GithubClientSecret=${github_oauth_client_secret}")

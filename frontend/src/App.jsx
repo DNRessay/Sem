@@ -9,7 +9,7 @@ import CoworkPage from "./components/CoworkPage";
 import DesignPage from "./components/DesignPage";
 import SettingsPage from "./components/SettingsPage";
 import FinancePage from "./components/FinancePage";
-import Login from "./components/Login";
+import Login, { resetTokenFromUrl } from "./components/Login";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { turnsToHistory } from "./utils/toolMarker";
 import useAgentFeed from "./hooks/useAgentFeed";
@@ -143,7 +143,8 @@ export default function App() {
         if (id === sessionIdRef.current) startNewChat();
     };
 
-    if (!token) {
+    // A reset link opens the reset screen even on a device that's still logged in.
+    if (!token || resetTokenFromUrl()) {
         return (
             <div className="app-shell" style={{ display: "flex", flexDirection: "column", background: "var(--bg)" }}>
                 <Login onLoggedIn={handleLoggedIn} />

@@ -1,3 +1,4 @@
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -5,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from cache.sys_cache import SysCache
+from config import settings
 from gateway.code_router import router as code_router
 from gateway.compact_router import router as compact_router
 from gateway.connectors import router as connectors_router
@@ -15,6 +17,7 @@ from gateway.google_oauth import router as google_oauth_router
 from gateway.mcp_router import router as mcp_router
 from gateway.media_router import router as media_router
 from gateway.openai_compat import router as openai_router
+from gateway.reset_router import router as reset_router
 from gateway.router import router
 from gateway.runs_router import router as runs_router
 from gateway.settings_router import router as settings_router
@@ -29,6 +32,12 @@ sys_cache = SysCache()
 # the equivalent "tick" is triggered on a schedule instead — see tick_handler.py
 # and the EventBridge rule in template.yaml.
 _IS_LAMBDA = bool(os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
+
+# SECRET_KEY signs every login token: with the default anyone could mint their own, so refuse to start.
+if _IS_LAMBDA and settings.SECRET_KEY in ("", "change-me"):
+    raise RuntimeError("SECRET_KEY is unset: set the SEMBLANCE_SECRET_KEY GitHub secret (32+ random characters)")
+if _IS_LAMBDA and len(settings.SECRET_KEY) < 32:
+    logging.warning("SECRET_KEY is shorter than 32 characters; rotate SEMBLANCE_SECRET_KEY to a longer random value")
 
 
 @asynccontextmanager
@@ -83,3 +92,4 @@ app.include_router(finance_router)
 app.include_router(compact_router)
 app.include_router(openai_router)
 app.include_router(runs_router)
+app.include_router(reset_router)

@@ -3,6 +3,8 @@ from html.parser import HTMLParser
 
 import httpx
 
+from tools.web.url_guard import BlockedURL, safe_get
+
 _SKIP_TAGS = {"script", "style", "noscript", "svg"}
 
 
@@ -35,8 +37,10 @@ class FetchTool:
         if not url:
             return {"error": "No URL provided"}
         try:
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-                r = await client.get(url, headers={"User-Agent": "Semblance/1.0"})
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                r = await safe_get(client, url, headers={"User-Agent": "Semblance/1.0"})
+        except BlockedURL as e:
+            return {"error": f"Not fetched: {e}", "url": url}
         except Exception as e:
             return {"error": str(e), "url": url}
 

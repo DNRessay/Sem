@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 
 from config import settings
+from gateway.auth import secret_matches
 from pipeline import activity
 from pipeline.bootstrap import Bootstrap
 from tau.tau_engine import TAUEngine
@@ -23,12 +24,16 @@ async def openclaw_inbound(request: Request):
     messages via WhatsApp, Telegram, Slack etc. Requires a self-hosted OpenClaw
     gateway (OPENCLAW_URL) — not part of the core deploy, disabled unless set.
     """
-    if not settings.OPENCLAW_URL:
-        raise HTTPException(503, "OpenClaw integration not configured (OPENCLAW_URL unset)")
+    if not settings.OPENCLAW_URL or not settings.OPENCLAW_WEBHOOK_SECRET:
+        raise HTTPException(503, "OpenClaw integration not configured (OPENCLAW_URL / OPENCLAW_WEBHOOK_SECRET unset)")
+    given = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    if not secret_matches(given, settings.OPENCLAW_WEBHOOK_SECRET):
+        raise HTTPException(401, "Bad token")
     payload = await request.json()
     ctx = await _bridge.webhook_receive(payload)
 
-    session_id = ctx["session_id"]
+    # Kept apart from the web app's sessions, so a bridge message can never land in (or read) one of those.
+    session_id = f"openclaw:{ctx['session_id']}"[:120]
     message = ctx["message"]
     channel = ctx["channel"]
 
@@ -70,11 +75,23 @@ async def whatsapp_inbound(request: Request):
     tools.misc.whatsapp_tool.WhatsAppTool already uses for outbound
     sends). Session is keyed "whatsapp:<phone>" so a WhatsApp
     conversation and any web-chat session for the same person never
-    collide. Only plain text messages are handled for now — media/
+    collide. Only messages Meta signed (WHATSAPP_APP_SECRET) from the owner's
+    own number (OWNER_WHATSAPP_NUMBER) get an answer; anyone else is ignored.
+    Only plain text messages are handled for now — media/
     location/interactive message types are silently skipped rather than
     erroring, since WhatsApp retries the whole delivery on anything but
     a 200. Always returns 200 for that reason."""
-    payload = await request.json()
+    body = await request.body()
+    if not settings.WHATSAPP_APP_SECRET:
+        return {"status": "ignored", "reason": "WHATSAPP_APP_SECRET unset"}  # 200, or Meta retries forever
+    want = "sha256=" + hmac.new(settings.WHATSAPP_APP_SECRET.encode(), body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(want, request.headers.get("x-hub-signature-256", "")):
+        raise HTTPException(401, "Bad signature")
+    owner = "".join(ch for ch in settings.OWNER_WHATSAPP_NUMBER if ch.isdigit())
+    try:
+        payload = json.loads(body or b"{}")
+    except json.JSONDecodeError:
+        return {"status": "ignored"}
     for entry in payload.get("entry", []):
         for change in entry.get("changes", []):
             value = change.get("value", {})
@@ -83,8 +100,8 @@ async def whatsapp_inbound(request: Request):
                     continue
                 phone = msg.get("from", "")
                 text = (msg.get("text") or {}).get("body", "")
-                if not phone or not text:
-                    continue
+                if not phone or not text or not owner or phone != owner:
+                    continue  # SEMBLANCE only talks to its owner
 
                 session_id = f"whatsapp:{phone}"
                 tau_ctx = await _tau.observe_and_inject(session_id, text, [])
@@ -107,7 +124,7 @@ GITHUB_LOG = "github"
 
 def _github_signed(body: bytes, header: str) -> bool:
     if not settings.GITHUB_WEBHOOK_SECRET:
-        return True
+        return False
     want = "sha256=" + hmac.new(settings.GITHUB_WEBHOOK_SECRET.encode(), body, hashlib.sha256).hexdigest()
     return hmac.compare_digest(want, header or "")
 
@@ -147,7 +164,7 @@ async def github_webhook(request: Request):
     runs, issues, pull requests, pushes). Failed CI runs and new issues are
     delivered like reminders (app chat + WhatsApp when set); every event is
     written to the "github" activity log. Set GITHUB_WEBHOOK_SECRET to the
-    webhook's secret and unsigned calls are refused."""
+    webhook's secret; until it's set every call is refused."""
     body = await request.body()
     if not _github_signed(body, request.headers.get("x-hub-signature-256", "")):
         raise HTTPException(401, "Bad signature")

@@ -60,7 +60,7 @@ see `docs/AWS_DEPLOYMENT.md` for why). `main.py`'s lifespan detects
 |---|---|---|
 | KAIROS daemon (`start()`) | `agents/kairos.py` | The infinite loop specifically — `run_once()` (used by Medium) is the Light/Medium-compatible half of this file. |
 | Proactive agent | `agents/proactive.py` | Only meaningful driven by something always-on. |
-| UDS inbox | `agents/uds_inbox.py` | Opens a Unix domain socket server — needs a live listener. |
+| UDS inbox | not written yet | Would open a Unix domain socket server — needs a live listener. |
 | Bridge agent | `agents/bridge.py` | Holds open a WebSocket/polling connection for remote control. |
 | Swarm workers | `agents/swarm.py` | Light if each run is spun up/torn down per request (current assumption); Heavy only if workers must persist across turns. |
 

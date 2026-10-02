@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from agents.research_agent import ResearchAgent
 from config import settings
-from gateway.auth import issue_token, require_account, verify_passphrase
+from gateway import ratelimit
+from gateway.auth import issue_token, require_account, secret_matches, verify_passphrase
 from pipeline import llm_providers
 from pipeline.agent_intent import (
     detect_explore_intent,
@@ -80,10 +81,13 @@ _tau = TAUEngine()
 
 
 def _get_trust(request: Request) -> str:
-    key = request.headers.get("x-api-key", "")
-    if key == settings.SECRET_KEY:
+    if secret_matches(request.headers.get("x-api-key", ""), settings.SECRET_KEY):
         return "BYPASS"
     return settings.TRUST_MODE
+
+
+# Wrong passphrases allowed before login locks: per caller, and for everyone at once (a spread-out guess).
+LOGIN_FAILS_PER_IP, LOGIN_FAILS_TOTAL, LOGIN_WINDOW_SECONDS = 5, 30, 15 * 60
 
 
 @router.post("/auth/login")
@@ -92,13 +96,19 @@ async def login(request: Request):
     passphrase = body.get("passphrase", "")
     if not passphrase:
         raise HTTPException(400, "passphrase required")
+    ip = ratelimit.client_ip(request)
+    if ratelimit.blocked("login", ip, LOGIN_FAILS_PER_IP) or ratelimit.blocked("login", "*", LOGIN_FAILS_TOTAL):
+        raise HTTPException(429, "Too many wrong passphrases — wait 15 minutes, or reset it by email")
 
     db = await get_store()
     account = await db.get_account("owner")
     if not account or not verify_passphrase(passphrase, account["passphrase_hash"]):
+        ratelimit.record("login", ip, LOGIN_WINDOW_SECONDS)
+        ratelimit.record("login", "*", LOGIN_WINDOW_SECONDS)
         raise HTTPException(401, "Incorrect passphrase")
 
-    return {"token": issue_token(account["id"], account["role"])}
+    ratelimit.clear("login", ip)
+    return {"token": issue_token(account["id"], account["role"], version=account.get("token_version") or 0)}
 
 
 def _is_image(attachment: dict) -> bool:

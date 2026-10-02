@@ -157,6 +157,8 @@ class NeonStore:
                     created_at BIGINT NOT NULL
                 )
             """)
+            # Bumped by a passphrase change; tokens carry it, so older ones stop working (gateway/auth.py).
+            await conn.execute("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0")
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS connectors (
                     provider TEXT PRIMARY KEY,
@@ -542,7 +544,7 @@ class NeonStore:
     async def get_account(self, account_id: str) -> dict | None:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT id, passphrase_hash, role FROM accounts WHERE id=$1", account_id,
+                "SELECT id, passphrase_hash, role, token_version FROM accounts WHERE id=$1", account_id,
             )
             return dict(row) if row else None
 
@@ -553,6 +555,18 @@ class NeonStore:
                    VALUES ($1, $2, $3, $4)
                    ON CONFLICT (id) DO UPDATE SET passphrase_hash=$2, role=$3""",
                 account_id, passphrase_hash, role, int(time.time()),
+            )
+
+    async def get_token_version(self, account_id: str) -> int:
+        async with self._pool.acquire() as conn:
+            return await conn.fetchval("SELECT token_version FROM accounts WHERE id=$1", account_id) or 0
+
+    async def set_passphrase(self, account_id: str, passphrase_hash: str) -> int:
+        """New passphrase hash; bumps token_version so every existing token and MCP key is signed out."""
+        async with self._pool.acquire() as conn:
+            return await conn.fetchval(
+                "UPDATE accounts SET passphrase_hash=$2, token_version=token_version+1 WHERE id=$1 RETURNING token_version",
+                account_id, passphrase_hash,
             )
 
     async def get_connector(self, account_id: str, provider: str) -> dict | None:

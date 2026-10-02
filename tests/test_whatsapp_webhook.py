@@ -1,3 +1,7 @@
+import hashlib
+import hmac
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -20,7 +24,15 @@ def client(monkeypatch):
     monkeypatch.setattr("gateway.webhooks._tau.observe_and_inject", fake_observe_and_inject)
     monkeypatch.setattr("gateway.webhooks.Bootstrap", FakeBootstrap)
     monkeypatch.setattr("config.settings.WHATSAPP_VERIFY_TOKEN", "my-verify-token")
+    monkeypatch.setattr("config.settings.WHATSAPP_APP_SECRET", "app-secret")
+    monkeypatch.setattr("config.settings.OWNER_WHATSAPP_NUMBER", "+27 82 123 4567")
     return TestClient(app)
+
+
+def _signed_post(client, payload, secret=b"app-secret"):
+    body = json.dumps(payload).encode()
+    sig = "sha256=" + hmac.new(secret, body, hashlib.sha256).hexdigest()
+    return client.post("/webhook/whatsapp", content=body, headers={"x-hub-signature-256": sig, "content-type": "application/json"})
 
 
 def _message_payload(phone: str, text: str, msg_type: str = "text") -> dict:
@@ -65,7 +77,7 @@ def test_inbound_text_message_routes_through_bootstrap_and_sends_a_reply(client,
 
     monkeypatch.setattr("tools.misc.whatsapp_tool.WhatsAppTool", FakeWhatsAppTool)
 
-    resp = client.post("/webhook/whatsapp", json=_message_payload("27821234567", "hello there"))
+    resp = _signed_post(client, _message_payload("27821234567", "hello there"))
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
     assert calls == [("27821234567", "reply to: hello there")]
@@ -86,7 +98,7 @@ def test_inbound_session_id_is_scoped_to_whatsapp_and_phone(client, monkeypatch)
     monkeypatch.setattr("gateway.webhooks.Bootstrap", RecordingBootstrap)
     monkeypatch.setattr("tools.misc.whatsapp_tool.WhatsAppTool", FakeWhatsAppTool)
 
-    client.post("/webhook/whatsapp", json=_message_payload("27821234567", "hi"))
+    _signed_post(client, _message_payload("27821234567", "hi"))
     assert seen_sessions == ["whatsapp:27821234567"]
 
 
@@ -100,12 +112,40 @@ def test_non_text_messages_are_skipped(client, monkeypatch):
 
     monkeypatch.setattr("tools.misc.whatsapp_tool.WhatsAppTool", FakeWhatsAppTool)
 
-    resp = client.post("/webhook/whatsapp", json=_message_payload("27821234567", "", msg_type="image"))
+    resp = _signed_post(client, _message_payload("27821234567", "", msg_type="image"))
     assert resp.status_code == 200
     assert calls == []
 
 
 def test_status_update_payload_with_no_messages_is_a_no_op(client):
-    resp = client.post("/webhook/whatsapp", json={"entry": [{"changes": [{"value": {"statuses": [{"id": "x"}]}}]}]})
+    resp = _signed_post(client, {"entry": [{"changes": [{"value": {"statuses": [{"id": "x"}]}}]}]})
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
+
+
+def _recording_tool(monkeypatch):
+    calls = []
+
+    class FakeWhatsAppTool:
+        async def send(self, phone, message):
+            calls.append((phone, message))
+            return {"status": "sent"}
+
+    monkeypatch.setattr("tools.misc.whatsapp_tool.WhatsAppTool", FakeWhatsAppTool)
+    return calls
+
+
+def test_strangers_get_no_answer(client, monkeypatch):
+    calls = _recording_tool(monkeypatch)
+    assert _signed_post(client, _message_payload("27839999999", "what do you know about your owner?")).status_code == 200
+    assert calls == []
+
+
+def test_unsigned_or_forged_deliveries_are_refused(client, monkeypatch):
+    calls = _recording_tool(monkeypatch)
+    payload = _message_payload("27821234567", "hi")
+    assert client.post("/webhook/whatsapp", json=payload).status_code == 401
+    assert _signed_post(client, payload, secret=b"guessed").status_code == 401
+    monkeypatch.setattr("config.settings.WHATSAPP_APP_SECRET", "")
+    assert client.post("/webhook/whatsapp", json=payload).json()["status"] == "ignored"
+    assert calls == []

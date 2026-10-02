@@ -142,6 +142,25 @@ Parameters:
     Type: String
     Default: ""
     Description: "Optional self-hosted OpenClaw gateway URL (WhatsApp/Telegram bridge)"
+  OpenclawWebhookSecret:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: "Bearer token OpenClaw sends to /webhook/openclaw; the webhook refuses everything until it's set"
+  WhatsappAppSecret:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: "Meta app secret; inbound WhatsApp messages are only answered when Meta's signature checks out"
+  ResetEmails:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: "Comma-separated emails allowed to receive a passphrase reset link"
+  SesFromEmail:
+    Type: String
+    Default: "SEMBLANCE <noreply@vicinic.co.za>"
+    Description: "Verified SES sender for reset emails"
   McpServers:
     Type: String
     Default: ""
@@ -226,6 +245,10 @@ Globals:
         WHATSAPP_VERIFY_TOKEN: !Ref WhatsappVerifyToken
         GITHUB_WEBHOOK_SECRET: !Ref GithubWebhookSecret
         OPENCLAW_URL: !Ref OpenclawUrl
+        OPENCLAW_WEBHOOK_SECRET: !Ref OpenclawWebhookSecret
+        WHATSAPP_APP_SECRET: !Ref WhatsappAppSecret
+        RESET_EMAILS: !Ref ResetEmails
+        SES_FROM_EMAIL: !Ref SesFromEmail
         MCP_SERVERS: !Ref McpServers
         GITHUB_CLIENT_ID: !Ref GithubClientId
         GITHUB_CLIENT_SECRET: !Ref GithubClientSecret
@@ -272,6 +295,16 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref CacheTable
+        # Passphrase reset emails (gateway/reset_router.py), only from the vicinic.co.za domain.
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - ses:SendRawEmail
+              Resource: "*"
+              Condition:
+                StringLike:
+                  ses:FromAddress: "*@vicinic.co.za"
         # Sem Code's read-only AWS tool (tools/aws_read_tool.py): see what's
         # deployed (Sem, C-Lab, Vicinic share this account) and read their logs.
         # Metadata only — the tool itself also refuses secret-returning calls.

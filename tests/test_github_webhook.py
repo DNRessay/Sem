@@ -21,13 +21,15 @@ def calls(monkeypatch):
 
     monkeypatch.setattr("gateway.webhooks.activity.log", fake_log)
     monkeypatch.setattr("agents.kairos.deliver", fake_deliver)
-    monkeypatch.setattr("config.settings.GITHUB_WEBHOOK_SECRET", "")
+    monkeypatch.setattr("config.settings.GITHUB_WEBHOOK_SECRET", "s3")
     return seen
 
 
 def _post(event, payload, headers=None):
-    return TestClient(app).post("/webhook/github", content=json.dumps(payload),
-                                headers={"x-github-event": event, **(headers or {})})
+    body = json.dumps(payload)
+    sig = "sha256=" + hmac.new(b"s3", body.encode(), hashlib.sha256).hexdigest()
+    return TestClient(app).post("/webhook/github", content=body,
+                                headers={"x-github-event": event, "x-hub-signature-256": sig, **(headers or {})})
 
 
 def test_failed_ci_run_is_delivered_and_logged(calls):
@@ -58,9 +60,8 @@ def test_passing_ci_is_not_delivered(calls):
     assert not calls["deliver"]
 
 
-def test_signature_is_checked_when_secret_set(calls, monkeypatch):
-    monkeypatch.setattr("config.settings.GITHUB_WEBHOOK_SECRET", "s3")
-    body = json.dumps({"zen": "hi"})
+def test_signature_is_required(calls, monkeypatch):
     assert _post("ping", {"zen": "hi"}, {"x-hub-signature-256": "sha256=bad"}).status_code == 401
-    sig = "sha256=" + hmac.new(b"s3", body.encode(), hashlib.sha256).hexdigest()
-    assert _post("ping", {"zen": "hi"}, {"x-hub-signature-256": sig}).json()["status"] == "ok"
+    assert _post("ping", {"zen": "hi"}).json()["status"] == "ok"
+    monkeypatch.setattr("config.settings.GITHUB_WEBHOOK_SECRET", "")
+    assert _post("ping", {"zen": "hi"}).status_code == 401  # no secret set: nothing gets in

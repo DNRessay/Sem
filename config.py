@@ -107,9 +107,13 @@ class Settings(BaseSettings):
     SERP_API_KEY: str = ""
     WHATSAPP_TOKEN: str = ""
     WHATSAPP_PHONE_ID: str = ""
-    GITHUB_WEBHOOK_SECRET: str = ""  # the repo webhook's secret; /webhook/github checks signatures when set
+    GITHUB_WEBHOOK_SECRET: str = ""  # the repo webhook's secret; /webhook/github refuses every call until it's set
     WHATSAPP_VERIFY_TOKEN: str = ""  # arbitrary string you also enter in the Meta App Dashboard webhook config
+    # Meta App Dashboard > App settings > Basic > App secret. Inbound WhatsApp messages are only answered when
+    # Meta's signature checks out with it, and only from OWNER_WHATSAPP_NUMBER.
+    WHATSAPP_APP_SECRET: str = ""
     OPENCLAW_URL: str = ""  # optional self-hosted WhatsApp/Telegram/Slack bridge
+    OPENCLAW_WEBHOOK_SECRET: str = ""  # bearer token OpenClaw must send to /webhook/openclaw
     # KAIROS (agents/kairos.py, every EventBridge tick): delivers due
     # reminders and a once-a-day morning brief (calendar + unread email +
     # today's reminders). Both always land in the app as a chat; set
@@ -139,7 +143,7 @@ class Settings(BaseSettings):
     AUTOMATION_MAX_STEPS: int = 20
     AUTOMATION_TIMEOUT_SECONDS: int = 600
 
-    SECRET_KEY: str = "change-me"
+    SECRET_KEY: str = "change-me"  # signs login tokens; the app won't start on Lambda without a real one
     TRUST_MODE: str = "AUTO"  # BYPASS | ALLOW_EDITS | AUTO
 
     # OAuth for the GitHub/GitLab connectors — lets "Connect GitHub" redirect
@@ -167,6 +171,13 @@ class Settings(BaseSettings):
     # inferred from the incoming request's Host header, to avoid depending on
     # proxy headers surviving the Lambda Web Adapter hop uncorrupted.
     PUBLIC_API_URL: str = ""
+
+    # Passphrase reset by email (gateway/reset_router.py). Only addresses in RESET_EMAILS (comma-separated,
+    # a GitHub secret) can get a link; mail goes through SES from a verified vicinic.co.za address.
+    RESET_EMAILS: str = ""
+    SES_FROM_EMAIL: str = "SEMBLANCE <noreply@vicinic.co.za>"
+    SES_REGION: str = "eu-west-1"
+    FRONTEND_URL: str = "https://semblance-773.pages.dev"
 
     model_config = SettingsConfigDict(env_file=".env")
 

@@ -6,6 +6,7 @@ import httpx
 
 from pipeline import llm_providers
 from tools.web.fetch_tool import _TextExtractor
+from tools.web.url_guard import BlockedURL, safe_get
 
 _KEY_PAGES = re.compile(r"about|service|product|pricing|price|menu|shop|store|contact|team|work|portfolio|offer", re.I)
 _MAX_PAGES = 5
@@ -64,9 +65,9 @@ def _internal_links(base: str, html: str) -> list[str]:
 
 async def _get(client: httpx.AsyncClient, url: str) -> str:
     try:
-        r = await client.get(url, headers={"User-Agent": "Mozilla/5.0 (Semblance site reader)"})
+        r = await safe_get(client, url, headers={"User-Agent": "Mozilla/5.0 (Semblance site reader)"})
         return r.text if r.status_code == 200 and "html" in r.headers.get("content-type", "") else ""
-    except httpx.HTTPError:
+    except (httpx.HTTPError, BlockedURL):
         return ""
 
 
@@ -76,7 +77,7 @@ async def learn_site(url: str, model: str = "auto") -> dict:
         return {"ok": False, "error": "url required"}
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
-    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=20) as client:
         home = await _get(client, url)
         if not home:
             return {"ok": False, "error": f"Couldn't read {url} — check the address is public"}

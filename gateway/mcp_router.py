@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse, Response
 
 from config import settings
 from gateway import mcp_server
-from gateway.auth import issue_token, require_account
+from gateway.auth import current_version, issue_token, require_account
 from storage.neon_store import get_store
 from tools.mcp_client import MCPClient
 
@@ -39,8 +39,9 @@ async def mcp_no_stream():
 @router.post("/key")
 async def mcp_key(account: dict = Depends(require_account)):
     """A long-lived key for MCP clients (login tokens expire after 30 days).
-    Rotating SECRET_KEY revokes every key at once."""
-    key = issue_token(account["account_id"], account["role"], ttl_seconds=MCP_KEY_TTL_SECONDS)
+    Changing the passphrase (or rotating SECRET_KEY) revokes every key at once."""
+    version = await current_version(account["account_id"]) or 0
+    key = issue_token(account["account_id"], account["role"], ttl_seconds=MCP_KEY_TTL_SECONDS, version=version)
     url = (settings.PUBLIC_API_URL or "<your API URL>").rstrip("/") + "/mcp"
     return {
         "key": key, "url": url, "expires_in_days": 365,

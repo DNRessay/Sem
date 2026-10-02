@@ -1,0 +1,9 @@
+# Cloudflare Pages response headers. The CSP only locks down framing, plugins and <base>; scripts still load
+# from the CDNs the avatar needs.
+/*
+  Content-Security-Policy: frame-ancestors 'none'; base-uri 'self'; object-src 'none'
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Permissions-Policy: camera=(), geolocation=(), microphone=(self)
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
