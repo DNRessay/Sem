@@ -40,14 +40,14 @@ def test_connect_checks_clab_and_saves_it(client):
     with respx.mock:
         respx.post(CLAB).mock(side_effect=fake_mcp_server(tools=CLAB_TOOLS))
         r = c.post("/finance/connect", json={"url": "https://clab.example/", "key": "clab_abc"})
-        assert r.json() == {"connected": True, "tools": ["overview"]}
+        assert r.json() == {"connected": True, "mode": "personal", "tools": ["overview"]}
         assert store.servers["clab"] == {"url": CLAB, "auth": "clab_abc", "require_approval": False}
         assert c.get("/finance/status").json()["connected"] is True
 
 
 def test_status_when_not_connected(client):
     c, _ = client
-    assert c.get("/finance/status").json() == {"connected": False}
+    assert c.get("/finance/status").json() == {"connected": False, "mode": "personal"}
     assert c.post("/finance/run", json={"message": "net worth?"}).status_code == 400
 
 
@@ -68,3 +68,30 @@ def test_run_uses_clab_tools(client):
     offered = {t["function"]["name"] for t in json.loads(llm.calls[0].request.content)["tools"]}
     assert offered == {"web_search", "fetch_url", "mcp__clab__overview", "handoff"}  # only C-Lab's MCP tools, not "other"
     assert any(json.loads(c.request.content).get("method") == "tools/call" for c in server.calls)
+
+
+COLU = "https://colu.example/mcp"
+COLU_TOOLS = [{"name": "companies", "description": "The group's companies", "inputSchema": {"type": "object"}}]
+
+
+def test_biz_mode_uses_colunimbus_only(client):
+    c, store = client
+    store.servers["clab"] = {"url": CLAB, "auth": "clab_abc", "require_approval": False}
+    assert c.get("/finance/status?mode=biz").json() == {"connected": False, "mode": "biz"}
+    assert c.post("/finance/run", json={"message": "P&L?", "mode": "biz"}).json()["detail"] == "Connect Colunimbus first"
+    call = {"id": "c1", "type": "function", "function": {"name": "mcp__colunimbus__companies", "arguments": "{}"}}
+    with respx.mock:
+        respx.post(COLU).mock(side_effect=fake_mcp_server(tools=COLU_TOOLS))
+        r = c.post("/finance/connect", json={"url": "https://colu.example", "key": "colu_abc", "mode": "biz"})
+        assert r.json() == {"connected": True, "mode": "biz", "tools": ["companies"]}
+        assert store.servers["colunimbus"]["url"] == COLU
+        llm = respx.post(GROQ).mock(side_effect=[
+            Response(200, json={"choices": [{"message": {"role": "assistant", "content": "", "tool_calls": [call]}}]}),
+            Response(200, json={"choices": [{"message": {"role": "assistant", "content": "Two companies."}}]}),
+        ])
+        r = c.post("/finance/run", json={"message": "how are the companies doing?", "mode": "biz"})
+    events = [json.loads(line[6:]) for line in r.text.split("\n") if line.startswith("data: {")]
+    assert events[-2] == {"type": "text", "text": "Two companies."}
+    first = json.loads(llm.calls[0].request.content)
+    assert {t["function"]["name"] for t in first["tools"]} == {"web_search", "fetch_url", "mcp__colunimbus__companies", "handoff"}
+    assert "Colunimbus" in first["messages"][0]["content"]

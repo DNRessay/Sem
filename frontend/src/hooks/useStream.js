@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef } from "react";
+import { runStream } from "../utils/runs";
 
 export function useStream(baseUrl = "", token = "", onUnauthorized) {
     const [chunks, setChunks] = useState([]);
@@ -29,76 +30,42 @@ export function useStream(baseUrl = "", token = "", onUnauthorized) {
         let suggestLocal = null;
 
         try {
-            const res = await fetch(`${baseUrl}/chat`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-                },
-                body: JSON.stringify({ message, session_id: sessionId, history, attachments, web_search_enabled: webSearchEnabled, model, research }),
+            const onEvent = (parsed) => {
+                if (parsed.usage) {
+                    setUsage(parsed.usage);
+                } else if (parsed.tool) {
+                    toolLocal = parsed.tool;
+                    setTool(parsed.tool);
+                    setStatus(null); // the search/fetch is done — the chip replaces the breadcrumb
+                } else if (parsed.suggest_model) {
+                    suggestLocal = parsed.suggest_model;
+                } else if (parsed.handoff) {
+                    handoffLocal = parsed.handoff;
+                } else if (parsed.title) {
+                    titleLocal = parsed.title;
+                } else if (parsed.status) {
+                    setStatus(parsed.status);
+                } else if (parsed.chunk) {
+                    full += parsed.chunk;
+                    setChunks(c => [...c, parsed.chunk]);
+                    setStatus(null);
+                } else if (parsed.type === "error" && parsed.text !== "Stopped.") {
+                    setError(parsed.text);
+                }
+            };
+            // runStream keeps the reply coming if the phone locks or switches apps mid-answer: the server
+            // finishes it and the missed part is fetched when the page is back (utils/runs.js).
+            const r = await runStream("/chat", {
+                headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+                body: { message, session_id: sessionId, history, attachments, web_search_enabled: webSearchEnabled, model, research },
                 signal: abortRef.current.signal,
+                onEvent,
             });
-
-            if (res.status === 401) {
+            if (r.status === 401) {
                 onUnauthorized?.();
                 throw new Error("Session expired — please log in again");
             }
-            if (!res.ok || !res.body) {
-                throw new Error(`Request failed: ${res.status}`);
-            }
-
-            const reader = res.body.getReader();
-            const decoder = new TextDecoder();
-            // A tool event's `detail` can carry many KB of fetched/searched
-            // text, easily spanning more than one network chunk — reading
-            // one chunk at a time and splitting it in isolation (the
-            // previous version) silently truncated/dropped any SSE line
-            // that landed across a chunk boundary. Buffering across reads
-            // and only processing complete lines (keeping the trailing
-            // partial one for the next read) is the standard fix.
-            let buffer = "";
-
-            const processLine = (line) => {
-                if (!line.startsWith("data: ")) return;
-                const data = line.slice(6);
-                if (data === "[DONE]") return;
-                try {
-                    const parsed = JSON.parse(data);
-                    if (parsed.usage) {
-                        setUsage(parsed.usage);
-                    } else if (parsed.tool) {
-                        toolLocal = parsed.tool;
-                        setTool(parsed.tool);
-                        setStatus(null); // the search/fetch is done — the chip replaces the breadcrumb
-                    } else if (parsed.suggest_model) {
-                        suggestLocal = parsed.suggest_model;
-                    } else if (parsed.handoff) {
-                        handoffLocal = parsed.handoff;
-                    } else if (parsed.title) {
-                        titleLocal = parsed.title;
-                    } else if (parsed.status) {
-                        setStatus(parsed.status);
-                    } else if (parsed.chunk) {
-                        full += parsed.chunk;
-                        setChunks(c => [...c, parsed.chunk]);
-                        setStatus(null);
-                    }
-                } catch {}
-            };
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split("\n");
-                buffer = lines.pop() ?? "";
-                lines.forEach(processLine);
-            }
-            // The stream can end with a complete-but-unterminated final line
-            // still sitting in the buffer (no trailing \n arrived before the
-            // connection closed) — without this, that last event is silently
-            // lost instead of processed.
-            if (buffer) processLine(buffer);
+            if (r.error) throw new Error(r.error);
         } catch (e) {
             if (e.name !== "AbortError") setError(e.message);
         } finally {

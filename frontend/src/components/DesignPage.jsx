@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import ModelPicker, { loadModel } from "./ModelPicker";
-import { readEvents } from "../utils/sse";
+import { runStream, useResumeRun } from "../utils/runs";
 import { copyToClipboard } from "../utils/clipboard";
 import { HeaderStatus } from "./StatusBar";
 import AgentFeedPanel from "./AgentFeedPanel";
@@ -316,24 +316,41 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
         setBusy("");
     };
 
+    // One ads run's events. Images aren't kept on the phone, so a resumed run replays from the start.
+    const applyEvent = (chatId, ev) => {
+        const set = v => updateChat(chatId, c => ({ ads: typeof v === "function" ? v(c.ads || []) : v }));
+        if (ev.type === "status") setBusy(ev.text);
+        else if (ev.type === "style") updateChat(chatId, () => ({ style: ev.text }));
+        else if (ev.type === "variants") {
+            set(ev.variants.map(v => ({ ...v, placementLabel: (PLACEMENTS.find(p => p[0] === v.placement) || [])[1] })));
+            setBusy("Making images…");
+        } else if (ev.type === "image") set(a => a.map((ad, i) => (i === ev.index ? { ...ad, image: { mime: ev.mime, base64: ev.base64 }, imageError: "" } : ad)));
+        else if (ev.type === "image_error") set(a => a.map((ad, i) => (i === ev.index ? { ...ad, imageError: ev.error } : ad)));
+        else if (ev.type === "error") setNotice(ev.text);
+    };
+    const finishAds = chatId => updateChat(chatId, c => ({
+        pendingRun: null,
+        ads: (c.ads || []).map(ad => (ad.image || ad.imageError ? ad : { ...ad, imageError: "Skipped (image limit reached) — tap New image later" })),
+    }));
+    useResumeRun(chat.id, chat.pendingRun, {
+        headers, apply: ev => applyEvent(chat.id, ev),
+        onStart: () => { setBusy("Picking your ads back up…"); updateChat(chat.id, () => ({ ads: [] })); },
+        done: () => { finishAds(chat.id); setBusy(""); },
+    });
+
     const create = async () => {
+        const chatId = chat.id;
         setBusy("Writing ads…"); setNotice(""); setAds([]);
         try {
-            const r = await fetch(`${API}/design/ads`, { method: "POST", headers, body: JSON.stringify({ brief, campaign, placements, count, model, references, chat_id: chat.id }) });
-            if (r.status === 401) { onUnauthorized(); return; }
-            if (!r.ok || !r.body) throw new Error((await r.json().catch(() => ({}))).detail || `Failed (${r.status})`);
-            await readEvents(r, (ev) => {
-                if (ev.type === "status") setBusy(ev.text);
-                else if (ev.type === "style") updateChat(chat.id, () => ({ style: ev.text }));
-                else if (ev.type === "variants") {
-                    setAds(ev.variants.map(v => ({ ...v, placementLabel: (PLACEMENTS.find(p => p[0] === v.placement) || [])[1] })));
-                    setBusy("Making images…");
-                } else if (ev.type === "image") setAds(a => a.map((ad, i) => (i === ev.index ? { ...ad, image: { mime: ev.mime, base64: ev.base64 } } : ad)));
-                else if (ev.type === "image_error") setAds(a => a.map((ad, i) => (i === ev.index ? { ...ad, imageError: ev.error } : ad)));
-                else if (ev.type === "error") setNotice(ev.text);
+            const r = await runStream("/design/ads", {
+                headers, body: { brief, campaign, placements, count, model, references, chat_id: chatId },
+                onEvent: ev => applyEvent(chatId, ev),
+                onRun: (id, seq) => seq === 0 && updateChat(chatId, () => ({ pendingRun: { id, seq: 0 } })),
             });
-            setAds(a => a.map(ad => (ad.image || ad.imageError ? ad : { ...ad, imageError: "Skipped (image limit reached) — tap New image later" })));
+            if (r.status === 401) { onUnauthorized(); return; }
+            if (r.error) throw new Error(r.error);
         } catch (e) { setNotice(e.message); }
+        finishAds(chatId);
         setBusy("");
     };
 

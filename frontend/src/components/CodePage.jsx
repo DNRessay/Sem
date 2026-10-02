@@ -4,7 +4,7 @@ import { TabWorking } from "./Working";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import ModelPicker, { loadModel } from "./ModelPicker";
-import { readEvents } from "../utils/sse";
+import { runStream, useResumeRun } from "../utils/runs";
 import { RepoPicker } from "./AttachMenu";
 import { AUTO_COMPACT_AT, ContextRing, compactItems, useContextBudget, ModeMenu, AssistantText, AttachedChips, QueuedMessages, turnReplies, useSendQueue, CLEAR_COMMAND, ChatMenu, ConnectorsSheet, HELP_COMMAND, NEW_COMMAND, PlusMenu, SuggestModel, errorClass, helpText, parseSlash, readTextFiles, withAttachments } from "./MessageKit";
 import { ApprovalCard } from "./CoworkPage";
@@ -325,6 +325,24 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
     const transcript = items.filter(i => i.kind === "user" || i.kind === "text")
         .map(i => ({ role: i.kind === "user" ? "user" : "assistant", text: i.text }));
 
+    const applyEvent = (chatId, ev, retry = "", runMode = "act") => {
+        const add = fn => updateChat(chatId, c => ({ items: fn(c.items) }));
+        if (ev.type === "usage") setTokens(ev.tokens);
+        else if (ev.type === "text") add(it => [...it, { kind: "text", text: ev.text, mode: runMode }]);
+        else if (ev.type === "tool") add(it => [...it, { kind: "tool", id: ev.id, name: ev.name, args: ev.args }]);
+        else if (ev.type === "result") add(it => it.map(i => (i.kind === "tool" && i.id === ev.id && i.ok === undefined ? { ...i, ok: ev.ok, output: ev.output } : i)));
+        else if (ev.type === "approval") add(it => [...it, { kind: "approval", id: ev.id, name: ev.name, args: ev.args, summary: ev.summary, state: "pending" }]);
+        else if (ev.type === "handoff") add(it => [...it, { kind: "handoff", tab: ev.tab, task: ev.task }]);
+        else if (ev.type === "error") add(it => [...it, { kind: "error", text: ev.text, suggest: ev.suggest, retry }]);
+    };
+    // A run still going when the page was closed or reloaded: pick it back up.
+    useResumeRun(chat.id, chat.pendingRun, {
+        headers, apply: ev => applyEvent(chat.id, ev, "", chat.pendingRun?.mode),
+        onStart: () => setBusy("Working…"),
+        onSeq: seq => updateChat(chat.id, c => ({ pendingRun: c.pendingRun && { ...c.pendingRun, seq } })),
+        done: () => { updateChat(chat.id, () => ({ pendingRun: null })); setBusy(""); },
+    });
+
     const run = async (message, runMode = mode, useModel = model) => {
         if (!message.trim() || busy || !repo) return;
         liveFrom.current = items.length;
@@ -347,23 +365,18 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
         setBusy(runMode === "plan" ? "Planning…" : "Working…"); setNotice("");
         abortRef.current = new AbortController();
         try {
-            const res = await fetch(`${API}/code/run`, {
-                method: "POST", headers, signal: abortRef.current.signal,
-                body: JSON.stringify({ provider, repo, branch, chat_id: chatId, extra_repos: extraRepos.map(x => `${x.provider}:${x.repo}`), message: sent, history: prior, mode: runMode, model: useModel }),
+            const r = await runStream("/code/run", {
+                headers, signal: abortRef.current.signal,
+                body: { provider, repo, branch, chat_id: chatId, extra_repos: extraRepos.map(x => `${x.provider}:${x.repo}`), message: sent, history: prior, mode: runMode, model: useModel },
+                onEvent: ev => applyEvent(chatId, ev, message, runMode),
+                onRun: (id, seq) => updateChat(chatId, () => ({ pendingRun: { id, seq, mode: runMode } })),
             });
-            if (res.status === 401) { onUnauthorized(); return; }
-            if (!res.ok || !res.body) throw new Error(`Request failed: ${res.status}`);
-            await readEvents(res, (ev) => {
-                if (ev.type === "usage") setTokens(ev.tokens);
-                else if (ev.type === "text") add(it => [...it, { kind: "text", text: ev.text, mode: runMode }]);
-                else if (ev.type === "tool") add(it => [...it, { kind: "tool", id: ev.id, name: ev.name, args: ev.args }]);
-                else if (ev.type === "result") add(it => it.map(i => (i.kind === "tool" && i.id === ev.id && i.ok === undefined ? { ...i, ok: ev.ok, output: ev.output } : i)));
-                else if (ev.type === "approval") add(it => [...it, { kind: "approval", id: ev.id, name: ev.name, args: ev.args, summary: ev.summary, state: "pending" }]);
-                else if (ev.type === "handoff") add(it => [...it, { kind: "handoff", tab: ev.tab, task: ev.task }]);
-                else if (ev.type === "error") add(it => [...it, { kind: "error", text: ev.text, suggest: ev.suggest, retry: message }]);
-            });
+            if (r.status === 401) { onUnauthorized(); return; }
+            if (r.error) throw new Error(r.error);
         } catch (e) {
             if (e.name !== "AbortError") add(it => [...it, { kind: "error", text: e.message }]);
+        } finally {
+            updateChat(chatId, () => ({ pendingRun: null }));
         }
         setBusy("");
     };

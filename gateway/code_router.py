@@ -2,7 +2,6 @@ import json
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
 
 from agents.code_agent import APPROVAL_ACTIONS, CodeAgent, describe_action
 from cache import ddb_backend
@@ -10,6 +9,7 @@ from gateway.auth import require_account
 from pipeline.activity import RunLog, log, session_for
 from pipeline.code_tasks import EVERY_SECONDS, connector_token, open_pr, run_code_action, valid_target
 from pipeline.mcp_tools import MCPToolset
+from pipeline.runs import durable
 from storage.neon_store import get_store
 from tau.tau_engine import TAUEngine
 from tools.code_workspace import CodeWorkspace
@@ -78,7 +78,7 @@ async def run(request: Request, account: dict = Depends(require_account)):
             await runlog.record({'type': 'error', 'text': f'Code agent crashed: {str(e)[:300]}'})
         yield "data: [DONE]\n\n"
 
-    return StreamingResponse(stream(), media_type="text/event-stream")
+    return durable(stream(), account["account_id"], body, "code")
 
 
 @router.post("/execute")

@@ -3,7 +3,6 @@ import io
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
 
 from agents.research_agent import ResearchAgent
 from config import settings
@@ -63,6 +62,7 @@ from pipeline.repo_context import (
     repo_status_label,
     run_repo_intent,
 )
+from pipeline.runs import durable
 from pipeline.session_title import generate_title
 from pipeline.ultraplan_intent import (
     detect_ultraplan_intent,
@@ -578,7 +578,7 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
 
         yield "data: [DONE]\n\n"
 
-    return StreamingResponse(stream_gen(), media_type="text/event-stream")
+    return durable(stream_gen(), _account["account_id"], body, "chat")
 
 
 @router.get("/status/{session_id}")

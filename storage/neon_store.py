@@ -253,6 +253,26 @@ class NeonStore:
                 )
             """)
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_events_session ON agent_events (session_id, created_at DESC)")
+            # Agent runs that outlive the browser connection (pipeline/runs.py): every SSE event a run
+            # emits, so a phone that locked or switched apps can fetch what it missed. Kept a day.
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS runs (
+                    run_id TEXT PRIMARY KEY,
+                    account_id TEXT NOT NULL,
+                    tab TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at BIGINT NOT NULL,
+                    updated_at BIGINT NOT NULL
+                )
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS run_events (
+                    run_id TEXT NOT NULL,
+                    seq INTEGER NOT NULL,
+                    data TEXT NOT NULL,
+                    PRIMARY KEY (run_id, seq)
+                )
+            """)
             # One active plan per session (like session_repos) — a plan
             # PlanAgent generates now survives past the single reply that
             # showed it, so "continue" (see pipeline/plan_intent.py) can
@@ -586,6 +606,50 @@ class NeonStore:
                 "INSERT INTO agent_events (session_id, agent, action, created_at) VALUES ($1,$2,$3,$4)",
                 session_id, agent, action, int(time.time()),
             )
+
+    async def start_run(self, run_id: str, account_id: str, tab: str, keep_seconds: int = 86400):
+        now = int(time.time())
+        async with self._pool.acquire() as conn:
+            old = [r["run_id"] for r in await conn.fetch("SELECT run_id FROM runs WHERE updated_at < $1", now - keep_seconds)]
+            if old:
+                await conn.execute("DELETE FROM run_events WHERE run_id = ANY($1::text[])", old)
+                await conn.execute("DELETE FROM runs WHERE run_id = ANY($1::text[])", old)
+            await conn.execute(
+                "INSERT INTO runs (run_id, account_id, tab, status, created_at, updated_at) VALUES ($1,$2,$3,'running',$4,$4) "
+                "ON CONFLICT (run_id) DO NOTHING", run_id, account_id, tab, now,
+            )
+
+    async def add_run_events(self, run_id: str, events: list[tuple[int, str]]) -> str:
+        """Appends (seq, data) rows and returns the run's status, so the runner sees a cancel."""
+        async with self._pool.acquire() as conn:
+            if events:
+                await conn.executemany(
+                    "INSERT INTO run_events (run_id, seq, data) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
+                    [(run_id, seq, data) for seq, data in events],
+                )
+            return await conn.fetchval(
+                "UPDATE runs SET updated_at=$2 WHERE run_id=$1 RETURNING status", run_id, int(time.time()),
+            ) or ""
+
+    async def set_run_status(self, run_id: str, status: str, account_id: str | None = None) -> bool:
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(
+                "UPDATE runs SET status=$2, updated_at=$3 WHERE run_id=$1 AND ($4::text IS NULL OR account_id=$4)",
+                run_id, status, int(time.time()), account_id,
+            )
+            return result.endswith(" 1")
+
+    async def get_run(self, run_id: str, account_id: str, after: int = 0, limit: int = 100) -> dict | None:
+        async with self._pool.acquire() as conn:
+            run = await conn.fetchrow(
+                "SELECT status, updated_at FROM runs WHERE run_id=$1 AND account_id=$2", run_id, account_id,
+            )
+            if not run:
+                return None
+            rows = await conn.fetch(
+                "SELECT seq, data FROM run_events WHERE run_id=$1 AND seq > $2 ORDER BY seq LIMIT $3", run_id, after, limit,
+            )
+            return {"status": run["status"], "updated_at": run["updated_at"], "events": [dict(r) for r in rows]}
 
     async def get_latest_agent_event(self, session_id: str) -> dict | None:
         """Most recent CABLES MAN activity for this session — what

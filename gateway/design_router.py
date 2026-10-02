@@ -1,11 +1,11 @@
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
 
 from gateway.auth import require_account
 from pipeline.activity import log, session_for
 from pipeline.ad_studio import PLACEMENTS, write_variants
+from pipeline.runs import durable
 from pipeline.site_brief import learn_site
 from storage.neon_store import get_store
 from tools import gemini_media, image_gen
@@ -76,7 +76,7 @@ async def ads(request: Request, _account: dict = Depends(require_account)):
                         break
         yield "data: [DONE]\n\n"
 
-    return StreamingResponse(stream(), media_type="text/event-stream")
+    return durable(stream(), _account["account_id"], body, "design")
 
 
 @router.post("/image")

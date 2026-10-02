@@ -3,7 +3,7 @@ import VoiceMode, { VoiceModeButton } from "./VoiceMode";
 import { TabWorking } from "./Working";
 import ModelPicker, { loadModel } from "./ModelPicker";
 import { ToolStep, md } from "./CodePage";
-import { readEvents } from "../utils/sse";
+import { runStream, useResumeRun } from "../utils/runs";
 import { AUTO_COMPACT_AT, ContextRing, compactItems, useContextBudget, AssistantText, AttachedChips, QueuedMessages, turnReplies, useSendQueue, CLEAR_COMMAND, ChatMenu, ConnectorsSheet, HELP_COMMAND, NEW_COMMAND, PlusMenu, SuggestModel, errorClass, helpText, parseSlash, readTextFiles, withAttachments } from "./MessageKit";
 import { HeaderStatus } from "./StatusBar";
 import { SendIcon, StopIcon } from "./Icons";
@@ -133,6 +133,25 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized, handoff,
     const transcript = items.filter(i => i.kind === "user" || i.kind === "text")
         .map(i => ({ role: i.kind === "user" ? "user" : "assistant", text: i.text }));
 
+    const applyEvent = (chatId, ev, retry = "") => {
+        const add = fn => updateChat(chatId, x => ({ items: fn(x.items) }));
+        if (ev.type === "usage") setTokens(ev.tokens);
+        else if (ev.type === "text") add(it => [...it, { kind: "text", text: ev.text }]);
+        else if (ev.type === "tool") add(it => [...it, { kind: "tool", id: ev.id, name: ev.name, args: ev.args }]);
+        else if (ev.type === "result") add(it => it.map(i => (i.kind === "tool" && i.id === ev.id && i.ok === undefined ? { ...i, ok: ev.ok, output: ev.output } : i)));
+        else if (ev.type === "approval") add(it => [...it, { kind: "approval", id: ev.id, name: ev.name, args: ev.args, summary: ev.summary, state: "pending" }]);
+        else if (ev.type === "image") add(it => [...it, { kind: "image", id: ev.id, mime: ev.mime, base64: ev.base64, prompt: ev.prompt }]);
+        else if (ev.type === "handoff") add(it => [...it, { kind: "handoff", tab: ev.tab, task: ev.task }]);
+        else if (ev.type === "error") add(it => [...it, { kind: "error", text: ev.text, suggest: ev.suggest, retry }]);
+    };
+    // A run still going when the page was closed or reloaded: pick it back up.
+    useResumeRun(chat.id, chat.pendingRun, {
+        headers, apply: ev => applyEvent(chat.id, ev),
+        onStart: () => setBusy(true),
+        onSeq: seq => updateChat(chat.id, c => ({ pendingRun: c.pendingRun && { ...c.pendingRun, seq } })),
+        done: () => { updateChat(chat.id, () => ({ pendingRun: null })); setBusy(false); },
+    });
+
     const run = async (message, useModel = model) => {
         if (!message.trim() || busy) return;
         liveFrom.current = items.length;
@@ -153,24 +172,17 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized, handoff,
         setInput(""); setBusy(true);
         abortRef.current = new AbortController();
         try {
-            const res = await fetch(`${API}/cowork/run`, {
-                method: "POST", headers, signal: abortRef.current.signal,
-                body: JSON.stringify({ message: sent, history, model: useModel, chat_id: chatId }),
+            const r = await runStream("/cowork/run", {
+                headers, signal: abortRef.current.signal, body: { message: sent, history, model: useModel, chat_id: chatId },
+                onEvent: ev => applyEvent(chatId, ev, message),
+                onRun: (id, seq) => updateChat(chatId, () => ({ pendingRun: { id, seq } })),
             });
-            if (res.status === 401) { onUnauthorized(); return; }
-            if (!res.ok || !res.body) throw new Error(`Request failed: ${res.status}`);
-            await readEvents(res, (ev) => {
-                if (ev.type === "usage") setTokens(ev.tokens);
-                else if (ev.type === "text") add(it => [...it, { kind: "text", text: ev.text }]);
-                else if (ev.type === "tool") add(it => [...it, { kind: "tool", id: ev.id, name: ev.name, args: ev.args }]);
-                else if (ev.type === "result") add(it => it.map(i => (i.kind === "tool" && i.id === ev.id && i.ok === undefined ? { ...i, ok: ev.ok, output: ev.output } : i)));
-                else if (ev.type === "approval") add(it => [...it, { kind: "approval", id: ev.id, name: ev.name, args: ev.args, summary: ev.summary, state: "pending" }]);
-                else if (ev.type === "image") add(it => [...it, { kind: "image", id: ev.id, mime: ev.mime, base64: ev.base64, prompt: ev.prompt }]);
-                else if (ev.type === "handoff") add(it => [...it, { kind: "handoff", tab: ev.tab, task: ev.task }]);
-                else if (ev.type === "error") add(it => [...it, { kind: "error", text: ev.text, suggest: ev.suggest, retry: message }]);
-            });
+            if (r.status === 401) { onUnauthorized(); return; }
+            if (r.error) throw new Error(r.error);
         } catch (e) {
             if (e.name !== "AbortError") add(it => [...it, { kind: "error", text: e.message }]);
+        } finally {
+            updateChat(chatId, () => ({ pendingRun: null }));
         }
         setBusy(false);
     };

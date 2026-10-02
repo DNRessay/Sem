@@ -1,12 +1,12 @@
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
 
 from agents.cowork_agent import NEEDS_APPROVAL, CoworkAgent, run_approved
 from gateway.auth import require_account
 from pipeline.activity import RunLog, log, session_for
 from pipeline.mcp_tools import MCPToolset
+from pipeline.runs import durable
 from tau.tau_engine import TAUEngine
 
 router = APIRouter(prefix="/cowork")
@@ -35,7 +35,7 @@ async def run(request: Request, account: dict = Depends(require_account)):
             await runlog.record({'type': 'error', 'text': f'Co-work agent crashed: {str(e)[:300]}'})
         yield "data: [DONE]\n\n"
 
-    return StreamingResponse(stream(), media_type="text/event-stream")
+    return durable(stream(), account["account_id"], body, "cowork")
 
 
 @router.post("/execute")
