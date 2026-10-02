@@ -1,8 +1,14 @@
 import { useEffect, useRef, useState } from "react";
+import AvatarStage from "./AvatarStage";
 import { GoldS } from "./Working";
 
 const API = import.meta.env.VITE_API_URL || "";
 const MAX_SPOKEN = 1200;
+const LOOK_KEY = "semblance_voice_look"; // "avatar" | "orb"
+
+function savedLook() {
+    try { return localStorage.getItem(LOOK_KEY) || "avatar"; } catch { return "avatar"; }
+}
 
 function plainForSpeech(text) {
     let t = (text || "").replace(/```[\s\S]*?```/g, " I've put the code in the chat. ")
@@ -19,6 +25,11 @@ export default function VoiceMode({ token, send, busy, lastReply, onClose }) {
     const [phase, setPhase] = useState("listening"); // listening | thinking | speaking | paused
     const [heard, setHeard] = useState("");
     const [note, setNote] = useState("");
+    const [look, setLook] = useState(savedLook);
+    const [avatarBroken, setAvatarBroken] = useState(false);
+    const avatar = useRef(null);
+    const useAvatar = look === "avatar" && !avatarBroken;
+    const chooseLook = (l) => { setLook(l); try { localStorage.setItem(LOOK_KEY, l); } catch { /* private mode */ } };
     const open = useRef(true);
     const recog = useRef(null);
     const audio = useRef(null);
@@ -27,6 +38,7 @@ export default function VoiceMode({ token, send, busy, lastReply, onClose }) {
     const stopSpeaking = () => {
         audio.current?.pause(); audio.current = null;
         window.speechSynthesis?.cancel();
+        avatar.current?.stop();
     };
 
     const listen = () => {
@@ -64,25 +76,38 @@ export default function VoiceMode({ token, send, busy, lastReply, onClose }) {
         const plain = plainForSpeech(text);
         if (!plain || !open.current) return listen();
         setPhase("speaking");
-        const done = () => { audio.current = null; if (open.current && phaseRef.current === "speaking") listen(); };
+        const face = avatar.current?.ready() ? avatar.current : null;
+        face?.mood("happy");
+        const done = () => {
+            audio.current = null; face?.mood("neutral");
+            if (open.current && phaseRef.current === "speaking") listen();
+        };
+        let wav = null;
         try {
             const r = await fetch(`${API}/media/speech`, {
                 method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
                 body: JSON.stringify({ text: plain }),
             });
-            if (!r.ok) throw new Error();
-            const d = await r.json();
-            if (!open.current) return;
-            const a = new Audio(`data:${d.mime};base64,${d.base64}`);
-            audio.current = a; a.onended = done;
-            await a.play();
-        } catch {
-            // Free fallback: the phone's own voice.
-            if (!window.speechSynthesis || !open.current) return done();
-            const u = new SpeechSynthesisUtterance(plain);
-            u.lang = "en-ZA"; u.onend = done; u.onerror = done;
-            window.speechSynthesis.speak(u);
+            if (r.ok) wav = await r.json();
+        } catch { /* fall through to the phone voice */ }
+        if (!open.current) return;
+        if (wav && face) {
+            // The avatar plays the audio itself so its lips follow it.
+            try { await face.speakAudio(wav.base64, plain); } catch { /* still carry on listening */ }
+            return done();
         }
+        if (wav) {
+            const a = new Audio(`data:${wav.mime};base64,${wav.base64}`);
+            audio.current = a; a.onended = done;
+            try { await a.play(); } catch { done(); }
+            return;
+        }
+        // Free fallback: the phone's own voice (the avatar mouths along).
+        if (!window.speechSynthesis) return done();
+        const u = new SpeechSynthesisUtterance(plain);
+        u.lang = "en-ZA"; u.onend = done; u.onerror = done;
+        window.speechSynthesis.speak(u);
+        face?.mouthAlong(plain, (plain.split(/\s+/).length / 2.6) * 1000);
     };
 
     const phaseRef = useRef(phase); phaseRef.current = phase;
@@ -106,6 +131,7 @@ export default function VoiceMode({ token, send, busy, lastReply, onClose }) {
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     const tapOrb = () => {
+        avatar.current?.resume();
         if (phase === "speaking") { stopSpeaking(); listen(); }
         else if (phase === "paused") listen();
         else if (phase === "listening") recog.current?.stop();
@@ -119,14 +145,30 @@ export default function VoiceMode({ token, send, busy, lastReply, onClose }) {
             background: "var(--surface)", borderTop: "1px solid var(--border)", borderRadius: "18px 18px 0 0",
             boxShadow: "0 -8px 28px rgba(0,0,0,0.22)", display: "flex", flexDirection: "column", alignItems: "center", gap: "10px",
         }}>
-            <button onClick={tapOrb} aria-label={phase === "speaking" ? "Interrupt" : "Talk"} style={{
+            <div style={{ alignSelf: "flex-end", display: "flex", gap: "4px", fontSize: "11px" }}>
+                {["avatar", "orb"].map(l => (
+                    <button key={l} onClick={() => chooseLook(l)} className={look === l ? "is-selected" : ""}
+                        style={{ border: "1px solid var(--border)", borderRadius: "999px", padding: "2px 8px", cursor: "pointer",
+                                 background: "transparent", color: look === l ? "var(--text)" : "var(--text-muted)" }}>
+                        {l === "avatar" ? "Avatar" : "Orb"}
+                    </button>
+                ))}
+            </div>
+            {avatarBroken && look === "avatar" && <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>The avatar can't run on this device — using the orb.</div>}
+            {useAvatar && (
+                <div onClick={tapOrb} style={{ width: "100%", cursor: "pointer" }}>
+                    <AvatarStage ref={avatar} height={Math.min(320, Math.round(window.innerHeight * 0.42))} onFail={() => setAvatarBroken(true)} />
+                </div>
+            )}
+            {!useAvatar && <button onClick={tapOrb} aria-label={phase === "speaking" ? "Interrupt" : "Talk"} style={{
                 width: "76px", height: "76px", borderRadius: "50%", border: "2px solid #f5b800", cursor: "pointer",
                 background: "radial-gradient(circle at 35% 30%, #fff3b0, #ffcf33 45%, #c98a00)",
                 animation: phase === "paused" ? "none" : `sem-orb ${phase === "listening" ? "1.1s" : phase === "speaking" ? "0.6s" : "1.8s"} ease-in-out infinite`,
                 display: "flex", alignItems: "center", justifyContent: "center",
             }}>
                 {phase === "thinking" ? <GoldS size={34} /> : <span style={{ fontSize: "30px", fontWeight: 800, color: "#5a3d00", fontFamily: "Georgia, serif" }}>S</span>}
-            </button>
+            </button>}
+            {useAvatar && phase === "thinking" && <div style={{ display: "flex", alignItems: "center", gap: "6px" }}><GoldS /></div>}
             <div style={{ minHeight: "20px", fontSize: "14px", color: heard && phase === "listening" ? "var(--text)" : "var(--text-muted)", textAlign: "center", maxWidth: "100%" }}>
                 {note || (phase === "listening" && heard ? heard : label)}
             </div>

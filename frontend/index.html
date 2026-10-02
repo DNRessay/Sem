@@ -4,6 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SEMBLANCE</title>
+    <!-- The voice-mode avatar (TalkingHead, same as AvaTa) loads from the CDN only when opened. -->
+    <script type="importmap">
+      { "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js/+esm",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
+        "talkinghead": "https://cdn.jsdelivr.net/gh/met4citizen/TalkingHead@1.7/modules/talkinghead.mjs"
+      } }
+    </script>
   </head>
   <body style="margin:0;">
     <div id="root"></div>
