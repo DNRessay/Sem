@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import VoiceMode, { VoiceModeButton } from "./VoiceMode";
+import PlanPanel from "./PlanPanel";
 import { TabWorking } from "./Working";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
@@ -310,7 +311,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
     const runCommand = (name, rest = "") => {
         if (name === "help") return setItems(it => [...it, { kind: "text", text: helpText(COMMANDS) }]);
         if (name === "new") return newChat();
-        if (name === "clear") return setItems(() => []);
+        if (name === "clear") return updateChat(chat.id, () => ({ items: [], plan: null }));
         if (name === "plan") return rest ? run(rest, "plan") : pickMode("plan");
         if (name === "pr") return run(rest ? `Open a PR titled "${rest}" with the current changes.` : "Open a PR with the current changes.", "act");
         if (name === "merge") return run(rest ? `Merge PR/MR #${rest.replace("#", "")}.` : "List the open PRs/MRs so I can pick one to merge.", "act");
@@ -327,6 +328,8 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
 
     const applyEvent = (chatId, ev, retry = "", runMode = "act") => {
         const add = fn => updateChat(chatId, c => ({ items: fn(c.items) }));
+        if ((ev.type === "tool" || ev.type === "result") && ev.name === "update_plan") return;
+        if (ev.type === "plan") return updateChat(chatId, () => ({ plan: ev.tasks }));
         if (ev.type === "usage") setTokens(ev.tokens);
         else if (ev.type === "text") add(it => [...it, { kind: "text", text: ev.text, mode: runMode }]);
         else if (ev.type === "tool") add(it => [...it, { kind: "tool", id: ev.id, name: ev.name, args: ev.args }]);
@@ -367,7 +370,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
         try {
             const r = await runStream("/code/run", {
                 headers, signal: abortRef.current.signal,
-                body: { provider, repo, branch, chat_id: chatId, extra_repos: extraRepos.map(x => `${x.provider}:${x.repo}`), message: sent, history: prior, mode: runMode, model: useModel },
+                body: { provider, repo, branch, chat_id: chatId, extra_repos: extraRepos.map(x => `${x.provider}:${x.repo}`), message: sent, history: prior, mode: runMode, model: useModel, plan: chat.plan || [] },
                 onEvent: ev => applyEvent(chatId, ev, message, runMode),
                 onRun: (id, seq) => updateChat(chatId, () => ({ pendingRun: { id, seq, mode: runMode } })),
             });
@@ -527,6 +530,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
             </div>
 
             <div style={{ padding: "8px 8px 20px" }}>
+                <PlanPanel plan={chat.plan} busy={!!busy} onClear={() => updateChat(chat.id, () => ({ plan: null }))} />
                 <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "20px", padding: "10px 14px 8px" }}>
                     <QueuedMessages queue={queue} onRemove={unqueue} />
                     <AttachedChips files={files} setFiles={setFiles} />

@@ -49,6 +49,28 @@ HANDOFF_TOOL = fn_tool(
 )
 
 
+PLAN_STATUSES = ("pending", "in_progress", "completed")
+PLAN_TOOL = fn_tool(
+    "update_plan", "Keep a task list the user sees beside the chat, for work with 3 or more steps (skip it for quick "
+    "answers). Send the whole list every time: mark a task in_progress just before you start it and completed as soon "
+    "as it's done, one in_progress at a time; add tasks you discover, drop ones that no longer apply.",
+    {"tasks": {"type": "array", "items": {"type": "object", "properties": {
+        "title": {"type": "string", "description": "Short imperative, e.g. 'Fix the login test'"},
+        "status": {"type": "string", "enum": list(PLAN_STATUSES)}}, "required": ["title", "status"]}}},
+    ["tasks"],
+)
+
+
+def clean_plan(tasks) -> list[dict]:
+    out = []
+    for t in tasks if isinstance(tasks, list) else []:
+        title = str((t or {}).get("title") or "").strip()[:200] if isinstance(t, dict) else ""
+        if title:
+            status = t.get("status") if t.get("status") in PLAN_STATUSES else "pending"
+            out.append({"title": title, "status": status})
+    return out[:30]
+
+
 def handoff_result(args: dict) -> dict:
     tab, task = args.get("tab"), (args.get("task") or "").strip()
     if tab not in HANDOFF_TABS or not task:
@@ -76,6 +98,7 @@ class ToolLoopAgent:
         self.user_context = user_context  # the owner's profile (TAUEngine.owner_context)
         self.tab = ""  # this agent's own tab; set allow_handoff False where no one sees the button
         self.allow_handoff = True
+        self.plan: list[dict] = []  # the tab's Plan panel; offered whenever the agent has a tab
 
     def system_prompt(self) -> str:
         raise NotImplementedError
@@ -101,6 +124,9 @@ class ToolLoopAgent:
         if self.user_context:
             system += "\n\nWho you're working for (the owner of SEMBLANCE):\n" + self.user_context.replace(
                 "You are SEMBLANCE. ", "")
+        if self.tab and self.plan:
+            system += "\n\nThe plan you're working through (update it with update_plan as you go):\n" + "\n".join(
+                f"- [{t['status']}] {t['title']}" for t in self.plan)
         msgs = [{"role": "system", "content": system}]
         for h in history[-20:]:
             if h.get("role") in ("user", "assistant") and isinstance(h.get("content"), str) and h["content"]:
@@ -110,9 +136,14 @@ class ToolLoopAgent:
 
     def all_tools(self) -> list[dict]:
         extra = self.mcp.tools(include_approval=self.allow_approvals) if self.mcp else []
-        return self.tools() + extra + ([HANDOFF_TOOL] if self.allow_handoff else [])
+        return (self.tools() + extra + ([HANDOFF_TOOL] if self.allow_handoff else [])
+                + ([PLAN_TOOL] if self.tab else []))
 
     async def _route(self, name: str, args: dict) -> dict:
+        if name == "update_plan" and self.tab:
+            self.plan = clean_plan(args.get("tasks"))
+            done = sum(t["status"] == "completed" for t in self.plan)
+            return {"ok": True, "status": f"plan shown to the user: {done}/{len(self.plan)} done"}
         if name == "handoff" and self.allow_handoff:
             if args.get("tab") == self.tab:
                 return {"ok": False, "error": "you are already in that tab — do the work here"}
@@ -181,6 +212,8 @@ class ToolLoopAgent:
                         result = {"result": result}
                     ok = bool(result.get("ok", "error" not in result))
                     yield {"type": "result", "id": call.get("id"), "name": name, "ok": ok, "output": preview(self.model_view(result))}
+                    if name == "update_plan" and result.get("ok"):
+                        yield {"type": "plan", "tasks": self.plan}
                     if name == "handoff" and result.get("ok"):
                         yield {"type": "handoff", "tab": args["tab"], "task": args["task"].strip()}
                     for event in self._mcp_events(call.get("id"), name, args or {}, result) + \

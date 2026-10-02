@@ -66,7 +66,7 @@ def test_run_uses_clab_tools(client):
     events = [json.loads(line[6:]) for line in r.text.split("\n") if line.startswith("data: {")]
     assert events[-2] == {"type": "text", "text": "Net worth R 1.2m."}
     offered = {t["function"]["name"] for t in json.loads(llm.calls[0].request.content)["tools"]}
-    assert offered == {"web_search", "fetch_url", "mcp__clab__overview", "handoff"}  # only C-Lab's MCP tools, not "other"
+    assert offered == {"web_search", "fetch_url", "mcp__clab__overview", "handoff", "update_plan"}  # only C-Lab's MCP tools, not "other"
     assert any(json.loads(c.request.content).get("method") == "tools/call" for c in server.calls)
 
 
@@ -93,5 +93,5 @@ def test_biz_mode_uses_colunimbus_only(client):
     events = [json.loads(line[6:]) for line in r.text.split("\n") if line.startswith("data: {")]
     assert events[-2] == {"type": "text", "text": "Two companies."}
     first = json.loads(llm.calls[0].request.content)
-    assert {t["function"]["name"] for t in first["tools"]} == {"web_search", "fetch_url", "mcp__colunimbus__companies", "handoff"}
+    assert {t["function"]["name"] for t in first["tools"]} == {"web_search", "fetch_url", "mcp__colunimbus__companies", "handoff", "update_plan"}
     assert "Colunimbus" in first["messages"][0]["content"]

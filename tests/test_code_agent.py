@@ -80,7 +80,7 @@ async def test_plan_mode_only_offers_and_allows_read_only_tools():
         events = [e async for e in CodeAgent(ws, mode="plan").run("plan it") if e["type"] != "usage"]
 
     offered = {t["function"]["name"] for t in json.loads(route.calls[0].request.content)["tools"]}
-    assert offered == {"list_dir", "read_file", "grep", "aws", "deep_research", "handoff"}
+    assert offered == {"list_dir", "read_file", "grep", "aws", "deep_research", "handoff", "update_plan"}
     assert ws.calls == []
     assert events[1] == {"type": "result", "id": "c1", "name": "write_file", "ok": False, "output": "plan mode is read-only"}
 
@@ -196,3 +196,24 @@ async def test_deep_research_works_in_plan_mode(monkeypatch):
     agent = CodeAgent(FakeWorkspace(), mode="plan")
     assert "deep_research" in [t["function"]["name"] for t in agent.tools()]
     assert (await agent.dispatch("deep_research", {"question": "q"}))["answer"] == "cited: q"
+
+
+@pytest.mark.asyncio
+async def test_update_plan_shows_the_plan_and_carries_into_the_next_turn():
+    ws = FakeWorkspace()
+    tasks = [{"title": "Read the failing test", "status": "completed"}, {"title": "Fix add()", "status": "in_progress"},
+             {"title": "", "status": "pending"}, {"title": "Run tests", "status": "bogus"}]
+    with respx.mock:
+        route = respx.post(GROQ_URL).mock(side_effect=[
+            _reply("", [_tool_call("p1", "update_plan", {"tasks": tasks})]),
+            _reply("Working on it."),
+        ])
+        agent = CodeAgent(ws)
+        agent.plan = [{"title": "Read the failing test", "status": "in_progress"}]
+        events = [e async for e in agent.run("fix it") if e["type"] != "usage"]
+    shown = [{"title": "Read the failing test", "status": "completed"}, {"title": "Fix add()", "status": "in_progress"},
+             {"title": "Run tests", "status": "pending"}]
+    assert {"type": "plan", "tasks": shown} in events
+    assert agent.plan == shown and ws.calls == []
+    system = json.loads(route.calls[0].request.content)["messages"][0]["content"]
+    assert "- [in_progress] Read the failing test" in system

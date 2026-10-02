@@ -3,6 +3,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from agents.cowork_agent import NEEDS_APPROVAL, CoworkAgent, run_approved
+from agents.tool_loop import clean_plan
 from gateway.auth import require_account
 from pipeline.activity import RunLog, log, session_for
 from pipeline.mcp_tools import MCPToolset
@@ -21,6 +22,7 @@ async def run(request: Request, account: dict = Depends(require_account)):
     mcp = await MCPToolset.for_account(account["account_id"])
     agent = CoworkAgent(account["account_id"], provider=body.get("model") or "auto", mcp=mcp)
     agent.user_context = await TAUEngine().owner_context()
+    agent.plan = clean_plan(body.get("plan"))
 
     runlog = RunLog(session_for("cowork", body), "cowork")
 

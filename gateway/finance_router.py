@@ -3,6 +3,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from agents.finance_agent import SERVERS, FinanceAgent
+from agents.tool_loop import clean_plan
 from gateway.auth import require_account
 from pipeline.activity import RunLog, session_for
 from pipeline.mcp_tools import MCPToolset
@@ -76,6 +77,7 @@ async def run(request: Request, account: dict = Depends(require_account)):
         raise HTTPException(400, f"Connect {LABELS[mode]} first")
     agent = FinanceAgent(provider=body.get("model") or "auto", mcp=toolset, mode=mode)
     agent.user_context = await TAUEngine().owner_context()
+    agent.plan = clean_plan(body.get("plan"))
 
     runlog = RunLog(session_for("finance", body), "finance")
 

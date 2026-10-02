@@ -4,6 +4,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from agents.code_agent import APPROVAL_ACTIONS, CodeAgent, describe_action
+from agents.tool_loop import clean_plan
 from cache import ddb_backend
 from gateway.auth import require_account
 from pipeline.activity import RunLog, log, session_for
@@ -58,6 +59,7 @@ async def run(request: Request, account: dict = Depends(require_account)):
     agent = CodeAgent(ws, mode=body.get("mode") or "act", provider=body.get("model") or "auto", mcp=mcp,
                       branch=_branch(body), others=others, tokens=tokens)
     agent.user_context = await TAUEngine().owner_context()
+    agent.plan = clean_plan(body.get("plan"))
 
     runlog = RunLog(session_for("code", body), "code")
 

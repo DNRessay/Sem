@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import VoiceMode, { VoiceModeButton } from "./VoiceMode";
+import PlanPanel from "./PlanPanel";
 import { TabWorking } from "./Working";
 import ModelPicker, { loadModel } from "./ModelPicker";
 import { ToolStep, md } from "./CodePage";
@@ -177,7 +178,7 @@ function FinanceMode({ mode, setMode, token, onNavigate, onUnauthorized, handoff
     const runCommand = (name, rest = "") => {
         if (name === "help") return setItems(it => [...it, { kind: "text", text: helpText(COMMANDS) }]);
         if (name === "new") return newChat();
-        if (name === "clear") return setItems(() => []);
+        if (name === "clear") return updateChat(chat.id, () => ({ items: [], plan: null }));
         const preset = M.commands.find(c => c.name === name);
         if (preset) return run(preset.ask);
     };
@@ -191,6 +192,8 @@ function FinanceMode({ mode, setMode, token, onNavigate, onUnauthorized, handoff
 
     const applyEvent = (chatId, ev, retry = "") => {
         const add = fn => updateChat(chatId, x => ({ items: fn(x.items) }));
+        if ((ev.type === "tool" || ev.type === "result") && ev.name === "update_plan") return;
+        if (ev.type === "plan") return updateChat(chatId, () => ({ plan: ev.tasks }));
         if (ev.type === "usage") setTokens(ev.tokens);
         else if (ev.type === "text") add(it => [...it, { kind: "text", text: ev.text }]);
         else if (ev.type === "tool") add(it => [...it, { kind: "tool", id: ev.id, name: toolLabel(ev.name), args: ev.args }]);
@@ -227,7 +230,7 @@ function FinanceMode({ mode, setMode, token, onNavigate, onUnauthorized, handoff
         abortRef.current = new AbortController();
         try {
             const r = await runStream("/finance/run", {
-                headers, signal: abortRef.current.signal, body: { message: sent, history, model: useModel, chat_id: chatId, mode },
+                headers, signal: abortRef.current.signal, body: { message: sent, history, model: useModel, chat_id: chatId, mode, plan: chat.plan || [] },
                 onEvent: ev => applyEvent(chatId, ev, message),
                 onRun: (id, seq) => updateChat(chatId, () => ({ pendingRun: { id, seq } })),
             });
@@ -302,6 +305,7 @@ function FinanceMode({ mode, setMode, token, onNavigate, onUnauthorized, handoff
 
             {status?.connected && (
                 <div style={{ padding: "8px 8px 20px" }}>
+                    <PlanPanel plan={chat.plan} busy={!!busy} onClear={() => updateChat(chat.id, () => ({ plan: null }))} />
                     <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "20px", padding: "10px 14px 8px" }}>
                         <QueuedMessages queue={queue} onRemove={unqueue} />
                     <AttachedChips files={files} setFiles={setFiles} />
