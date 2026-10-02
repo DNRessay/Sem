@@ -57,6 +57,7 @@ def _download():
 gpu_image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("ffmpeg")
+    .env({"PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"})
     .pip_install("torch>=2.4", "diffusers>=0.33", "transformers>=4.46", "accelerate", "ftfy", "sentencepiece",
                  "protobuf", "imageio[ffmpeg]", "huggingface_hub", "fastapi>=0.115.0")
     # FLUX.1-schnell is gated on Hugging Face (accept its terms once): the HF_TOKEN in the deploying
@@ -79,7 +80,13 @@ class Generator:
         from diffusers import AutoencoderKLWan, WanPipeline
 
         vae = AutoencoderKLWan.from_pretrained(MODEL_ID, subfolder="vae", torch_dtype=torch.float32)
-        self.pipe = WanPipeline.from_pretrained(MODEL_ID, vae=vae, torch_dtype=torch.bfloat16).to("cuda")
+        self.pipe = WanPipeline.from_pretrained(MODEL_ID, vae=vae, torch_dtype=torch.bfloat16)
+        # The 11 GB umt5 text encoder, the transformer and the fp32 VAE together fill the L4's 22 GB, and the
+        # VAE decode (the last step, after ~10 min of denoising) ran out of memory. Offloading keeps only the
+        # part that is running on the GPU, and tiling decodes the video in pieces.
+        self.pipe.enable_model_cpu_offload()
+        if hasattr(self.pipe.vae, "enable_tiling"):
+            self.pipe.vae.enable_tiling()
 
     @modal.method()
     def generate(self, prompt: str, aspect_ratio: str = "9:16", seconds: int = 5) -> dict:
