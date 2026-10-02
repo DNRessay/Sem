@@ -74,7 +74,8 @@ def cheapest_paid() -> dict | None:
 
 
 # Context window (tokens) per provider — what the chat's context ring measures against.
-CONTEXT = {"bonsai": 65536, "gemini": 1_000_000, "groq": 131072, "anthropic": 200000, "openai": 400000,
+# Bonsai: llama-server splits -c 65536 across -np 2 slots, so one request gets 32768.
+CONTEXT = {"bonsai": 32768, "gemini": 1_000_000, "groq": 131072, "anthropic": 200000, "openai": 400000,
            "qwen": 131072, "deepseek": 128000, "kimi": 256000, "huggingface": 32768}
 
 
@@ -159,8 +160,10 @@ async def _complete_openai(p: Provider, client: httpx.AsyncClient, messages: lis
     except ValueError:
         data = {}
     if r.status_code != 200 or "choices" not in data:
+        # Too long for this model's window is no one else's problem: a bigger-window model can still answer.
+        too_long = "exceed_context_size" in r.text or "exceeds the available context" in r.text
         return {"error": f"{p.label} error {r.status_code}: {str(data or r.text)[:300]}",
-                "unavailable": r.status_code not in (400, 422)}  # a bad key or outage: try the next model
+                "unavailable": too_long or r.status_code not in (400, 422)}  # a bad key or outage: try the next model
     message = data["choices"][0]["message"]
     message.pop("reasoning_content", None)
     usage = data.get("usage") or {}
