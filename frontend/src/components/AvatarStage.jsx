@@ -54,7 +54,7 @@ const AvatarStage = forwardRef(function AvatarStage({ onFail, height = 300 }, re
         const h = head.current;
         await h.audioCtx.resume();
         h.speakAudio({ audio: buffer, ...timings(text, buffer.duration * 1000) });
-        await new Promise(r => setTimeout(r, buffer.duration * 1000 + 300));
+        await new Promise(r => setTimeout(r, buffer.duration * 1000 + 60));
     };
 
     useImperativeHandle(ref, () => ({

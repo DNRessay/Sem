@@ -5,37 +5,56 @@ import { GoldS } from "./Working";
 const API = import.meta.env.VITE_API_URL || "";
 const MAX_SPOKEN = 1200;
 const LOOK_KEY = "semblance_voice_look"; // "avatar" | "orb"
+const VOICE_KEY = "semblance_voice_engine"; // "natural" (Gemini) | "fast" (the phone's own voice)
+const SILENCE_MS = 700; // end your turn after this much quiet, instead of the browser's slower default
+const FIRST_MIN = 20;   // start talking at the first sentence this long…
+const NEXT_MIN = 220;   // …then speak in bigger pieces (fewer TTS calls, fewer seams)
 
-function savedLook() {
-    try { return localStorage.getItem(LOOK_KEY) || "avatar"; } catch { return "avatar"; }
+function saved(key, fallback) {
+    try { return localStorage.getItem(key) || fallback; } catch { return fallback; }
 }
 
-function plainForSpeech(text) {
-    let t = (text || "").replace(/```[\s\S]*?```/g, " I've put the code in the chat. ")
+export function plainForSpeech(text) {
+    return (text || "").replace(/\[\[SEMBLANCE_TOOL:[^\]]*\]\]\n?/g, "")
+        .replace(/```[\s\S]*?```/g, " I've put the code in the chat. ")
         .replace(/!\[[^\]]*\]\([^)]*\)/g, "").replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
         .replace(/[#*_`>|]/g, "").replace(/\s+/g, " ").trim();
-    if (t.length > MAX_SPOKEN) t = t.slice(0, MAX_SPOKEN).replace(/[^.!?]*$/, "") + " The rest is in the chat.";
-    return t;
 }
 
-// Hands-free conversation: listens, sends what you said when you pause,
-// waits for Sem's reply, reads it out, then listens again. Tap the orb to
-// cut Sem off and talk; End to stop. The chat underneath keeps every turn.
-export default function VoiceMode({ token, send, busy, lastReply, onClose }) {
+// Where the next spoken piece of a still-growing reply can end: after a sentence, never inside a code block.
+export function speakableCut(text, min) {
+    if ((text.match(/```/g) || []).length % 2) text = text.slice(0, text.lastIndexOf("```"));
+    let cut = 0;
+    for (const m of text.matchAll(/[.!?](?=\s)|\n/g)) {
+        cut = m.index + 1;
+        if (cut >= min) break;
+    }
+    return cut >= min ? cut : 0;
+}
+
+// Hands-free conversation: listens, sends what you said when you pause, and
+// reads Sem's reply out while it is still being written (sentence by sentence,
+// fetching the next piece's audio while this one plays), then listens again.
+// Tap the orb to cut Sem off and talk; End to stop. The chat keeps every turn.
+export default function VoiceMode({ token, send, busy, lastReply, liveReply = "", onClose }) {
     const [phase, setPhase] = useState("listening"); // listening | thinking | speaking | paused
     const [heard, setHeard] = useState("");
     const [note, setNote] = useState("");
-    const [look, setLook] = useState(savedLook);
+    const [look, setLook] = useState(() => saved(LOOK_KEY, "avatar"));
+    const [engine, setEngine] = useState(() => saved(VOICE_KEY, "natural"));
     const [avatarBroken, setAvatarBroken] = useState(false);
     const avatar = useRef(null);
     const useAvatar = look === "avatar" && !avatarBroken;
-    const chooseLook = (l) => { setLook(l); try { localStorage.setItem(LOOK_KEY, l); } catch { /* private mode */ } };
+    const choose = (key, set) => (v) => { set(v); try { localStorage.setItem(key, v); } catch { /* private mode */ } };
     const open = useRef(true);
     const recog = useRef(null);
     const audio = useRef(null);
-    const pending = useRef(null); // { before, sawBusy }
     const ctx = useRef(null);
+    const engineRef = useRef(engine); engineRef.current = engine;
     const [said, setSaid] = useState("");     // what Sem is saying (captions)
+    // The reply being read out: how much of it is queued, the queue, and whether the reply is complete.
+    const turn = useRef(null); // { before, sawBusy, consumed, spoken, final, queue, playing, gen, tts, ttsDown }
+    const gen = useRef(0);
     const audioCtx = () => {
         if (!ctx.current) ctx.current = new (window.AudioContext || window.webkitAudioContext)();
         ctx.current.resume();
@@ -43,7 +62,9 @@ export default function VoiceMode({ token, send, busy, lastReply, onClose }) {
     };
 
     const stopSpeaking = () => {
+        gen.current += 1;
         try { audio.current?.stop(); } catch { /* already stopped */ }
+        audio.current?.onended?.();
         audio.current = null;
         window.speechSynthesis?.cancel();
         avatar.current?.stop();
@@ -56,55 +77,58 @@ export default function VoiceMode({ token, send, busy, lastReply, onClose }) {
         setPhase("listening"); setHeard(""); setNote("");
         const r = new SR();
         r.lang = "en-ZA"; r.interimResults = true; r.continuous = false;
-        let finalText = "";
+        let finalText = "", latest = "", quiet = null;
         r.onresult = (e) => {
             let interim = "";
             for (let i = 0; i < e.results.length; i++) {
                 if (e.results[i].isFinal) finalText = e.results[i][0].transcript;
                 else interim += e.results[i][0].transcript;
             }
-            setHeard((finalText || interim).trim());
+            latest = (finalText || interim).trim();
+            setHeard(latest);
+            clearTimeout(quiet);
+            quiet = setTimeout(() => recog.current === r && r.stop(), SILENCE_MS);
         };
         r.onerror = (e) => { if (e.error === "not-allowed") { setNote("Microphone blocked — allow it in the browser."); setPhase("paused"); } };
         r.onend = () => {
+            clearTimeout(quiet);
             recog.current = null;
             if (!open.current) return;
-            const said = finalText.trim();
-            if (said) {
-                setPhase("thinking");
-                pending.current = { before: lastReplyRef.current, sawBusy: false };
-                send(said);
+            const text = (finalText || latest).trim();
+            if (text) {
+                setPhase("thinking"); setSaid("");
+                turn.current = { before: lastReplyRef.current, sawBusy: false, consumed: 0, spoken: 0, final: false,
+                                 queue: [], playing: false, gen: gen.current, tts: Promise.resolve(), ttsDown: false };
+                send(text);
             } else setTimeout(() => open.current && phaseRef.current === "listening" && listen(), 250);
-            // (paused: stays quiet until you tap)
         };
         recog.current = r;
         try { r.start(); } catch { /* already started */ }
     };
 
-    const speak = async (text) => {
-        const plain = plainForSpeech(text);
-        if (!plain || !open.current) return listen();
-        setPhase("speaking");
-        setSaid(plain);
-        const face = avatar.current?.ready() ? avatar.current : null;
-        face?.mood("happy");
-        const done = () => {
-            audio.current = null; face?.mood("neutral");
-            if (open.current && phaseRef.current === "speaking") listen();
-        };
-        let wav = null;
-        try {
-            const r = await fetch(`${API}/media/speech`, {
-                method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ text: plain }),
-            });
-            if (r.ok) wav = await r.json();
-        } catch { /* fall through to the phone voice */ }
-        if (!open.current) return;
+    // Natural voice: Gemini TTS, one request at a time (its rate limit is tight), started as soon as a piece is
+    // queued so it's ready when the previous piece ends. A rate limit switches the rest of the reply to the phone voice.
+    const fetchSpeech = (t, text) => {
+        if (engineRef.current !== "natural" || t.ttsDown) return Promise.resolve(null);
+        const job = t.tts.then(async () => {
+            if (t.ttsDown) return null;
+            try {
+                const r = await fetch(`${API}/media/speech`, {
+                    method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                    body: JSON.stringify({ text }),
+                });
+                if (r.status === 429) t.ttsDown = true;
+                return r.ok ? await r.json() : null;
+            } catch { return null; }
+        });
+        t.tts = job;
+        return job;
+    };
+
+    const playPiece = async (text, wav, face) => {
         if (wav && face) {
-            // The avatar plays the audio itself so its lips follow it.
-            try { await face.speakAudio(wav.base64, plain); } catch { /* still carry on listening */ }
-            return done();
+            try { await face.speakAudio(wav.base64, text); } catch { /* carry on */ }
+            return;
         }
         if (wav) {
             try {
@@ -113,34 +137,74 @@ export default function VoiceMode({ token, send, busy, lastReply, onClose }) {
                 const src = ac.createBufferSource();
                 src.buffer = await ac.decodeAudioData(bytes.buffer);
                 src.connect(ac.destination);
-                src.onended = done;
-                audio.current = src;
-                src.start();
+                await new Promise(resolve => { src.onended = resolve; audio.current = src; src.start(); });
+                audio.current = null;
                 return;
             } catch { /* fall through to the phone voice */ }
         }
-        // Free fallback: the phone's own voice (the avatar mouths along).
-        if (!window.speechSynthesis) return done();
-        const u = new SpeechSynthesisUtterance(plain);
-        u.lang = "en-ZA"; u.onend = done; u.onerror = done;
-        window.speechSynthesis.speak(u);
-        face?.mouthAlong(plain, (plain.split(/\s+/).length / 2.6) * 1000);
+        if (!window.speechSynthesis) return;
+        await new Promise(resolve => {
+            const u = new SpeechSynthesisUtterance(text);
+            u.lang = "en-ZA"; u.onend = resolve; u.onerror = resolve;
+            window.speechSynthesis.speak(u);
+            face?.mouthAlong(text, (text.split(/\s+/).length / 2.6) * 1000);
+        });
+    };
+
+    const playQueue = async (t) => {
+        if (t.playing) return;
+        t.playing = true;
+        const face = avatar.current?.ready() ? avatar.current : null;
+        face?.mood("happy");
+        while (t.queue.length && open.current && t.gen === gen.current) {
+            const piece = t.queue.shift();
+            setPhase("speaking");
+            setSaid(s => (s ? `${s} ${piece.text}` : piece.text));
+            const wav = await piece.audio;
+            if (t.gen !== gen.current || !open.current) break;
+            await playPiece(piece.text, wav, face);
+        }
+        t.playing = false;
+        if (t.gen !== gen.current || !open.current) return;
+        if (t.final && !t.queue.length) {
+            face?.mood("neutral");
+            turn.current = null;
+            listen();
+        } else if (!t.queue.length) setPhase("thinking");
+    };
+
+    // Queue whatever new, complete part of the reply is ready (all of it once the reply is done).
+    const feed = (t, text) => {
+        const fresh = text.slice(t.consumed);
+        const cut = t.final ? fresh.length : speakableCut(fresh, t.consumed ? NEXT_MIN : FIRST_MIN);
+        if (!cut) return;
+        t.consumed += cut;
+        let piece = plainForSpeech(fresh.slice(0, cut));
+        if (!piece || t.spoken >= MAX_SPOKEN) return;
+        if (t.spoken + piece.length > MAX_SPOKEN) piece = `${piece.slice(0, MAX_SPOKEN - t.spoken).replace(/[^.!?]*$/, "")} The rest is in the chat.`;
+        t.spoken += piece.length;
+        t.queue.push({ text: piece, audio: fetchSpeech(t, piece) });
+        playQueue(t);
     };
 
     const phaseRef = useRef(phase); phaseRef.current = phase;
     const lastReplyRef = useRef(lastReply); lastReplyRef.current = lastReply;
 
-    // Reply finished → read it out.
+    // Read the reply out as it streams in, then whatever is left once it's complete.
     useEffect(() => {
-        const p = pending.current;
-        if (!p) return;
-        if (busy) { p.sawBusy = true; return; }
-        if (p.sawBusy || lastReply !== p.before) {
-            pending.current = null;
-            if (lastReply && lastReply !== p.before) speak(lastReply);
-            else listen();
+        const t = turn.current;
+        if (!t || t.final || t.gen !== gen.current) return;
+        if (busy) {
+            t.sawBusy = true;
+            if (liveReply) feed(t, liveReply);
+            return;
         }
-    }, [busy, lastReply]); // eslint-disable-line react-hooks/exhaustive-deps
+        if (!t.sawBusy && lastReply === t.before) return;
+        t.final = true;
+        const reply = lastReply !== t.before ? lastReply : liveReply;
+        if (reply) feed(t, reply);
+        if (!t.queue.length && !t.playing) { turn.current = null; listen(); }
+    }, [busy, lastReply, liveReply]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
         audioCtx();
@@ -151,11 +215,11 @@ export default function VoiceMode({ token, send, busy, lastReply, onClose }) {
     const tapOrb = () => {
         avatar.current?.resume();
         audioCtx();
-        if (phase === "speaking") { stopSpeaking(); listen(); }
+        if (phase === "speaking") { stopSpeaking(); turn.current = null; listen(); }
         else if (phase === "paused") listen();
         else if (phase === "listening") recog.current?.stop();
     };
-    const pause = () => { recog.current?.abort(); stopSpeaking(); setPhase("paused"); };
+    const pause = () => { recog.current?.abort(); stopSpeaking(); turn.current = null; setPhase("paused"); };
     const end = () => { open.current = false; recog.current?.abort(); stopSpeaking(); onClose(); };
 
     const label = { listening: heard ? "" : "Listening…", thinking: "Sem is working…", speaking: "Tap to interrupt", paused: "Paused — tap to talk" }[phase];
@@ -166,11 +230,17 @@ export default function VoiceMode({ token, send, busy, lastReply, onClose }) {
             position: "fixed", inset: 0, zIndex: 100, background: "var(--bg)", display: "flex", flexDirection: "column",
             padding: "max(12px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom))", boxSizing: "border-box",
         }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
                 <span style={{ fontWeight: 700, fontSize: "15px", color: "var(--text)" }}>Sem voice</span>
                 <span style={{ flex: 1 }} />
+                {["natural", "fast"].map(v => (
+                    <button key={v} onClick={() => choose(VOICE_KEY, setEngine)(v)} className={engine === v ? "is-selected" : ""} style={pill(engine === v)}
+                        title={v === "fast" ? "The phone's own voice: starts instantly" : "Gemini voice: sounds better, a moment slower"}>
+                        {v === "natural" ? "Natural" : "Fast"}
+                    </button>
+                ))}
                 {["avatar", "orb"].map(l => (
-                    <button key={l} onClick={() => chooseLook(l)} className={look === l ? "is-selected" : ""} style={pill(look === l)}>
+                    <button key={l} onClick={() => choose(LOOK_KEY, setLook)(l)} className={look === l ? "is-selected" : ""} style={pill(look === l)}>
                         {l === "avatar" ? "Avatar" : "Orb"}
                     </button>
                 ))}

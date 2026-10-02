@@ -4,7 +4,7 @@ import { TabWorking } from "./Working";
 import ModelPicker, { loadModel } from "./ModelPicker";
 import { ToolStep, md } from "./CodePage";
 import { runStream, useResumeRun } from "../utils/runs";
-import { AUTO_COMPACT_AT, ContextRing, compactItems, useContextBudget, AssistantText, AttachedChips, QueuedMessages, turnReplies, useSendQueue, CLEAR_COMMAND, ChatMenu, ConnectorsSheet, HELP_COMMAND, NEW_COMMAND, PlusMenu, SuggestModel, errorClass, helpText, parseSlash, readTextFiles, withAttachments } from "./MessageKit";
+import { AUTO_COMPACT_AT, ContextRing, compactItems, useContextBudget, AssistantText, AttachedChips, QueuedMessages, turnReplies, liveReplyText, useSendQueue, CLEAR_COMMAND, ChatMenu, ConnectorsSheet, HELP_COMMAND, NEW_COMMAND, PlusMenu, SuggestModel, errorClass, helpText, parseSlash, readTextFiles, withAttachments } from "./MessageKit";
 import { HeaderStatus } from "./StatusBar";
 import { SendIcon, StopIcon } from "./Icons";
 import AgentFeedPanel from "./AgentFeedPanel";
@@ -327,7 +327,7 @@ function FinanceMode({ mode, setMode, token, onNavigate, onUnauthorized, handoff
                 </div>
             )}
             {voiceOn && <VoiceMode token={token} busy={!!busy} send={m => run(m)} onClose={() => setVoiceOn(false)}
-                lastReply={[...turnReplies(items, busy).values()].pop() || ""} />}
+                lastReply={[...turnReplies(items, busy).values()].pop() || ""} liveReply={liveReplyText(items, busy)} />}
             {connectorsOpen && <ConnectorsSheet token={token} onClose={() => setConnectorsOpen(false)} />}
         </div>
     );

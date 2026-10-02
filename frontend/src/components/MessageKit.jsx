@@ -234,6 +234,14 @@ export function turnReplies(items, busy) {
     return out;
 }
 
+// The reply still being written (text since the last user message), for voice mode to read out early.
+export function liveReplyText(items, busy) {
+    if (!busy) return "";
+    const parts = [];
+    for (let i = items.length - 1; i >= 0 && items[i].kind !== "user"; i--) if (items[i].kind === "text") parts.unshift(items[i].text);
+    return parts.join("\n\n");
+}
+
 // Messages typed while Sem is working wait here and send in order when it's free.
 export function useSendQueue(busy, send) {
     const [queue, setQueue] = useState([]);

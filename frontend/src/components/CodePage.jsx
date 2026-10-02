@@ -6,7 +6,7 @@ import DOMPurify from "dompurify";
 import ModelPicker, { loadModel } from "./ModelPicker";
 import { runStream, useResumeRun } from "../utils/runs";
 import { RepoPicker } from "./AttachMenu";
-import { AUTO_COMPACT_AT, ContextRing, compactItems, useContextBudget, ModeMenu, AssistantText, AttachedChips, QueuedMessages, turnReplies, useSendQueue, CLEAR_COMMAND, ChatMenu, ConnectorsSheet, HELP_COMMAND, NEW_COMMAND, PlusMenu, SuggestModel, errorClass, helpText, parseSlash, readTextFiles, withAttachments } from "./MessageKit";
+import { AUTO_COMPACT_AT, ContextRing, compactItems, useContextBudget, ModeMenu, AssistantText, AttachedChips, QueuedMessages, turnReplies, liveReplyText, useSendQueue, CLEAR_COMMAND, ChatMenu, ConnectorsSheet, HELP_COMMAND, NEW_COMMAND, PlusMenu, SuggestModel, errorClass, helpText, parseSlash, readTextFiles, withAttachments } from "./MessageKit";
 import { ApprovalCard } from "./CoworkPage";
 import { HeaderStatus, iconBtn } from "./StatusBar";
 import { CloseIcon, CodeIcon, PlusIcon, SendIcon, StopIcon } from "./Icons";
@@ -558,7 +558,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
                 </div>
             </div>
             {voiceOn && <VoiceMode token={token} busy={!!busy} send={m => run(m)} onClose={() => setVoiceOn(false)}
-                lastReply={[...turnReplies(items, busy).values()].pop() || ""} />}
+                lastReply={[...turnReplies(items, busy).values()].pop() || ""} liveReply={liveReplyText(items, busy)} />}
             {connectorsOpen && <ConnectorsSheet token={token} onClose={() => setConnectorsOpen(false)} />}
         </div>
     );
