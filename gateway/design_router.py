@@ -2,13 +2,14 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from cache import ddb_backend
 from gateway.auth import require_account
 from pipeline.activity import log, session_for
 from pipeline.ad_studio import PLACEMENTS, write_variants
 from pipeline.runs import durable
 from pipeline.site_brief import learn_site
 from storage.neon_store import get_store
-from tools import gemini_media, image_gen
+from tools import gemini_media, image_gen, media_store
 from tools.mcp_client import MCPClient
 from tools.video_tool import video_call
 
@@ -69,7 +70,9 @@ async def ads(request: Request, _account: dict = Depends(require_account)):
                 await log(session, "gemini", f"{'ok' if img['ok'] else 'blocked'}:image {i + 1} — "
                                              f"{('made with ' + img.get('engine', 'gemini')) if img['ok'] else img['error']}")
                 if img["ok"]:
-                    yield f"data: {json.dumps({'type': 'image', 'index': i, 'mime': img['mime'], 'base64': img['base64']})}\n\n"
+                    url = await media_store.save(img["base64"], img["mime"], "ads")
+                    shown = {"url": url} if url else {"base64": img["base64"]}
+                    yield f"data: {json.dumps({'type': 'image', 'index': i, 'mime': img['mime'], **shown})}\n\n"
                 else:
                     yield f"data: {json.dumps({'type': 'image_error', 'index': i, 'error': img['error']})}\n\n"
                     if img.get("rate_limited"):
@@ -86,7 +89,8 @@ async def regenerate_image(request: Request, _account: dict = Depends(require_ac
                                                references=body.get("references"))
     if not result["ok"]:
         raise HTTPException(429 if result.get("rate_limited") else 400, result["error"])
-    return result
+    url = await media_store.save(result["base64"], result["mime"], "ads")
+    return {"ok": True, "mime": result["mime"], **({"url": url} if url else {"base64": result["base64"]})}
 
 
 @router.post("/video")
@@ -106,9 +110,17 @@ async def video_budget(_account: dict = Depends(require_account)):
 
 @router.get("/video/{job_id}")
 async def video_status(job_id: str, _account: dict = Depends(require_account)):
+    saved = ddb_backend.get("video_url", job_id)
+    if saved:
+        return json.loads(saved)
     result = await video_call("status", job_id=job_id)
     if not result.get("ok") and result.get("status") != "failed":
         raise HTTPException(400, result.get("error") or "status check failed")
+    if result.get("status") == "done" and result.get("base64"):
+        url = await media_store.save(result["base64"], result.get("mime") or "video/mp4", "video")
+        if url:
+            result = {k: v for k, v in result.items() if k != "base64"} | {"url": url}
+            ddb_backend.set("video_url", job_id, json.dumps(result), ttl=media_store.KEEP_SECONDS)
     return result
 
 

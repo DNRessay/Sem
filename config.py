@@ -179,6 +179,10 @@ class Settings(BaseSettings):
     SES_REGION: str = "eu-west-1"
     FRONTEND_URL: str = "https://semblance-773.pages.dev"
 
+    # Ad images and video ads (tools/media_store.py): a private bucket whose lifecycle rule deletes them after 7 days.
+    MEDIA_BUCKET: str = ""
+    MEDIA_REGION: str = "eu-west-1"
+
     model_config = SettingsConfigDict(env_file=".env")
 
 

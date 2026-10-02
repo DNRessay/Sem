@@ -1,7 +1,10 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import RedirectResponse
 
 from gateway.auth import require_account
-from tools import gemini_media, image_gen
+from tools import gemini_media, image_gen, media_store
 
 router = APIRouter(prefix="/media")
 
@@ -33,3 +36,13 @@ async def speech(request: Request, _account: dict = Depends(require_account)):
 @router.get("/options")
 async def options(_account: dict = Depends(require_account)):
     return {"aspect_ratios": list(gemini_media.ASPECT_RATIOS), "voices": list(gemini_media.VOICES)}
+
+
+@router.get("/file/{key:path}")
+async def media_file(key: str, exp: int = 0, sig: str = ""):
+    """A saved ad image or video. The link itself is the permission (signed, 7 days, matching the bucket's
+    lifecycle), so <img>/<video> can load it without a login header."""
+    if not media_store.enabled() or not media_store.verify(key, exp, sig):
+        raise HTTPException(404, "This file has expired or the link is wrong")
+    url = await asyncio.to_thread(media_store.presigned, key)
+    return RedirectResponse(url, status_code=302, headers={"Cache-Control": "private, max-age=300"})

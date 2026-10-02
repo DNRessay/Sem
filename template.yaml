@@ -157,6 +157,10 @@ Parameters:
     NoEcho: true
     Default: ""
     Description: "Comma-separated emails allowed to receive a passphrase reset link"
+  MediaBucket:
+    Type: String
+    Default: "semblance-media-053097418755"
+    Description: "Existing private bucket for ad images and videos; its lifecycle rule deletes them after 7 days"
   SesFromEmail:
     Type: String
     Default: "SEMBLANCE <noreply@vicinic.co.za>"
@@ -249,6 +253,7 @@ Globals:
         WHATSAPP_APP_SECRET: !Ref WhatsappAppSecret
         RESET_EMAILS: !Ref ResetEmails
         SES_FROM_EMAIL: !Ref SesFromEmail
+        MEDIA_BUCKET: !Ref MediaBucket
         MCP_SERVERS: !Ref McpServers
         GITHUB_CLIENT_ID: !Ref GithubClientId
         GITHUB_CLIENT_SECRET: !Ref GithubClientSecret
@@ -295,6 +300,13 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref CacheTable
+        # Ad images and video ads (tools/media_store.py): only this bucket's objects.
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObject
+              Resource: !Sub "arn:aws:s3:::${MediaBucket}/*"
         # Passphrase reset emails (gateway/reset_router.py), only from the vicinic.co.za domain.
         - Statement:
             - Effect: Allow

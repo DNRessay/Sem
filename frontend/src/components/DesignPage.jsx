@@ -168,15 +168,19 @@ function VicinicPicker({ headers, onBrief, disabled }) {
     );
 }
 
-function AdCard({ ad, onRetry }) {
+// Saved images/videos are links (kept 7 days in S3); older or unsaved ones are inline base64.
+const mediaSrc = (m) => m?.url || (m?.base64 ? `data:${m.mime};base64,${m.base64}` : "");
+const EXPIRED = "Image expired (kept 7 days) — tap New image";
+
+function AdCard({ ad, onRetry, onExpired }) {
     const text = `${ad.headline}\n\n${ad.primary_text}\n\n${(ad.hashtags || []).join(" ")}`;
     return (
         <div style={{ border: "1px solid var(--border)", borderRadius: "14px", overflow: "hidden", background: "var(--surface)" }}>
             <div style={{ background: "var(--surface-2)", minHeight: "120px", display: "flex", alignItems: "center", justifyContent: "center" }}>
                 {ad.image ? (
-                    <img src={`data:${ad.image.mime};base64,${ad.image.base64}`} alt={ad.headline} style={{ width: "100%", display: "block" }} />
+                    <img src={mediaSrc(ad.image)} alt={ad.headline} onError={onExpired} style={{ width: "100%", display: "block" }} />
                 ) : (
-                    <span style={{ fontSize: "12px", color: !ad.imageError ? "var(--text-muted)" : /limit|not kept/i.test(ad.imageError) ? "var(--warning)" : "var(--danger)", padding: "16px", textAlign: "center" }}>
+                    <span style={{ fontSize: "12px", color: !ad.imageError ? "var(--text-muted)" : /limit|not kept|expired/i.test(ad.imageError) ? "var(--warning)" : "var(--danger)", padding: "16px", textAlign: "center" }}>
                         {ad.imageError || "Making image…"}
                     </span>
                 )}
@@ -191,7 +195,7 @@ function AdCard({ ad, onRetry }) {
                     <span style={{ flex: 1 }} />
                     <button onClick={() => copyToClipboard(text)} style={{ ...btn, fontSize: "12px" }}>Copy text</button>
                     {ad.image && (
-                        <a href={`data:${ad.image.mime};base64,${ad.image.base64}`} download={`ad-${ad.placement}.png`} style={{ ...btn, fontSize: "12px", textDecoration: "none" }}>Download</a>
+                        <a href={mediaSrc(ad.image)} download={`ad-${ad.placement}.png`} target="_blank" rel="noreferrer" style={{ ...btn, fontSize: "12px", textDecoration: "none" }}>Download</a>
                     )}
                     <button onClick={onRetry} style={{ ...btn, fontSize: "12px" }}>New image</button>
                 </div>
@@ -200,12 +204,24 @@ function AdCard({ ad, onRetry }) {
     );
 }
 
+const VIDEO_KEY = "semblance_last_video";
+
 function VideoStudio({ token, seedPrompt }) {
     const [prompt, setPrompt] = useState("");
     const [aspect, setAspect] = useState("9:16");
     const [job, setJob] = useState(null);
     const [status, setStatus] = useState("");
-    const [video, setVideo] = useState(null);
+    // The last finished video stays for its 7 days (its link's exp), across reloads.
+    const [video, setVideoState] = useState(() => {
+        try {
+            const v = JSON.parse(localStorage.getItem(VIDEO_KEY));
+            return v?.url && Number(new URL(v.url).searchParams.get("exp")) * 1000 > Date.now() ? v : null;
+        } catch { return null; }
+    });
+    const setVideo = (v) => {
+        setVideoState(v);
+        try { v?.url ? localStorage.setItem(VIDEO_KEY, JSON.stringify(v)) : localStorage.removeItem(VIDEO_KEY); } catch { /* private mode */ }
+    };
     const [budget, setBudget] = useState(null);
     const timer = useRef(null);
     const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
@@ -256,8 +272,9 @@ function VideoStudio({ token, seedPrompt }) {
             {status && <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "8px" }}>{status}</div>}
             {video && (
                 <div style={{ marginTop: "10px" }}>
-                    <video src={`data:${video.mime};base64,${video.base64}`} controls style={{ width: "100%", borderRadius: "12px" }} />
-                    <a href={`data:${video.mime};base64,${video.base64}`} download="semblance-video-ad.mp4" style={{ ...btn, display: "inline-block", marginTop: "6px", textDecoration: "none" }}>Download video</a>
+                    <video src={mediaSrc(video)} controls playsInline onError={() => video.url && setVideo(null)} style={{ width: "100%", borderRadius: "12px" }} />
+                    <a href={mediaSrc(video)} download="semblance-video-ad.mp4" target="_blank" rel="noreferrer" style={{ ...btn, display: "inline-block", marginTop: "6px", textDecoration: "none" }}>Download video</a>
+                    {video.url && <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px" }}>Kept for 7 days</div>}
                 </div>
             )}
         </div>
@@ -272,7 +289,8 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
     const { chats, chat, updateChat, newChat, selectChat, deleteChat } = useTabChats(STORE_KEY, {
         blank: () => ({ site: "", brief: "", campaign: "", placements: ["fb_ig_feed", "story_reel"], count: 2, ads: [] }),
         legacy: () => { const s = loadSaved(); return { ...s, title: (s.campaign || "").slice(0, 60) }; },
-        persist: c => ({ ...c, ads: (c.ads || []).map(({ image, ...ad }) => (image ? { ...ad, imageError: "Image not kept — tap New image" } : ad)) }),
+        // Saved images are short links and stay with the chat; inline (unsaved) ones are too big for the phone.
+        persist: c => ({ ...c, ads: (c.ads || []).map(({ image, ...ad }) => (image?.url ? { ...ad, image } : image ? { ...ad, imageError: "Image not kept — tap New image" } : ad)) }),
     });
     const { site, brief, campaign, placements, count } = chat;
     const field$ = key => v => updateChat(chat.id, c => ({ [key]: typeof v === "function" ? v(c[key]) : v,
@@ -324,7 +342,7 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
         else if (ev.type === "variants") {
             set(ev.variants.map(v => ({ ...v, placementLabel: (PLACEMENTS.find(p => p[0] === v.placement) || [])[1] })));
             setBusy("Making images…");
-        } else if (ev.type === "image") set(a => a.map((ad, i) => (i === ev.index ? { ...ad, image: { mime: ev.mime, base64: ev.base64 }, imageError: "" } : ad)));
+        } else if (ev.type === "image") set(a => a.map((ad, i) => (i === ev.index ? { ...ad, image: ev.url ? { mime: ev.mime, url: ev.url } : { mime: ev.mime, base64: ev.base64 }, imageError: "" } : ad)));
         else if (ev.type === "image_error") set(a => a.map((ad, i) => (i === ev.index ? { ...ad, imageError: ev.error } : ad)));
         else if (ev.type === "error") setNotice(ev.text);
     };
@@ -361,7 +379,7 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
             const r = await fetch(`${API}/design/image`, { method: "POST", headers, body: JSON.stringify({ prompt: ad.image_prompt, aspect_ratio: ad.aspect_ratio, references }) });
             const d = await r.json();
             if (!r.ok) throw new Error(d.detail || `Failed (${r.status})`);
-            setAds(a => a.map((x, i) => (i === index ? { ...x, image: { mime: d.mime, base64: d.base64 } } : x)));
+            setAds(a => a.map((x, i) => (i === index ? { ...x, image: d.url ? { mime: d.mime, url: d.url } : { mime: d.mime, base64: d.base64 } } : x)));
         } catch (e) { setAds(a => a.map((x, i) => (i === index ? { ...x, imageError: e.message } : x))); }
     };
 
@@ -430,7 +448,8 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
                 )}
                 {ads.length > 0 && (
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "12px", marginTop: "14px" }}>
-                        {ads.map((ad, i) => <AdCard key={i} ad={ad} onRetry={() => retryImage(i)} />)}
+                        {ads.map((ad, i) => <AdCard key={i} ad={ad} onRetry={() => retryImage(i)}
+                            onExpired={() => ad.image?.url && setAds(x => x.map((y, j) => (j === i ? { ...y, image: null, imageError: EXPIRED } : y)))} />)}
                     </div>
                 )}
 
