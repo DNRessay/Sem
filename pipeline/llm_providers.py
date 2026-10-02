@@ -74,8 +74,8 @@ def cheapest_paid() -> dict | None:
 
 
 # Context window (tokens) per provider — what the chat's context ring measures against.
-# Bonsai: llama-server splits -c 65536 across -np 2 slots, so one request gets 32768.
-CONTEXT = {"bonsai": 32768, "gemini": 1_000_000, "groq": 131072, "anthropic": 200000, "openai": 400000,
+# Bonsai: one llama-server slot with a 131072-token window (see modal_app/llm.py).
+CONTEXT = {"bonsai": 131072, "gemini": 1_000_000, "groq": 131072, "anthropic": 200000, "openai": 400000,
            "qwen": 131072, "deepseek": 128000, "kimi": 256000, "huggingface": 32768}
 
 
