@@ -89,6 +89,23 @@ async def describe_style(references: list[dict]) -> dict:
     return {"ok": bool(text), "text": text, **({} if text else {"error": "Gemini returned no description"})}
 
 
+async def describe_design(references: list[dict]) -> dict:
+    """A UI design (e.g. Figma frames) as build notes a developer — or a text-only model — can rebuild from."""
+    refs = clean_references(references)
+    if not refs:
+        return {"ok": False, "error": "no design images"}
+    result = await _generate(settings.GEMINI_MODEL, {"contents": [{"parts": _ref_parts(refs) + [{"text": (
+        "These are screens from a website/app design. Write build notes so a developer can rebuild them faithfully: "
+        "for each screen, the sections from top to bottom with their layout (columns, alignment, spacing), every "
+        "visible heading/button/label text, colours as hex, fonts (family guess, weights, sizes), corner radii, "
+        "shadows, icons and image placeholders. Be concrete and concise; no commentary.")}]}]}, timeout=90)
+    if not result["ok"]:
+        return result
+    parts = (((result["data"].get("candidates") or [{}])[0].get("content") or {}).get("parts")) or []
+    text = "".join(p.get("text", "") for p in parts).strip()
+    return {"ok": bool(text), "text": text, **({} if text else {"error": "Gemini returned no description"})}
+
+
 def _pcm_to_wav(pcm: bytes, rate: int = _TTS_RATE) -> bytes:
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:

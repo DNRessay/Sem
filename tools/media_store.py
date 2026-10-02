@@ -13,7 +13,7 @@ from urllib.parse import quote
 from config import settings
 
 KEEP_SECONDS = 7 * 24 * 3600
-KEY_RE = re.compile(r"(ads|video)/\d{4}-\d{2}-\d{2}/[a-f0-9]{32}\.(png|jpg|webp|mp4)")
+KEY_RE = re.compile(r"(ads|video|web)/\d{4}-\d{2}-\d{2}/[a-f0-9]{32}\.(png|jpg|webp|mp4)")
 _EXT = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "video/mp4": "mp4"}
 
 
@@ -43,7 +43,7 @@ def verify(key: str, exp: int, sig: str) -> bool:
 async def save(data_b64: str, mime: str, kind: str) -> str | None:
     """Stores the file and returns its 7-day link, or None (no bucket, or S3 failed: the caller keeps base64)."""
     ext = _EXT.get(mime)
-    if not enabled() or not ext or kind not in ("ads", "video"):
+    if not enabled() or not ext or kind not in ("ads", "video", "web"):
         return None
     key = f"{kind}/{time.strftime('%Y-%m-%d')}/{uuid.uuid4().hex}.{ext}"
     try:

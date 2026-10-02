@@ -7,9 +7,12 @@ import AgentFeedPanel from "./AgentFeedPanel";
 import useAgentFeed from "../hooks/useAgentFeed";
 import TabDrawer, { MenuButton } from "./TabDrawer";
 import useTabChats from "../hooks/useTabChats";
+import WebStudio from "./WebStudio";
 
 const API = import.meta.env.VITE_API_URL || "";
 const STORE_KEY = "semblance_design_campaigns";
+const MODE_KEY = "semblance_design_mode"; // "ads" | "web"
+const keepLinks = list => (list || []).map(({ image, ...x }) => (image?.url ? { ...x, image } : x));
 const OLD_KEY = "semblance_design";
 const PLACEMENTS = [
     ["fb_ig_feed", "FB/IG feed"], ["square", "Square"], ["story_reel", "Story/Reel/TikTok"],
@@ -290,7 +293,11 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
         blank: () => ({ site: "", brief: "", campaign: "", placements: ["fb_ig_feed", "story_reel"], count: 2, ads: [] }),
         legacy: () => { const s = loadSaved(); return { ...s, title: (s.campaign || "").slice(0, 60) }; },
         // Saved images are short links and stay with the chat; inline (unsaved) ones are too big for the phone.
-        persist: c => ({ ...c, ads: (c.ads || []).map(({ image, ...ad }) => (image?.url ? { ...ad, image } : image ? { ...ad, imageError: "Image not kept — tap New image" } : ad)) }),
+        persist: c => ({
+            ...c, ads: (c.ads || []).map(({ image, ...ad }) => (image?.url ? { ...ad, image } : image ? { ...ad, imageError: "Image not kept — tap New image" } : ad)),
+            ...(c.web ? { web: { ...c.web, logos: keepLinks(c.web.logos),
+                ...(c.web.figma ? { figma: { ...c.web.figma, frames: (c.web.figma.frames || []).filter(f => f.url) } } : {}) } } : {}),
+        }),
     });
     const { site, brief, campaign, placements, count } = chat;
     const field$ = key => v => updateChat(chat.id, c => ({ [key]: typeof v === "function" ? v(c[key]) : v,
@@ -319,6 +326,8 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
     const setAds = v => updateChat(chat.id, c => ({ ads: typeof v === "function" ? v(c.ads || []) : v }));
     const [busy, setBusy] = useState("");
     const [notice, setNotice] = useState("");
+    const [mode, setModeState] = useState(() => { try { return localStorage.getItem(MODE_KEY) === "web" ? "web" : "ads"; } catch { return "ads"; } });
+    const setMode = m => { setModeState(m); setNotice(""); try { localStorage.setItem(MODE_KEY, m); } catch { /* private mode */ } };
     const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
 
     const learn = async () => {
@@ -389,7 +398,15 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
         <div style={{ position: "fixed", inset: 0, background: "var(--bg)", zIndex: 25, display: "flex", flexDirection: "column" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
                 <MenuButton onClick={() => setMenuOpen(true)} />
-                <span style={{ fontWeight: 700, color: "var(--text)", flex: 1 }}>Sem Design</span>
+                <span style={{ fontWeight: 700, color: "var(--text)" }}>Sem Design</span>
+                <div role="tablist" aria-label="Design mode" style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: "999px", padding: "2px" }}>
+                    {[["ads", "Ads"], ["web", "Web"]].map(([id, name]) => (
+                        <button key={id} role="tab" aria-selected={mode === id} disabled={!!busy && mode !== id} onClick={() => setMode(id)}
+                            style={{ border: "none", borderRadius: "999px", padding: "4px 10px", fontSize: "12px", fontWeight: 600, cursor: "pointer",
+                                background: mode === id ? "var(--accent)" : "transparent", color: mode === id ? "var(--accent-contrast)" : "var(--text-muted)" }}>{name}</button>
+                    ))}
+                </div>
+                <span style={{ flex: 1 }} />
                 <HeaderStatus token={token} onFeed={() => { setFeedOpen(true); feed.acknowledgeErrors(); }} hasError={feed.hasError} busy={!!busy} />
                 <ModelPicker token={token} value={model} onChange={setModel} storageKey="semblance_design_model" />
             </div>
@@ -416,6 +433,13 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
                 <textarea value={brief} onChange={e => setBrief(e.target.value)} rows={brief ? 9 : 3} style={{ ...field, marginTop: "8px" }}
                     placeholder="Or describe the business: what you sell, who to, where, your tone…" />
 
+                {mode === "web" ? (
+                    <>
+                        <WebStudio headers={headers} chat={chat} updateChat={updateChat} brief={brief} site={site} model={model}
+                            busy={busy} setBusy={setBusy} setNotice={setNotice} onUnauthorized={onUnauthorized} onHandoff={onHandoff} />
+                        {(busy || notice) && <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "8px" }}>{busy || notice}</div>}
+                    </>
+                ) : (<>
                 <Inspiration refs={refs} setRefs={setRefs} style={chat.style} disabled={!!busy} />
 
                 <div style={label}>CAMPAIGN</div>
@@ -454,6 +478,7 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
                 )}
 
                 <VideoStudio token={token} seedPrompt={ads[0]?.image_prompt || ""} />
+                </>)}
             </div>
         </div>
     );
