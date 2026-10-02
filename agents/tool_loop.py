@@ -141,7 +141,7 @@ class ToolLoopAgent:
 
     async def run(self, task: str, history: list[dict] | None = None):
         messages = self._messages(task, history or [])
-        answered_by = ""
+        answered_by, tokens = "", 0
         async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=180.0)) as client:
             for step in range(1, self.max_steps + 1):
                 if time.monotonic() > self.deadline:
@@ -156,6 +156,8 @@ class ToolLoopAgent:
                     return
 
                 answered_by = msg.get("_provider") or answered_by
+                tokens += int(msg.get("_tokens") or 0)
+                yield {"type": "usage", "tokens": tokens}
                 content = msg.get("content") or ""
                 calls = msg.get("tool_calls") or []
                 if content.strip():

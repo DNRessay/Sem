@@ -194,11 +194,14 @@ class Bootstrap:
     async def _tool_reply(self, messages: list[dict], session_id: str, provider: str):
         tools, active = await chat_tools.available(session_id)
         deadline = time.monotonic() + 240
-        used = []
+        used, tokens = [], 0
         for step in range(_MAX_TOOL_STEPS + 1):
             result = await llm_providers.complete(
                 provider, messages, tools if step < _MAX_TOOL_STEPS else None, max_tokens=4096, deadline=deadline,
             )
+            if "error" not in result:
+                tokens += int(result.get("_tokens") or 0)
+                yield {"usage": tokens}
             if "error" in result:
                 if result.get("suggest"):
                     yield {"suggest_model": result["suggest"]}

@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import VoiceMode, { VoiceModeButton } from "./VoiceMode";
+import { TabWorking } from "./Working";
 import ModelPicker, { loadModel } from "./ModelPicker";
 import { ToolStep, md } from "./CodePage";
 import { readEvents } from "../utils/sse";
@@ -92,6 +94,10 @@ export default function FinancePage({ token, onNavigate, onUnauthorized, handoff
         newChat(); setInput(handoff.task);
     }, [handoff]); // eslint-disable-line react-hooks/exhaustive-deps
     const [busy, setBusy] = useState(false);
+    const liveFrom = useRef(Infinity);
+    const [voiceOn, setVoiceOn] = useState(false);
+    const [tokens, setTokens] = useState(0);
+    useEffect(() => { liveFrom.current = Infinity; }, [chat.id]);
     const [model, setModel] = useState(() => loadModel("semblance_finance_model"));
     const budget = useContextBudget(items, model, token);
     const [compacting, setCompacting] = useState(false);
@@ -134,6 +140,8 @@ export default function FinancePage({ token, onNavigate, onUnauthorized, handoff
 
     const run = async (message, useModel = model) => {
         if (!message.trim() || busy) return;
+        liveFrom.current = items.length;
+        setTokens(0);
         const slash = parseSlash(message, COMMANDS);
         if (slash) { setInput(""); return runCommand(slash.cmd.name, slash.rest); }
         const sent = withAttachments(message, files);
@@ -156,7 +164,8 @@ export default function FinancePage({ token, onNavigate, onUnauthorized, handoff
             if (res.status === 401) { onUnauthorized(); return; }
             if (!res.ok || !res.body) throw new Error((await res.json().catch(() => ({}))).detail || `Request failed: ${res.status}`);
             await readEvents(res, (ev) => {
-                if (ev.type === "text") add(it => [...it, { kind: "text", text: ev.text }]);
+                if (ev.type === "usage") setTokens(ev.tokens);
+                else if (ev.type === "text") add(it => [...it, { kind: "text", text: ev.text }]);
                 else if (ev.type === "tool") add(it => [...it, { kind: "tool", id: ev.id, name: ev.name.replace("mcp__clab__", "c-lab: "), args: ev.args }]);
                 else if (ev.type === "result") add(it => it.map(i => (i.kind === "tool" && i.id === ev.id && i.ok === undefined ? { ...i, ok: ev.ok, output: ev.output } : i)));
                 else if (ev.type === "handoff") add(it => [...it, { kind: "handoff", tab: ev.tab, task: ev.task }]);
@@ -218,9 +227,9 @@ export default function FinancePage({ token, onNavigate, onUnauthorized, handoff
                             <SuggestModel suggest={item.suggest} onSwitch={id => { setModel(id); run(item.retry, id); }} />
                         </div>
                     );
-                    return <AssistantText key={i} text={item.text} token={token} copyText={replies.get(i)} />;
+                    return <AssistantText key={i} text={item.text} token={token} copyText={replies.get(i)} animate={i >= liveFrom.current} />;
                 }); })()}
-                {busy && <div style={{ color: "var(--text-muted)", fontSize: "13px", margin: "8px 0" }}>Looking at your numbers…</div>}
+                <TabWorking tokens={tokens} active={busy} status="Looking at your numbers…" />
                 {compacting && <div style={{ color: "var(--text-muted)", fontSize: "13px", margin: "8px 0" }}>Compacting the conversation…</div>}
                 <div ref={endRef} />
             </div>
@@ -238,6 +247,7 @@ export default function FinancePage({ token, onNavigate, onUnauthorized, handoff
                         <PlusMenu commands={COMMANDS} onCommand={c => (c.arg ? setInput(`/${c.name} `) : runCommand(c.name))}
                             onFiles={addFiles} onConnectors={() => setConnectorsOpen(true)} disabled={!!busy} />
                         <VoiceInput value={input} onChange={setInput} />
+                        <VoiceModeButton onClick={() => setVoiceOn(true)} />
                             <ModelPicker token={token} value={model} onChange={setModel} storageKey="semblance_finance_model" />
                             <span style={{ flex: 1 }} />
                         <ContextRing budget={budget} onCompact={compactNow} busy={!!busy || compacting} />
@@ -250,6 +260,8 @@ export default function FinancePage({ token, onNavigate, onUnauthorized, handoff
                     </div>
                 </div>
             )}
+            {voiceOn && <VoiceMode token={token} busy={!!busy} send={m => run(m)} onClose={() => setVoiceOn(false)}
+                lastReply={[...turnReplies(items, busy).values()].pop() || ""} />}
             {connectorsOpen && <ConnectorsSheet token={token} onClose={() => setConnectorsOpen(false)} />}
         </div>
     );

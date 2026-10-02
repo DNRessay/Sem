@@ -30,7 +30,7 @@ async def test_chat_model_calls_a_tool_then_answers(monkeypatch):
     monkeypatch.setattr(chat_tools, "run", fake_run)
 
     b = bootstrap_mod.Bootstrap.__new__(bootstrap_mod.Bootstrap)
-    out = [p async for p in b._tool_reply([{"role": "user", "content": "do you remember ams"}], "s1", "bonsai")]
+    out = [p async for p in b._tool_reply([{"role": "user", "content": "do you remember ams"}], "s1", "bonsai") if not (isinstance(p, dict) and "usage" in p)]
 
     assert out[0]["tool"]["kind"] == "memory" and "ams" in out[0]["tool"]["label"]
     assert out[1] == "You told me AMS is Abel Motshoane Secondary."
@@ -72,3 +72,23 @@ async def test_deep_research_tool_returns_the_cited_answer(monkeypatch):
     out = await chat_tools.run("deep_research", {"question": "best x?"}, "s1", None)
     assert out == {"ok": True, "answer": "Answer [1]", "pages_read": ["https://a"]}
     assert (await research_agent.deep_research("  "))["ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_chat_reports_tokens_used(monkeypatch):
+    async def fake_complete(provider, messages, tools=None, **kw):
+        return {"role": "assistant", "content": "hi", "_tokens": 120}
+
+    async def fake_available(session_id):
+        return chat_tools.BASE, None
+
+    monkeypatch.setattr(bootstrap_mod.llm_providers, "complete", fake_complete)
+    monkeypatch.setattr(chat_tools, "available", fake_available)
+    b = bootstrap_mod.Bootstrap.__new__(bootstrap_mod.Bootstrap)
+    out = [p async for p in b._tool_reply([{"role": "user", "content": "hi"}], "s1", "bonsai")]
+    assert out == [{"usage": 120}, "hi"]
+
+
+def test_token_estimate_when_provider_is_silent():
+    from pipeline import llm_providers
+    assert llm_providers.estimate_tokens([{"content": "a" * 400}], {"content": "b" * 40}) == 110

@@ -213,3 +213,14 @@ body {
     0%, 100% { box-shadow: 0 0 0 0 var(--danger-bg); }
     50% { box-shadow: 0 0 0 6px var(--danger-bg); }
 }
+
+/* Sem's gold "S" working mark: a slow breathe + glow, brighter than the UI gold. */
+@keyframes sem-s-breathe {
+    0%, 100% { transform: scale(1) rotate(0deg); filter: drop-shadow(0 0 1px rgba(255, 196, 0, 0.5)); }
+    50% { transform: scale(1.12) rotate(-6deg); filter: drop-shadow(0 0 5px rgba(255, 205, 40, 0.9)); }
+}
+.sem-s { animation: sem-s-breathe 1.4s ease-in-out infinite; transform-origin: center; }
+@keyframes sem-orb {
+    0%, 100% { transform: scale(1); box-shadow: 0 0 18px rgba(255, 200, 40, 0.45); }
+    50% { transform: scale(1.08); box-shadow: 0 0 34px rgba(255, 200, 40, 0.85); }
+}

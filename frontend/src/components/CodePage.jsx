@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import VoiceMode, { VoiceModeButton } from "./VoiceMode";
+import { TabWorking } from "./Working";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import ModelPicker, { loadModel } from "./ModelPicker";
@@ -248,6 +250,10 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
         } finally { setCompacting(false); }
     };
     const [busy, setBusy] = useState("");
+    const liveFrom = useRef(Infinity);
+    const [voiceOn, setVoiceOn] = useState(false);
+    const [tokens, setTokens] = useState(0);
+    useEffect(() => { liveFrom.current = Infinity; }, [chat.id]);
     const [notice, setNotice] = useState("");
     const [showAutomations, setShowAutomations] = useState(false);
     const abortRef = useRef(null);
@@ -321,6 +327,8 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
 
     const run = async (message, runMode = mode, useModel = model) => {
         if (!message.trim() || busy || !repo) return;
+        liveFrom.current = items.length;
+        setTokens(0);
         const slash = parseSlash(message, COMMANDS);
         if (slash) { setInput(""); return runCommand(slash.cmd.name, slash.rest); }
         const sent = withAttachments(message, files);
@@ -346,7 +354,8 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
             if (res.status === 401) { onUnauthorized(); return; }
             if (!res.ok || !res.body) throw new Error(`Request failed: ${res.status}`);
             await readEvents(res, (ev) => {
-                if (ev.type === "text") add(it => [...it, { kind: "text", text: ev.text, mode: runMode }]);
+                if (ev.type === "usage") setTokens(ev.tokens);
+                else if (ev.type === "text") add(it => [...it, { kind: "text", text: ev.text, mode: runMode }]);
                 else if (ev.type === "tool") add(it => [...it, { kind: "tool", id: ev.id, name: ev.name, args: ev.args }]);
                 else if (ev.type === "result") add(it => it.map(i => (i.kind === "tool" && i.id === ev.id && i.ok === undefined ? { ...i, ok: ev.ok, output: ev.output } : i)));
                 else if (ev.type === "approval") add(it => [...it, { kind: "approval", id: ev.id, name: ev.name, args: ev.args, summary: ev.summary, state: "pending" }]);
@@ -492,9 +501,9 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
                             <SuggestModel suggest={item.suggest} onSwitch={id => { setModel(id); run(item.retry, mode, id); }} />
                         </div>
                     );
-                    return <AssistantText key={i} text={item.text} token={token} copyText={replies.get(i)} />;
+                    return <AssistantText key={i} text={item.text} token={token} copyText={replies.get(i)} animate={i >= liveFrom.current} />;
                 }); })()}
-                {busy && <div style={{ color: "var(--text-muted)", fontSize: "13px", margin: "8px 0" }}>{busy}</div>}
+                <TabWorking tokens={tokens} active={!!busy} status={busy === "Working…" || busy === "Planning…" ? "" : busy} />
                 {lastIsPlan && (
                     <button className="btn-primary" onClick={() => run("Go ahead and implement the plan above.", "act")} style={{ ...btn, margin: "8px 0", background: "var(--accent)", color: "var(--accent-contrast)" }}>
                         Approve plan &amp; run
@@ -520,6 +529,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
                             onFiles={addFiles} onConnectors={() => setConnectorsOpen(true)} disabled={!!busy}
                             extraItems={[{ label: "Add repo", icon: <CodeIcon size={18} />, onClick: () => setAddingRepo(true) }]} />
                         <VoiceInput value={input} onChange={setInput} />
+                        <VoiceModeButton onClick={() => setVoiceOn(true)} />
                         <ModeMenu mode={mode} onChange={pickMode} />
                         <ModelPicker token={token} value={model} onChange={setModel} storageKey="semblance_code_model" />
                         <span style={{ flex: 1 }} />
@@ -534,6 +544,8 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
                     </div>
                 </div>
             </div>
+            {voiceOn && <VoiceMode token={token} busy={!!busy} send={m => run(m)} onClose={() => setVoiceOn(false)}
+                lastReply={[...turnReplies(items, busy).values()].pop() || ""} />}
             {connectorsOpen && <ConnectorsSheet token={token} onClose={() => setConnectorsOpen(false)} />}
         </div>
     );

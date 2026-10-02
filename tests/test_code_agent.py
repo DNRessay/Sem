@@ -58,7 +58,7 @@ async def test_agent_loops_through_tools_until_a_final_answer():
                         _tool_call("c3", "bash", {"command": "pytest -q"})]),
             _reply("Fixed add() and tests pass."),
         ])
-        events = [e async for e in CodeAgent(ws).run("fix add")]
+        events = [e async for e in CodeAgent(ws).run("fix add") if e["type"] != "usage"]
 
     assert [c[0] for c in ws.calls] == ["read_file", "edit_file", "bash"]
     assert [e["type"] for e in events] == ["text", "tool", "result", "tool", "result", "tool", "result", "text", "done"]
@@ -77,7 +77,7 @@ async def test_plan_mode_only_offers_and_allows_read_only_tools():
             _reply("", [_tool_call("c1", "write_file", {"path": "x.py", "content": "x"})]),
             _reply("1. Change add()"),
         ])
-        events = [e async for e in CodeAgent(ws, mode="plan").run("plan it")]
+        events = [e async for e in CodeAgent(ws, mode="plan").run("plan it") if e["type"] != "usage"]
 
     offered = {t["function"]["name"] for t in json.loads(route.calls[0].request.content)["tools"]}
     assert offered == {"list_dir", "read_file", "grep", "aws", "deep_research", "handoff"}
@@ -91,7 +91,7 @@ async def test_bad_tool_arguments_are_reported_back_not_crashed_on():
     bad = {"id": "c1", "type": "function", "function": {"name": "bash", "arguments": "{not json"}}
     with respx.mock:
         respx.post(GROQ_URL).mock(side_effect=[_reply("", [bad]), _reply("ok")])
-        events = [e async for e in CodeAgent(ws).run("go")]
+        events = [e async for e in CodeAgent(ws).run("go") if e["type"] != "usage"]
     assert events[1]["ok"] is False and "not valid JSON" in events[1]["output"]
     assert ws.calls == []
 
@@ -100,7 +100,7 @@ async def test_bad_tool_arguments_are_reported_back_not_crashed_on():
 async def test_model_error_ends_the_run_with_an_error_event():
     with respx.mock:
         respx.post(GROQ_URL).mock(return_value=Response(500, json={"error": "boom"}))
-        events = [e async for e in CodeAgent(FakeWorkspace()).run("go")]
+        events = [e async for e in CodeAgent(FakeWorkspace()).run("go") if e["type"] != "usage"]
     assert events == [{"type": "error", "text": "Qwen 27B on Groq error 500: {'error': 'boom'}"}]
 
 
@@ -108,7 +108,7 @@ async def test_model_error_ends_the_run_with_an_error_event():
 async def test_step_limit_stops_a_runaway_loop():
     with respx.mock:
         respx.post(GROQ_URL).mock(return_value=_reply("", [_tool_call("c", "bash", {"command": "true"})]))
-        events = [e async for e in CodeAgent(FakeWorkspace(), max_steps=3).run("go")]
+        events = [e async for e in CodeAgent(FakeWorkspace(), max_steps=3).run("go") if e["type"] != "usage"]
     assert events[-1]["type"] == "error" and "3 steps" in events[-1]["text"]
 
 
@@ -163,7 +163,7 @@ async def test_handoff_emits_a_button_event_and_refuses_its_own_tab():
             _reply("", [_tool_call("h1", "handoff", {"tab": "design", "task": "Make ads for the new pricing page"})]),
             _reply("Offered Design."),
         ])
-        events = [e async for e in CodeAgent(ws).run("make ads for this")]
+        events = [e async for e in CodeAgent(ws).run("make ads for this") if e["type"] != "usage"]
     assert {"type": "handoff", "tab": "design", "task": "Make ads for the new pricing page"} in events
     assert (await CodeAgent(ws)._route("handoff", {"tab": "code", "task": "x"}))["ok"] is False
 

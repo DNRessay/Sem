@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
+import { useTypewriter } from "../hooks/useTypewriter";
 import { copyToClipboard } from "../utils/clipboard";
 import { downloadAllAsZip, downloadText, extractCodeBlocks, filenameFor } from "../utils/codeBlocks";
 import ConnectorsPanel from "./ConnectorsPanel";
@@ -193,11 +194,13 @@ const pill = {
 // An assistant reply in any tab: markdown with code cards, then copy / read aloud / download-all.
 // `copyText` (the whole reply) shows the action row; omitted while the reply
 // is still being written or on text that isn't the end of a turn.
-export function AssistantText({ text, token, copyText }) {
+export function AssistantText({ text, token, copyText, animate }) {
     return (
         <div style={{ margin: "6px 0" }}>
-            <div className="md-content" style={{ fontSize: "14px", color: "var(--text)" }}
-                onClick={handleCodeCardClick} dangerouslySetInnerHTML={renderMarkdown(text)} />
+            {animate ? <TypedMarkdown text={text} /> : (
+                <div className="md-content" style={{ fontSize: "14px", color: "var(--text)" }}
+                    onClick={handleCodeCardClick} dangerouslySetInnerHTML={renderMarkdown(text)} />
+            )}
             {copyText && (
                 <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                     <CopyButton text={copyText} />
@@ -207,6 +210,14 @@ export function AssistantText({ text, token, copyText }) {
             )}
         </div>
     );
+}
+
+// A new reply "types" in like the main chat instead of appearing all at once.
+function TypedMarkdown({ text }) {
+    const shown = useTypewriter(text);
+    const typing = shown.length < text.length;
+    return <div className="md-content" style={{ fontSize: "14px", color: "var(--text)" }}
+        onClick={handleCodeCardClick} dangerouslySetInnerHTML={renderMarkdown(typing ? shown + " ▋" : text)} />;
 }
 
 // For each finished turn, the index of its last text item → the turn's whole reply text.

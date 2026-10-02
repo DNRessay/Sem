@@ -7,6 +7,8 @@ import { SendIcon, StopIcon } from "./Icons";
 import { ChatMenu, CopyButton, DownloadAllButton, SpeakButton, SuggestModel, errorClass, handleCodeCardClick, renderMarkdown } from "./MessageKit";
 import { useTypewriter } from "../hooks/useTypewriter";
 import VoiceInput from "./VoiceInput";
+import VoiceMode, { VoiceModeButton } from "./VoiceMode";
+import { GoldS, formatTokens } from "./Working";
 import ModelPicker, { loadModel } from "./ModelPicker";
 import AttachMenu, { GitHubIcon, GitLabIcon, AttachFileIcon, ImageIcon } from "./AttachMenu";
 import { copyToClipboard } from "../utils/clipboard";
@@ -53,7 +55,7 @@ function useElapsedSeconds(active) {
     return elapsed;
 }
 
-function WaitLabel({ elapsed, status }) {
+function WaitLabel({ elapsed, status, tokens }) {
     const [i, setI] = useState(0);
 
     useEffect(() => {
@@ -63,8 +65,9 @@ function WaitLabel({ elapsed, status }) {
 
     return (
         <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "var(--text-muted)", fontSize: "14px" }}>
+            <GoldS />
             {status && <GlobeIcon />}
-            {elapsed}s · {status || `${THINKING_WORDS[i]}…`}
+            {elapsed}s{tokens ? ` · ${formatTokens(tokens)}` : ""} · {status || `${THINKING_WORDS[i]}…`}
         </span>
     );
 }
@@ -108,7 +111,8 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
     const [webSearchEnabled, setWebSearchEnabled] = useState(true);
     const [model, setModel] = useState(() => loadModel("semblance_chat_model"));
     const [research, setResearch] = useState(false);
-    const { chunks, streaming, error, status, tool, send, abort } = useStream(API, token, onUnauthorized);
+    const [voiceOn, setVoiceOn] = useState(false);
+    const { usage, chunks, streaming, error, status, tool, send, abort } = useStream(API, token, onUnauthorized);
     const bottomRef = useRef(null);
     // Set once send() resolves and cleared once the typewriter below has
     // fully caught up to it — history isn't updated until then, so the
@@ -208,7 +212,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                 {isWaiting && (
                     <div style={{ alignSelf: "flex-start", padding: "6px 2px" }}>
                         {tool && <ToolChip tool={tool} />}
-                        <WaitLabel elapsed={elapsed} status={status} />
+                        <WaitLabel elapsed={elapsed} status={status} tokens={usage} />
                     </div>
                 )}
                 {(streaming || pendingReply) && fullResponse.length > 0 && (
@@ -276,6 +280,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                         </button>
                         <span style={{ flex: 1 }} />
                         <VoiceInput value={input} onChange={setInput} />
+                        <VoiceModeButton onClick={() => setVoiceOn(true)} />
                         <button
                             onClick={streaming ? abort : () => submit()}
                             aria-label={streaming ? "Stop" : "Send"} className={streaming ? "" : "btn-gold"}
@@ -290,6 +295,8 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                     </div>
                 </div>
             </div>
+            {voiceOn && <VoiceMode token={token} send={m => submit(m)} busy={streaming || !!pendingReply} onClose={() => setVoiceOn(false)}
+                lastReply={[...history].reverse().find(m => m.role === "assistant")?.content || ""} />}
         </div>
     );
 }

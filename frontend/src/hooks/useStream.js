@@ -3,6 +3,7 @@ import { useState, useCallback, useRef } from "react";
 export function useStream(baseUrl = "", token = "", onUnauthorized) {
     const [chunks, setChunks] = useState([]);
     const [status, setStatus] = useState(null);
+    const [usage, setUsage] = useState(0);
     const [tool, setTool] = useState(null);
     const [streaming, setStreaming] = useState(false);
     const [error, setError] = useState(null);
@@ -11,6 +12,7 @@ export function useStream(baseUrl = "", token = "", onUnauthorized) {
     const send = useCallback(async (message, sessionId = "default", history = [], attachments = [], webSearchEnabled = true, model = "auto", research = false) => {
         setChunks([]);
         setStatus(null);
+        setUsage(0);
         setTool(null);
         setError(null);
         setStreaming(true);
@@ -62,7 +64,9 @@ export function useStream(baseUrl = "", token = "", onUnauthorized) {
                 if (data === "[DONE]") return;
                 try {
                     const parsed = JSON.parse(data);
-                    if (parsed.tool) {
+                    if (parsed.usage) {
+                        setUsage(parsed.usage);
+                    } else if (parsed.tool) {
                         toolLocal = parsed.tool;
                         setTool(parsed.tool);
                         setStatus(null); // the search/fetch is done — the chip replaces the breadcrumb
@@ -106,5 +110,5 @@ export function useStream(baseUrl = "", token = "", onUnauthorized) {
 
     const abort = useCallback(() => abortRef.current?.abort(), []);
 
-    return { chunks, streaming, error, status, tool, send, abort };
+    return { usage, chunks, streaming, error, status, tool, send, abort };
 }

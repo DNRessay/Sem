@@ -104,6 +104,11 @@ def _chain(choice: str) -> list[Provider]:
     return [PROVIDERS[i] for i in FREE_ORDER if PROVIDERS[i].configured]
 
 
+def estimate_tokens(messages: list[dict], reply: dict) -> int:
+    chars = sum(len(str(m.get("content") or "")) for m in messages) + len(str(reply.get("content") or ""))
+    return chars // 4
+
+
 def _clean(messages: list[dict]) -> list[dict]:
     # Private keys (Claude's raw blocks, "_provider") mean nothing to other APIs, which reject unknown fields.
     return [{k: v for k, v in m.items() if not k.startswith("_")} for m in messages]
@@ -131,6 +136,8 @@ async def _complete_openai(p: Provider, client: httpx.AsyncClient, messages: lis
                 "unavailable": r.status_code not in (400, 422)}  # a bad key or outage: try the next model
     message = data["choices"][0]["message"]
     message.pop("reasoning_content", None)
+    usage = data.get("usage") or {}
+    message["_tokens"] = usage.get("total_tokens") or (usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0))
     return message
 
 
@@ -160,6 +167,8 @@ async def complete(choice: str, messages: list[dict], tools: list[dict] | None =
                     result = {"error": f"{p.label} unreachable: {e}", "unavailable": True}
                 if "error" not in result:
                     result["_provider"] = p.id
+                    if not result.get("_tokens"):  # provider didn't report usage: ~4 characters a token
+                        result["_tokens"] = estimate_tokens(messages, result)
                     return result
                 # A model picked on its own gets one retry on a brief overload; in "auto" the next model is the retry.
                 transient = result.get("rate_limited") or result.get("unavailable")
