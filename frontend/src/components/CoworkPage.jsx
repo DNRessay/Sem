@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import ModelPicker, { loadModel } from "./ModelPicker";
 import { ToolStep, md } from "./CodePage";
 import { readEvents } from "../utils/sse";
-import { AUTO_COMPACT_AT, ContextRing, compactItems, useContextBudget, AssistantText, AttachedChips, CLEAR_COMMAND, ChatMenu, ConnectorsSheet, HELP_COMMAND, NEW_COMMAND, PlusMenu, SuggestModel, errorClass, helpText, parseSlash, readTextFiles, withAttachments } from "./MessageKit";
+import { AUTO_COMPACT_AT, ContextRing, compactItems, useContextBudget, AssistantText, AttachedChips, QueuedMessages, turnReplies, useSendQueue, CLEAR_COMMAND, ChatMenu, ConnectorsSheet, HELP_COMMAND, NEW_COMMAND, PlusMenu, SuggestModel, errorClass, helpText, parseSlash, readTextFiles, withAttachments } from "./MessageKit";
 import { HeaderStatus } from "./StatusBar";
 import { SendIcon, StopIcon } from "./Icons";
 import AgentFeedPanel from "./AgentFeedPanel";
@@ -165,6 +165,12 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized, handoff,
         }
         setBusy(false);
     };
+    const { queue, enqueue, remove: unqueue } = useSendQueue(busy, (m) => run(m));
+    const submit = () => {
+        if (!busy) return run(input);
+        enqueue(input);
+        setInput("");
+    };
 
     const decide = async (id, decision) => {
         const item = items.find(i => i.kind === "approval" && i.id === id);
@@ -207,7 +213,7 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized, handoff,
                         ))}
                     </div>
                 )}
-                {items.map((item, i) => {
+                {(() => { const replies = turnReplies(items, busy); return items.map((item, i) => {
                     if (item.kind === "tool") return <ToolStep key={i} item={item} />;
                     if (item.kind === "approval") return <ApprovalCard key={`${item.id}-${i}`} item={item} onDecide={decide} />;
                     if (item.kind === "image") return (
@@ -231,8 +237,8 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized, handoff,
                             <SuggestModel suggest={item.suggest} onSwitch={id => { setModel(id); run(item.retry, id); }} />
                         </div>
                     );
-                    return <AssistantText key={i} text={item.text} token={token} />;
-                })}
+                    return <AssistantText key={i} text={item.text} token={token} copyText={replies.get(i)} />;
+                }); })()}
                 {busy && <div style={{ color: "var(--text-muted)", fontSize: "13px", margin: "8px 0" }}>Working…</div>}
                 {compacting && <div style={{ color: "var(--text-muted)", fontSize: "13px", margin: "8px 0" }}>Compacting the conversation…</div>}
                 <div ref={endRef} />
@@ -240,11 +246,12 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized, handoff,
 
             <div style={{ padding: "8px 8px 20px" }}>
                 <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "20px", padding: "10px 14px 8px" }}>
+                    <QueuedMessages queue={queue} onRemove={unqueue} />
                     <AttachedChips files={files} setFiles={setFiles} />
                     <textarea
                         value={input} rows={2}
                         onChange={e => setInput(e.target.value)}
-                        onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); run(input); } }}
+                        onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
                         placeholder="Type / for commands"
                         style={{ width: "100%", background: "transparent", border: "none", color: "var(--text)", fontSize: "15px", outline: "none", resize: "none", fontFamily: "inherit" }}
                     />
@@ -256,11 +263,11 @@ export default function CoworkPage({ token, onNavigate, onUnauthorized, handoff,
                         <span style={{ flex: 1 }} />
                         <ContextRing budget={budget} onCompact={compactNow} busy={!!busy || compacting} />
                         <button
-                            onClick={busy ? () => abortRef.current?.abort() : () => run(input)}
-                            aria-label={busy ? "Stop" : "Send"} className={busy ? "" : "btn-gold"}
+                            onClick={busy && !input.trim() ? () => abortRef.current?.abort() : submit}
+                            aria-label={busy ? (input.trim() ? "Queue message" : "Stop") : "Send"} className={busy && !input.trim() ? "" : "btn-gold"}
                             style={{ width: "32px", height: "32px", borderRadius: "50%", border: "none", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center",
-                                background: busy ? "var(--danger)" : "var(--accent)", color: "var(--accent-contrast)", fontSize: "15px" }}
-                        >{busy ? <StopIcon size={14} /> : <SendIcon size={16} />}</button>
+                                background: busy && !input.trim() ? "var(--danger)" : "var(--accent)", color: "var(--accent-contrast)", fontSize: "15px" }}
+                        >{busy && !input.trim() ? <StopIcon size={14} /> : <SendIcon size={16} />}</button>
                     </div>
                 </div>
             </div>

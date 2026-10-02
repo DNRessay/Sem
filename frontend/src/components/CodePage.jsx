@@ -4,7 +4,7 @@ import DOMPurify from "dompurify";
 import ModelPicker, { loadModel } from "./ModelPicker";
 import { readEvents } from "../utils/sse";
 import { RepoPicker } from "./AttachMenu";
-import { AUTO_COMPACT_AT, ContextRing, compactItems, useContextBudget, ModeMenu, AssistantText, AttachedChips, CLEAR_COMMAND, ChatMenu, ConnectorsSheet, HELP_COMMAND, NEW_COMMAND, PlusMenu, SuggestModel, errorClass, helpText, parseSlash, readTextFiles, withAttachments } from "./MessageKit";
+import { AUTO_COMPACT_AT, ContextRing, compactItems, useContextBudget, ModeMenu, AssistantText, AttachedChips, QueuedMessages, turnReplies, useSendQueue, CLEAR_COMMAND, ChatMenu, ConnectorsSheet, HELP_COMMAND, NEW_COMMAND, PlusMenu, SuggestModel, errorClass, helpText, parseSlash, readTextFiles, withAttachments } from "./MessageKit";
 import { ApprovalCard } from "./CoworkPage";
 import { HeaderStatus, iconBtn } from "./StatusBar";
 import { CloseIcon, CodeIcon, PlusIcon, SendIcon, StopIcon } from "./Icons";
@@ -358,6 +358,12 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
         }
         setBusy("");
     };
+    const { queue, enqueue, remove: unqueue } = useSendQueue(busy, (m) => run(m));
+    const submit = () => {
+        if (!busy) return run(input);
+        enqueue(input);
+        setInput("");
+    };
 
     // Merges, pushes, workflow runs and secrets wait for this tap; the server runs exactly what it showed.
     const decide = async (id, decision) => {
@@ -469,7 +475,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
                         (shared by every chat on that repo) and nothing reaches your repo until it opens a PR. Use Plan first for bigger changes.
                     </div>
                 )}
-                {items.map((item, i) => {
+                {(() => { const replies = turnReplies(items, busy); return items.map((item, i) => {
                     if (item.kind === "tool") return <ToolStep key={i} item={item} />;
                     if (item.kind === "user") return (
                         <div key={i} style={{ margin: "12px 0 6px", display: "flex", justifyContent: "flex-end" }}>
@@ -486,8 +492,8 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
                             <SuggestModel suggest={item.suggest} onSwitch={id => { setModel(id); run(item.retry, mode, id); }} />
                         </div>
                     );
-                    return <AssistantText key={i} text={item.text} token={token} />;
-                })}
+                    return <AssistantText key={i} text={item.text} token={token} copyText={replies.get(i)} />;
+                }); })()}
                 {busy && <div style={{ color: "var(--text-muted)", fontSize: "13px", margin: "8px 0" }}>{busy}</div>}
                 {lastIsPlan && (
                     <button className="btn-primary" onClick={() => run("Go ahead and implement the plan above.", "act")} style={{ ...btn, margin: "8px 0", background: "var(--accent)", color: "var(--accent-contrast)" }}>
@@ -500,11 +506,12 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
 
             <div style={{ padding: "8px 8px 20px" }}>
                 <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "20px", padding: "10px 14px 8px" }}>
+                    <QueuedMessages queue={queue} onRemove={unqueue} />
                     <AttachedChips files={files} setFiles={setFiles} />
                     <textarea
                         value={input} rows={2} disabled={!repo}
                         onChange={e => setInput(e.target.value)}
-                        onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); run(input); } }}
+                        onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
                         placeholder={repo ? "Type / for commands" : "Pick a repo first"}
                         style={{ width: "100%", background: "transparent", border: "none", color: "var(--text)", fontSize: "15px", outline: "none", resize: "none", fontFamily: "inherit" }}
                     />
@@ -518,12 +525,12 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
                         <span style={{ flex: 1 }} />
                         <ContextRing budget={budget} onCompact={compactNow} busy={!!busy || compacting} />
                         <button
-                            onClick={busy && abortRef.current ? () => abortRef.current.abort() : () => run(input)}
+                            onClick={busy && !input.trim() ? () => abortRef.current?.abort() : submit}
                             disabled={!repo}
-                            aria-label={busy ? "Stop" : "Send"} className={busy ? "" : "btn-gold"}
+                            aria-label={busy ? (input.trim() ? "Queue message" : "Stop") : "Send"} className={busy && !input.trim() ? "" : "btn-gold"}
                             style={{ width: "32px", height: "32px", borderRadius: "50%", border: "none", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center",
-                                background: busy ? "var(--danger)" : "var(--accent)", color: "var(--accent-contrast)", fontSize: "15px" }}
-                        >{busy ? <StopIcon size={14} /> : <SendIcon size={16} />}</button>
+                                background: busy && !input.trim() ? "var(--danger)" : "var(--accent)", color: "var(--accent-contrast)", fontSize: "15px" }}
+                        >{busy && !input.trim() ? <StopIcon size={14} /> : <SendIcon size={16} />}</button>
                     </div>
                 </div>
             </div>

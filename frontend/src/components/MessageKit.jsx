@@ -191,16 +191,66 @@ const pill = {
 };
 
 // An assistant reply in any tab: markdown with code cards, then copy / read aloud / download-all.
-export function AssistantText({ text, token }) {
+// `copyText` (the whole reply) shows the action row; omitted while the reply
+// is still being written or on text that isn't the end of a turn.
+export function AssistantText({ text, token, copyText }) {
     return (
         <div style={{ margin: "6px 0" }}>
             <div className="md-content" style={{ fontSize: "14px", color: "var(--text)" }}
                 onClick={handleCodeCardClick} dangerouslySetInnerHTML={renderMarkdown(text)} />
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                <CopyButton text={text} />
-                {token && <SpeakButton text={text} token={token} />}
-                <DownloadAllButton content={text} />
-            </div>
+            {copyText && (
+                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <CopyButton text={copyText} />
+                    {token && <SpeakButton text={copyText} token={token} />}
+                    <DownloadAllButton content={copyText} />
+                </div>
+            )}
+        </div>
+    );
+}
+
+// For each finished turn, the index of its last text item → the turn's whole reply text.
+// The turn still running (busy) gets no entry, so its actions appear only when it's done.
+export function turnReplies(items, busy) {
+    const out = new Map();
+    let parts = [], last = -1;
+    const close = () => { if (last >= 0) out.set(last, parts.join("\n\n")); parts = []; last = -1; };
+    items.forEach((it, i) => {
+        if (it.kind === "user") close();
+        else if (it.kind === "text") { parts.push(it.text); last = i; }
+    });
+    if (!busy) close();
+    return out;
+}
+
+// Messages typed while Sem is working wait here and send in order when it's free.
+export function useSendQueue(busy, send) {
+    const [queue, setQueue] = useState([]);
+    const [tick, setTick] = useState(0);
+    const sending = useRef(false);
+    useEffect(() => {
+        if (busy || sending.current || !queue.length) return;
+        const [next, ...rest] = queue;
+        setQueue(rest);
+        sending.current = true;  // one at a time: the next waits until this send has finished
+        Promise.resolve(send(next)).finally(() => { sending.current = false; setTick(t => t + 1); });
+    }, [busy, queue, tick]); // eslint-disable-line react-hooks/exhaustive-deps
+    return { queue, enqueue: (m) => m.trim() && setQueue(q => [...q, m]), remove: (i) => setQueue(q => q.filter((_, j) => j !== i)) };
+}
+
+export function QueuedMessages({ queue, onRemove }) {
+    if (!queue.length) return null;
+    return (
+        <div style={{ display: "flex", flexDirection: "column", gap: "4px", marginBottom: "6px" }}>
+            {queue.map((m, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "var(--text-muted)",
+                                      border: "1px dashed var(--border)", borderRadius: "10px", padding: "4px 8px" }}>
+                    <span style={{ flexShrink: 0 }}>Queued</span>
+                    <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text)" }}>{m}</span>
+                    <button onClick={() => onRemove(i)} aria-label="Remove queued message"
+                        style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: "14px", padding: 0 }}>×</button>
+                </div>
+            ))}
         </div>
     );
 }
