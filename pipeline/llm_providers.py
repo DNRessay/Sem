@@ -114,13 +114,40 @@ def _clean(messages: list[dict]) -> list[dict]:
     return [{k: v for k, v in m.items() if not k.startswith("_")} for m in messages]
 
 
+_SKIP_SIG = "skip_thought_signature_validator"  # Gemini's documented placeholder for calls it didn't sign
+
+
+def _for_provider(p: Provider, messages: list[dict]) -> list[dict]:
+    """Gemini signs each tool call it makes (tool_calls[].extra_content.google.thought_signature) and rejects
+    a replayed call without one. Calls made by Bonsai/Groq earlier in the same loop have none, so give them the
+    placeholder; every other provider rejects the extra_content field, so strip it."""
+    out = []
+    for m in _clean(messages):
+        calls = m.get("tool_calls")
+        if m.get("role") == "assistant" and calls:
+            fixed = []
+            for c in calls:
+                c = dict(c)
+                if p.id == "gemini":
+                    extra = dict(c.get("extra_content") or {})
+                    google = dict(extra.get("google") or {})
+                    google.setdefault("thought_signature", _SKIP_SIG)
+                    c["extra_content"] = {**extra, "google": google}
+                else:
+                    c.pop("extra_content", None)
+                fixed.append(c)
+            m = {**m, "tool_calls": fixed}
+        out.append(m)
+    return out
+
+
 async def _complete_openai(p: Provider, client: httpx.AsyncClient, messages: list[dict],
                            tools: list[dict] | None, max_tokens: int, deadline: float, model: str = "") -> dict:
     if p.id == "bonsai":
         from pipeline.query_engine import wait_for_local_llm
         if not await wait_for_local_llm(client, min(deadline, time.monotonic() + 110)):
             return {"error": "the self-hosted model didn't come up in time", "unavailable": True}
-    body = {"model": model or p.model, "messages": _clean(messages), "max_tokens": min(max_tokens, p.max_tokens)}
+    body = {"model": model or p.model, "messages": _for_provider(p, messages), "max_tokens": min(max_tokens, p.max_tokens)}
     if tools:
         body["tools"] = tools
     r = await client.post(p.url(), json=body,
@@ -153,7 +180,7 @@ async def complete(choice: str, messages: list[dict], tools: list[dict] | None =
     if not chain:
         return {"error": "No model is configured — set GROQ_API_KEY, GEMINI_API_KEY or LOCAL_LLM_URL."}
     owns_client = client is None
-    client = client or httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=180.0))
+    client = client or httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=180.0), follow_redirects=True)
     last, errors = {"error": "no provider answered"}, []
     try:
         for p in chain:
