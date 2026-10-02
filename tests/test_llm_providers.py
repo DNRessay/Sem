@@ -144,3 +144,16 @@ async def test_auto_suggests_the_cheapest_paid_model_when_free_ones_are_out(keys
         respx.post(GROQ).mock(return_value=Response(429))
         msg = await llm_providers.complete("auto", [{"role": "user", "content": "hi"}])
     assert "error" in msg and msg["suggest"]["id"] == "qwen"
+
+
+@pytest.mark.asyncio
+async def test_gemini_gets_a_signature_for_tool_calls_other_models_made(keys):
+    call = {"id": "1", "type": "function", "function": {"name": "overview", "arguments": "{}"}}
+    history = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "", "tool_calls": [call]},
+               {"role": "tool", "tool_call_id": "1", "content": "{}"}]
+    with respx.mock:
+        g = respx.post(GEMINI).mock(return_value=_ok("ok"))
+        await llm_providers.complete("gemini", history)
+    sent = json.loads(g.calls[0].request.content)["messages"][1]["tool_calls"][0]
+    assert sent["extra_content"]["google"]["thought_signature"]
+    assert "extra_content" not in call  # the caller's history is untouched
