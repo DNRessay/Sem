@@ -34,9 +34,17 @@ export default function VoiceMode({ token, send, busy, lastReply, onClose }) {
     const recog = useRef(null);
     const audio = useRef(null);
     const pending = useRef(null); // { before, sawBusy }
+    const ctx = useRef(null);
+    const [said, setSaid] = useState("");     // what Sem is saying (captions)
+    const audioCtx = () => {
+        if (!ctx.current) ctx.current = new (window.AudioContext || window.webkitAudioContext)();
+        ctx.current.resume();
+        return ctx.current;
+    };
 
     const stopSpeaking = () => {
-        audio.current?.pause(); audio.current = null;
+        try { audio.current?.stop(); } catch { /* already stopped */ }
+        audio.current = null;
         window.speechSynthesis?.cancel();
         avatar.current?.stop();
     };
@@ -45,7 +53,7 @@ export default function VoiceMode({ token, send, busy, lastReply, onClose }) {
         if (!open.current) return;
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SR) { setNote("Voice isn't supported in this browser — try Chrome."); setPhase("paused"); return; }
-        setPhase("listening"); setHeard("");
+        setPhase("listening"); setHeard(""); setNote("");
         const r = new SR();
         r.lang = "en-ZA"; r.interimResults = true; r.continuous = false;
         let finalText = "";
@@ -67,6 +75,7 @@ export default function VoiceMode({ token, send, busy, lastReply, onClose }) {
                 pending.current = { before: lastReplyRef.current, sawBusy: false };
                 send(said);
             } else setTimeout(() => open.current && phaseRef.current === "listening" && listen(), 250);
+            // (paused: stays quiet until you tap)
         };
         recog.current = r;
         try { r.start(); } catch { /* already started */ }
@@ -76,6 +85,7 @@ export default function VoiceMode({ token, send, busy, lastReply, onClose }) {
         const plain = plainForSpeech(text);
         if (!plain || !open.current) return listen();
         setPhase("speaking");
+        setSaid(plain);
         const face = avatar.current?.ready() ? avatar.current : null;
         face?.mood("happy");
         const done = () => {
@@ -97,10 +107,17 @@ export default function VoiceMode({ token, send, busy, lastReply, onClose }) {
             return done();
         }
         if (wav) {
-            const a = new Audio(`data:${wav.mime};base64,${wav.base64}`);
-            audio.current = a; a.onended = done;
-            try { await a.play(); } catch { done(); }
-            return;
+            try {
+                const ac = audioCtx();
+                const bytes = Uint8Array.from(atob(wav.base64), c => c.charCodeAt(0));
+                const src = ac.createBufferSource();
+                src.buffer = await ac.decodeAudioData(bytes.buffer);
+                src.connect(ac.destination);
+                src.onended = done;
+                audio.current = src;
+                src.start();
+                return;
+            } catch { /* fall through to the phone voice */ }
         }
         // Free fallback: the phone's own voice (the avatar mouths along).
         if (!window.speechSynthesis) return done();
@@ -126,53 +143,71 @@ export default function VoiceMode({ token, send, busy, lastReply, onClose }) {
     }, [busy, lastReply]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
+        audioCtx();
         listen();
-        return () => { open.current = false; recog.current?.abort(); stopSpeaking(); };
+        return () => { open.current = false; recog.current?.abort(); stopSpeaking(); ctx.current?.close(); };
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     const tapOrb = () => {
         avatar.current?.resume();
+        audioCtx();
         if (phase === "speaking") { stopSpeaking(); listen(); }
         else if (phase === "paused") listen();
         else if (phase === "listening") recog.current?.stop();
     };
+    const pause = () => { recog.current?.abort(); stopSpeaking(); setPhase("paused"); };
     const end = () => { open.current = false; recog.current?.abort(); stopSpeaking(); onClose(); };
 
-    const label = { listening: heard ? "" : "Listening…", thinking: "Sem is working…", speaking: "Speaking — tap to interrupt", paused: "Tap to talk" }[phase];
+    const label = { listening: heard ? "" : "Listening…", thinking: "Sem is working…", speaking: "Tap to interrupt", paused: "Paused — tap to talk" }[phase];
+    const pill = (active) => ({ border: "1px solid var(--border)", borderRadius: "999px", padding: "4px 12px", cursor: "pointer", fontSize: "12px",
+                                background: "transparent", color: active ? "var(--text)" : "var(--text-muted)" });
     return (
         <div role="dialog" aria-label="Voice mode" style={{
-            position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 60, padding: "14px 16px 22px",
-            background: "var(--surface)", borderTop: "1px solid var(--border)", borderRadius: "18px 18px 0 0",
-            boxShadow: "0 -8px 28px rgba(0,0,0,0.22)", display: "flex", flexDirection: "column", alignItems: "center", gap: "10px",
+            position: "fixed", inset: 0, zIndex: 100, background: "var(--bg)", display: "flex", flexDirection: "column",
+            padding: "max(12px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom))", boxSizing: "border-box",
         }}>
-            <div style={{ alignSelf: "flex-end", display: "flex", gap: "4px", fontSize: "11px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ fontWeight: 700, fontSize: "15px", color: "var(--text)" }}>Sem voice</span>
+                <span style={{ flex: 1 }} />
                 {["avatar", "orb"].map(l => (
-                    <button key={l} onClick={() => chooseLook(l)} className={look === l ? "is-selected" : ""}
-                        style={{ border: "1px solid var(--border)", borderRadius: "999px", padding: "2px 8px", cursor: "pointer",
-                                 background: "transparent", color: look === l ? "var(--text)" : "var(--text-muted)" }}>
+                    <button key={l} onClick={() => chooseLook(l)} className={look === l ? "is-selected" : ""} style={pill(look === l)}>
                         {l === "avatar" ? "Avatar" : "Orb"}
                     </button>
                 ))}
+                <button onClick={end} aria-label="Close voice mode" style={{ background: "none", border: "none", fontSize: "22px", color: "var(--text-muted)", cursor: "pointer", padding: "0 4px" }}>×</button>
             </div>
-            {avatarBroken && look === "avatar" && <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>The avatar can't run on this device — using the orb.</div>}
-            {useAvatar && (
-                <div onClick={tapOrb} style={{ width: "100%", cursor: "pointer" }}>
-                    <AvatarStage ref={avatar} height={Math.min(320, Math.round(window.innerHeight * 0.42))} onFail={() => setAvatarBroken(true)} />
-                </div>
-            )}
-            {!useAvatar && <button onClick={tapOrb} aria-label={phase === "speaking" ? "Interrupt" : "Talk"} style={{
-                width: "76px", height: "76px", borderRadius: "50%", border: "2px solid #f5b800", cursor: "pointer",
-                background: "radial-gradient(circle at 35% 30%, #fff3b0, #ffcf33 45%, #c98a00)",
-                animation: phase === "paused" ? "none" : `sem-orb ${phase === "listening" ? "1.1s" : phase === "speaking" ? "0.6s" : "1.8s"} ease-in-out infinite`,
-                display: "flex", alignItems: "center", justifyContent: "center",
-            }}>
-                {phase === "thinking" ? <GoldS size={34} /> : <span style={{ fontSize: "30px", fontWeight: 800, color: "#5a3d00", fontFamily: "Georgia, serif" }}>S</span>}
-            </button>}
-            {useAvatar && phase === "thinking" && <div style={{ display: "flex", alignItems: "center", gap: "6px" }}><GoldS /></div>}
-            <div style={{ minHeight: "20px", fontSize: "14px", color: heard && phase === "listening" ? "var(--text)" : "var(--text-muted)", textAlign: "center", maxWidth: "100%" }}>
-                {note || (phase === "listening" && heard ? heard : label)}
+            {avatarBroken && look === "avatar" && <div style={{ fontSize: "12px", color: "var(--text-muted)", textAlign: "center", marginTop: "6px" }}>The avatar can't run on this device — using the orb.</div>}
+
+            <div onClick={tapOrb} style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", position: "relative" }}>
+                {useAvatar ? (
+                    <div style={{ width: "100%", maxWidth: "520px" }}>
+                        <AvatarStage ref={avatar} height={Math.round(window.innerHeight * 0.58)} onFail={() => setAvatarBroken(true)} />
+                    </div>
+                ) : (
+                    <div aria-label={phase === "speaking" ? "Interrupt" : "Talk"} style={{
+                        width: "160px", height: "160px", borderRadius: "50%", border: "3px solid #f5b800",
+                        background: "radial-gradient(circle at 35% 30%, #fff3b0, #ffcf33 45%, #c98a00)",
+                        animation: phase === "paused" ? "none" : `sem-orb ${phase === "listening" ? "1.1s" : phase === "speaking" ? "0.6s" : "1.8s"} ease-in-out infinite`,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                    }}>
+                        {phase === "thinking" ? <GoldS size={70} /> : <span style={{ fontSize: "64px", fontWeight: 800, color: "#5a3d00", fontFamily: "Georgia, serif" }}>S</span>}
+                    </div>
+                )}
+                {useAvatar && phase === "thinking" && <div style={{ position: "absolute", top: "8px" }}><GoldS size={30} /></div>}
             </div>
-            <button onClick={end} className="btn-primary" style={{ border: "1px solid var(--gold, #c9a227)", borderRadius: "999px", padding: "6px 18px", fontSize: "13px", cursor: "pointer" }}>End voice</button>
+
+            <div style={{ minHeight: "64px", maxHeight: "22vh", overflowY: "auto", textAlign: "center", padding: "0 6px", fontSize: "16px", lineHeight: 1.5,
+                          color: phase === "speaking" || (phase === "listening" && heard) ? "var(--text)" : "var(--text-muted)" }}>
+                {note || (phase === "speaking" ? said : phase === "listening" && heard ? heard : label)}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "center", gap: "12px", marginTop: "12px" }}>
+                <button onClick={phase === "paused" ? listen : pause} style={{ ...pill(true), padding: "10px 20px", fontSize: "14px" }}>
+                    {phase === "paused" ? "Resume" : "Pause"}
+                </button>
+                <button onClick={end} style={{ border: "none", borderRadius: "999px", padding: "10px 24px", fontSize: "14px", cursor: "pointer",
+                                               background: "var(--danger)", color: "#fff", fontWeight: 600 }}>End</button>
+            </div>
         </div>
     );
 }
