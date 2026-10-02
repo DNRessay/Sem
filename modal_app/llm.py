@@ -52,10 +52,13 @@ _PORT = 8000
 GPU = os.environ.get("SEMBLANCE_LLM_GPU", "L4")
 MODEL_ALIAS = "bonsai-2-27b"
 SCALEDOWN_SECONDS = int(os.environ.get("SEMBLANCE_LLM_SCALEDOWN", "300"))
-# Two 32K slots — the configuration a 24 GB RTX 3090 Ti community benchmark
-# ran Bonsai 2 27B with, so Sem and a coding session don't queue on each other.
-CTX_SIZE = int(os.environ.get("SEMBLANCE_LLM_CTX", "65536"))
-PARALLEL = 2
+# Bonsai 2's native window is 262,144 tokens and ~75% of its layers are linear attention, so the KV cache is
+# small. One slot gets the whole -c window (it is shared across -np slots); 131072 is comfortably past 100K and
+# leaves plenty of room on a 24 GB L4 beside the ~8 GB of weights. 8-bit KV halves the cache. If it ever runs out of memory, set
+# SEMBLANCE_LLM_KV=q4_0 (smaller, slightly lossy) or lower SEMBLANCE_LLM_CTX.
+CTX_SIZE = int(os.environ.get("SEMBLANCE_LLM_CTX", "131072"))
+KV_TYPE = os.environ.get("SEMBLANCE_LLM_KV", "q8_0")
+PARALLEL = 1
 
 
 def _download_weights():
@@ -113,6 +116,7 @@ def serve():
         "--api-key", os.environ["LLM_API_KEY"],
         "-ngl", "99", "-fa", "on",
         "-c", str(CTX_SIZE), "-np", str(PARALLEL),
+        "--cache-type-k", KV_TYPE, "--cache-type-v", KV_TYPE,
         "--jinja",
         # Model card sampling for thinking mode.
         "--temp", "1.0", "--top-p", "0.95", "--top-k", "20", "--min-p", "0.05",
