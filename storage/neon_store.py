@@ -5,6 +5,8 @@ import asyncpg
 
 from config import settings
 
+PINNED_SALIENCE = 1.0  # facts the user asked Sem to remember (pipeline/turn_router.py)
+
 _EMBED_DIM = 384  # matches the Modal sentence-transformers model (all-MiniLM-L6-v2)
 
 # Starter skills seeded once into an empty skills table (see
@@ -398,6 +400,16 @@ class NeonStore:
                        ORDER BY salience DESC, created_at DESC LIMIT $1""",
                     limit,
                 )
+            return [dict(r) for r in rows]
+
+    async def get_pinned_memories(self, limit: int = 30) -> list[dict]:
+        """Facts the user asked Sem to remember (saved at salience 1.0) — shown in every chat."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT id, content, created_at FROM memories WHERE salience >= $1
+                   ORDER BY created_at DESC LIMIT $2""",
+                PINNED_SALIENCE, limit,
+            )
             return [dict(r) for r in rows]
 
     async def search_memories(self, term: str = "", limit: int = 50) -> list[dict]:

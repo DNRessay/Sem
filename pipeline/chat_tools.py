@@ -36,11 +36,14 @@ KIND = {"web_search": "search", "deep_research": "search", "fetch_url": "fetch",
         "repo_list": "read", "repo_read": "read", "repo_grep": "read", "handoff": "handoff"}
 
 
-async def available(session_id: str, query: str = "", recent: list[dict] | None = None) -> tuple[list[dict], dict | None]:
-    """The repo tools only join when a repo is attached AND this turn is about it (needs_repo)."""
+async def available(session_id: str, query: str = "", recent: list[dict] | None = None,
+                    repo: bool | None = None) -> tuple[list[dict], dict | None]:
+    """The repo tools only join when a repo is attached AND this turn is about it — `repo` is Laya's call
+    (pipeline/turn_router.py); without it, the keyword check (needs_repo)."""
     db = await get_store()
     active = await db.get_active_repo(session_id)
-    return (BASE + REPO if active and needs_repo(query, recent) else BASE), active
+    about_repo = repo if repo is not None else needs_repo(query, recent)
+    return (BASE + REPO if active and about_repo else BASE), active
 
 
 def label(name: str, args: dict) -> str:
