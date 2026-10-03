@@ -144,3 +144,26 @@ def test_vicinic_site_brief_comes_over_mcp(client, monkeypatch):
     assert client.get("/design/vicinic/sites").json() == {"connected": True, "sites": [{"slug": "bakes", "name": "Vicinic Bakes"}]}
     assert client.get("/design/vicinic/brief/bakes").json()["brief"] == "Business: Vicinic Bakes"
     assert calls[0] == ("https://vic.example/mcp", "vic_k")
+
+
+def test_finished_video_is_saved_to_s3_and_listed_in_history(client, monkeypatch, moto_cache_table):
+    calls = []
+
+    async def fake_video(action, **kw):
+        calls.append(action)
+        if action == "submit":
+            return {"ok": True, "job_id": "fc-1", "used_usd": 0, "cap_usd": 10}
+        return {"ok": True, "status": "done", "mime": "video/mp4", "base64": "QUJD", "gpu_seconds": 600}
+
+    async def fake_save(data, mime, kind):
+        return "https://api/media/file/video/x.mp4"
+
+    monkeypatch.setattr("gateway.design_router.video_call", fake_video)
+    monkeypatch.setattr("gateway.design_router.media_store.save", fake_save)
+    assert client.post("/design/video", json={"prompt": "bread rising", "chat_id": "c1"}).json()["job_id"] == "fc-1"
+    assert client.get("/design/videos").json()["videos"][0]["status"] == "rendering"
+    done = client.get("/design/video/fc-1").json()
+    assert done["url"].endswith("x.mp4") and "base64" not in done
+    assert client.get("/design/video/fc-1").json() == done and calls.count("status") == 1  # remembered
+    listed = client.get("/design/videos").json()["videos"]
+    assert [(v["job_id"], v["prompt"], v["chat_id"], v["url"]) for v in listed] == [("fc-1", "bread rising", "c1", done["url"])]

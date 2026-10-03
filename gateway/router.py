@@ -1,5 +1,4 @@
 import base64
-import io
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -71,10 +70,12 @@ from pipeline.ultraplan_intent import (
     run_ultraplan_intent,
     ultraplan_status_label,
 )
+from pipeline.voice_stream import with_speech
 from pipeline.web_context import detect_web_intent, run_web_intent, status_label
 from storage.embeddings import embed_text
 from storage.neon_store import get_store
 from tau.tau_engine import TAUEngine
+from tools import file_reader
 
 router = APIRouter()
 _tau = TAUEngine()
@@ -112,63 +113,43 @@ async def login(request: Request):
 
 
 def _is_image(attachment: dict) -> bool:
-    return (attachment.get("mime") or "").startswith("image/")
+    return file_reader.is_image(attachment.get("name", ""), attachment.get("mime") or "")
 
 
-def _extract_pdf_text(raw: bytes) -> str:
-    from pypdf import PdfReader
-
-    reader = PdfReader(io.BytesIO(raw))
-    return "\n".join(page.extract_text() or "" for page in reader.pages)
-
-
-def _extract_docx_text(raw: bytes) -> str:
-    import docx
-
-    document = docx.Document(io.BytesIO(raw))
-    return "\n".join(p.text for p in document.paragraphs)
+def _vision_ready(images: list) -> tuple[list, list]:
+    """Any image format → one the vision model reads (HEIC/BMP/TIFF… become JPEG); unreadable ones are
+    returned separately so the reply can say so."""
+    ok, bad = [], []
+    for a in images:
+        try:
+            converted = file_reader.to_vision_image(base64.b64decode(a.get("base64", "")), a.get("mime", ""))
+        except ValueError:
+            converted = None
+        if converted:
+            raw, mime = converted
+            ok.append({**a, "mime": mime, "base64": a["base64"] if mime == a.get("mime") else base64.b64encode(raw).decode()})
+        else:
+            bad.append({"name": a.get("name", "image"), "content": f"[{a.get('name', 'image')}: couldn't open this image format]"})
+    return ok, bad
 
 
 async def _attachment_text(a: dict, session_id: str) -> str:
-    """Plain-text attachments (from the frontend's client-side FileReader
-    path) carry their text directly in `content`. Binary formats we can't
-    read client-side (PDF, Word) instead carry base64 + a mime type, and get
-    extracted here, server-side, into the same plain text. Extraction is
-    wrapped so a malformed/password-protected/corrupt file logs a visible
-    "blocked" agent event and degrades to an empty string instead of
-    crashing the whole /chat request."""
+    """Text attachments carry their text in `content`; everything else (documents, audio, video) is base64
+    and gets read server-side by tools/file_reader.py. A file that can't be read says so in the message,
+    so the model can tell the user, and logs a "blocked" agent event."""
     if a.get("content") is not None:
         return a["content"]
-
-    mime = a.get("mime", "")
-    name = a.get("name", "file")
-    b64 = a.get("base64", "")
+    name, b64 = a.get("name", "file"), a.get("base64", "")
     if not b64:
         return ""
-    raw = base64.b64decode(b64)
-
     from storage.neon_store import get_store
+    try:
+        text, how = await file_reader.read_file(name, a.get("mime", ""), base64.b64decode(b64))
+    except Exception as exc:
+        text, how = "", f"couldn't read it: {str(exc)[:150]}"
     db = await get_store()
-
-    if mime == "application/pdf":
-        try:
-            text = _extract_pdf_text(raw)
-            await db.save_agent_event(session_id, "file", f"ok:Reading {name}")
-            return text
-        except Exception as exc:
-            await db.save_agent_event(session_id, "file", f"blocked:{name}: {exc}")
-            return ""
-    if mime in (
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    ):
-        try:
-            text = _extract_docx_text(raw)
-            await db.save_agent_event(session_id, "file", f"ok:Reading {name}")
-            return text
-        except Exception as exc:
-            await db.save_agent_event(session_id, "file", f"blocked:{name}: {exc}")
-            return ""
-    return ""
+    await db.save_agent_event(session_id, "file", f"{'ok' if text else 'blocked'}:{name} — {how}")
+    return text or f"[{name}: {how}]"
 
 
 async def _fold_attachments(user_msg: str, attachments: list, session_id: str) -> str:
@@ -211,8 +192,8 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
     if not raw_msg:
         raw_msg = "Please review the attached file(s)."
 
-    images = [a for a in attachments if _is_image(a)]
-    text_attachments = [a for a in attachments if not _is_image(a)]
+    images, unreadable = _vision_ready([a for a in attachments if _is_image(a)])
+    text_attachments = [a for a in attachments if not _is_image(a)] + unreadable
 
     # augmented is what the model sees (attachments + fetched/searched
     # content folded in); raw_msg is what's persisted as "what the user
@@ -588,7 +569,9 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
 
         yield "data: [DONE]\n\n"
 
-    return durable(stream_gen(), _account["account_id"], body, "chat")
+    # Voice mode with the natural voice: the server speaks each sentence as it's written (pipeline/voice_stream.py).
+    lines = with_speech(stream_gen(), body.get("voice_name") or "Kore") if body.get("voice") else stream_gen()
+    return durable(lines, _account["account_id"], body, "chat")
 
 
 @router.get("/status/{session_id}")

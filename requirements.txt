@@ -10,6 +10,13 @@ ddgs>=9.0
 python-dotenv>=1.0.0
 pypdf>=4.2.0
 python-docx>=1.1.0
+# Uploads (tools/file_reader.py): Excel, PowerPoint, RTF, and any image format → JPEG
+openpyxl>=3.1.0
+xlrd>=2.0.1
+python-pptx>=1.0.0
+striprtf>=0.0.26
+Pillow>=11.0.0
+pillow-heif>=0.18.0
 # Runtime dependency (not just CI) — tools/dev_loop_tool.py shells out to
 # `python -m ruff check` to lint an AI-proposed fix before it's ever
 # allowed to reach tools/repo_write_tool.py's propose_fix. Same version

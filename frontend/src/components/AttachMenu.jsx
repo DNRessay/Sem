@@ -5,13 +5,21 @@ import ConnectorsPanel from "./ConnectorsPanel";
 const API = import.meta.env.VITE_API_URL || "";
 const TEXT_EXT = /\.(txt|md|mdx|py|js|jsx|ts|tsx|mjs|cjs|json|jsonc|csv|tsv|log|ya?ml|html?|css|scss|sass|less|sql|sh|bash|zsh|env|toml|ini|cfg|conf|xml|svg|graphql|gql|proto|rs|go|java|kt|kts|c|h|cpp|cc|hpp|cs|rb|php|swift|dart|lua|r|jl|vue|svelte|diff|patch|lock|gitignore|editorconfig)$/i;
 const BARE_TEXT_NAMES = /^(dockerfile|makefile|license|readme|procfile|jenkinsfile|vagrantfile)$/i;
-const IMAGE_EXT = /\.(png|jpe?g|gif|webp)$/i;
-const DOC_EXT = /\.(pdf|docx)$/i;
 const MAX_BINARY_BYTES = 4 * 1024 * 1024; // Lambda Function URL request body caps around 6MB; base64 adds ~33%
+// Everything that isn't plain text goes to the server as base64 and is read there (tools/file_reader.py):
+// documents, spreadsheets, slides, any image format, audio (transcribed) and short videos.
 const MIME_BY_EXT = {
-    pdf: "application/pdf",
+    pdf: "application/pdf", doc: "application/msword", rtf: "application/rtf",
     docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp",
+    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xls: "application/vnd.ms-excel",
+    pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    odt: "application/vnd.oasis.opendocument.text", ods: "application/vnd.oasis.opendocument.spreadsheet",
+    odp: "application/vnd.oasis.opendocument.presentation", epub: "application/epub+zip",
+    png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", bmp: "image/bmp",
+    tif: "image/tiff", tiff: "image/tiff", heic: "image/heic", heif: "image/heif", avif: "image/avif", ico: "image/x-icon",
+    mp3: "audio/mpeg", wav: "audio/wav", m4a: "audio/mp4", aac: "audio/aac", ogg: "audio/ogg", opus: "audio/ogg",
+    flac: "audio/flac", amr: "audio/amr", weba: "audio/webm",
+    mp4: "video/mp4", mov: "video/quicktime", webm: "video/webm", "3gp": "video/3gpp",
 };
 
 function extOf(name) {
@@ -539,26 +547,21 @@ export default function AttachMenu({ token, sessionId, onAttach, webSearchEnable
         const files = Array.from(e.target.files || []);
         const skipped = [];
         for (const file of files) {
-            const isText = TEXT_EXT.test(file.name) || BARE_TEXT_NAMES.test(file.name);
-            const isBinary = IMAGE_EXT.test(file.name) || DOC_EXT.test(file.name);
+            const isText = TEXT_EXT.test(file.name) || BARE_TEXT_NAMES.test(file.name) || (file.type.startsWith("text/") && file.type !== "text/rtf");
             if (isText) {
                 const content = await file.text();
                 onAttach({ name: file.name, content, source: "file" });
-            } else if (isBinary) {
-                if (file.size > MAX_BINARY_BYTES) {
-                    skipped.push(`${file.name} (too large — 4MB max)`);
-                    continue;
-                }
-                const base64 = await readAsBase64(file);
-                const mime = file.type || MIME_BY_EXT[extOf(file.name)] || "application/octet-stream";
-                onAttach({ name: file.name, base64, mime, source: "file" });
+            } else if (file.size > MAX_BINARY_BYTES) {
+                skipped.push(`${file.name} (too large — 4MB max)`);
             } else {
-                skipped.push(file.name);
+                const base64 = await readAsBase64(file);
+                const mime = MIME_BY_EXT[extOf(file.name)] || file.type || "application/octet-stream";
+                onAttach({ name: file.name, base64, mime, source: "file" });
             }
         }
         e.target.value = "";
         if (skipped.length > 0) {
-            setFileError(`Can't attach ${skipped.join(", ")} — unsupported file type.`);
+            setFileError(`Can't attach ${skipped.join(", ")}.`);
         } else {
             close();
         }

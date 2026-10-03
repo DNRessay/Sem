@@ -5,6 +5,7 @@ import json
 
 from agents.tool_loop import HANDOFF_TOOL, fn_tool, handoff_result
 from pipeline.bash_intent import run_bash_intent
+from pipeline.repo_context import needs_repo
 from storage.neon_store import get_store
 from tools.repo_tool import RepoTool
 from tools.web.fetch_tool import FetchTool
@@ -35,10 +36,11 @@ KIND = {"web_search": "search", "deep_research": "search", "fetch_url": "fetch",
         "repo_list": "read", "repo_read": "read", "repo_grep": "read", "handoff": "handoff"}
 
 
-async def available(session_id: str) -> tuple[list[dict], dict | None]:
+async def available(session_id: str, query: str = "", recent: list[dict] | None = None) -> tuple[list[dict], dict | None]:
+    """The repo tools only join when a repo is attached AND this turn is about it (needs_repo)."""
     db = await get_store()
     active = await db.get_active_repo(session_id)
-    return (BASE + REPO if active else BASE), active
+    return (BASE + REPO if active and needs_repo(query, recent) else BASE), active
 
 
 def label(name: str, args: dict) -> str:

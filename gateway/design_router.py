@@ -1,4 +1,5 @@
 import json
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -94,13 +95,48 @@ async def regenerate_image(request: Request, _account: dict = Depends(require_ac
     return {"ok": True, "mime": result["mime"], **({"url": url} if url else {"base64": result["base64"]})}
 
 
+VIDEO_JOBS = "video_jobs"
+MAX_VIDEO_JOBS = 30
+
+
+def _video_jobs(account_id: str) -> list[dict]:
+    try:
+        return json.loads(ddb_backend.get(VIDEO_JOBS, account_id) or "[]")
+    except ValueError:
+        return []
+
+
+def _save_video_job(account_id: str, job: dict):
+    jobs = [j for j in _video_jobs(account_id) if j["job_id"] != job["job_id"]]
+    ddb_backend.set(VIDEO_JOBS, account_id, json.dumps([job, *jobs][:MAX_VIDEO_JOBS]), ttl=media_store.KEEP_SECONDS)
+
+
+async def _video_result(job_id: str) -> dict:
+    """A render's state. A finished one is copied from Modal to S3 once and remembered, so it plays in the
+    app (and stays 7 days) whether or not anyone was watching when it finished."""
+    saved = ddb_backend.get("video_url", job_id)
+    if saved:
+        return json.loads(saved)
+    result = await video_call("status", job_id=job_id)
+    if result.get("status") == "done" and result.get("base64"):
+        url = await media_store.save(result["base64"], result.get("mime") or "video/mp4", "video")
+        if url:
+            result = {k: v for k, v in result.items() if k != "base64"} | {"url": url}
+            ddb_backend.set("video_url", job_id, json.dumps(result), ttl=media_store.KEEP_SECONDS)
+    elif result.get("status") == "failed":
+        ddb_backend.set("video_url", job_id, json.dumps(result), ttl=3600)  # an hour: Modal may just have hiccuped
+    return result
+
+
 @router.post("/video")
-async def video_submit(request: Request, _account: dict = Depends(require_account)):
+async def video_submit(request: Request, account: dict = Depends(require_account)):
     body = await request.json()
-    result = await video_call("submit", prompt=(body.get("prompt") or "").strip(),
-                              aspect_ratio=body.get("aspect_ratio") or "9:16", seconds=body.get("seconds") or 5)
+    prompt, aspect = (body.get("prompt") or "").strip(), body.get("aspect_ratio") or "9:16"
+    result = await video_call("submit", prompt=prompt, aspect_ratio=aspect, seconds=body.get("seconds") or 5)
     if not result.get("ok"):
         raise HTTPException(400, result.get("error") or "video submit failed")
+    _save_video_job(account["account_id"], {"job_id": result["job_id"], "prompt": prompt[:500], "aspect_ratio": aspect,
+                                            "chat_id": body.get("chat_id") or "", "created": int(time.time())})
     return result
 
 
@@ -109,19 +145,21 @@ async def video_budget(_account: dict = Depends(require_account)):
     return await video_call("budget")
 
 
+@router.get("/videos")
+async def video_history(account: dict = Depends(require_account)):
+    """Every render from the last 7 days, newest first, with its saved link once finished."""
+    jobs = _video_jobs(account["account_id"])
+    for j in jobs:
+        saved = ddb_backend.get("video_url", j["job_id"])
+        j.update(json.loads(saved) if saved else {"status": "rendering"})
+    return {"videos": jobs}
+
+
 @router.get("/video/{job_id}")
 async def video_status(job_id: str, _account: dict = Depends(require_account)):
-    saved = ddb_backend.get("video_url", job_id)
-    if saved:
-        return json.loads(saved)
-    result = await video_call("status", job_id=job_id)
+    result = await _video_result(job_id)
     if not result.get("ok") and result.get("status") != "failed":
         raise HTTPException(400, result.get("error") or "status check failed")
-    if result.get("status") == "done" and result.get("base64"):
-        url = await media_store.save(result["base64"], result.get("mime") or "video/mp4", "video")
-        if url:
-            result = {k: v for k, v in result.items() if k != "base64"} | {"url": url}
-            ddb_backend.set("video_url", job_id, json.dumps(result), ttl=media_store.KEEP_SECONDS)
     return result
 
 

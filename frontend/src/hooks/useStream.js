@@ -10,7 +10,7 @@ export function useStream(baseUrl = "", token = "", onUnauthorized) {
     const [error, setError] = useState(null);
     const abortRef = useRef(null);
 
-    const send = useCallback(async (message, sessionId = "default", history = [], attachments = [], webSearchEnabled = true, model = "auto", research = false) => {
+    const send = useCallback(async (message, sessionId = "default", history = [], attachments = [], webSearchEnabled = true, model = "auto", research = false, opts = {}) => {
         setChunks([]);
         setStatus(null);
         setUsage(0);
@@ -31,7 +31,9 @@ export function useStream(baseUrl = "", token = "", onUnauthorized) {
 
         try {
             const onEvent = (parsed) => {
-                if (parsed.usage) {
+                if (parsed.speech || parsed.speech_done !== undefined) {
+                    opts.onSpeech?.(parsed); // voice mode: audio the server made for the reply (pipeline/voice_stream.py)
+                } else if (parsed.usage) {
                     setUsage(parsed.usage);
                 } else if (parsed.tool) {
                     toolLocal = parsed.tool;
@@ -57,7 +59,7 @@ export function useStream(baseUrl = "", token = "", onUnauthorized) {
             // finishes it and the missed part is fetched when the page is back (utils/runs.js).
             const r = await runStream("/chat", {
                 headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-                body: { message, session_id: sessionId, history, attachments, web_search_enabled: webSearchEnabled, model, research },
+                body: { message, session_id: sessionId, history, attachments, web_search_enabled: webSearchEnabled, model, research, ...(opts.voice ? { voice: true } : {}) },
                 signal: abortRef.current.signal,
                 onEvent,
             });

@@ -6,35 +6,35 @@ import { HeaderStatus } from "./StatusBar";
 import AgentFeedPanel from "./AgentFeedPanel";
 import useAgentFeed from "../hooks/useAgentFeed";
 import TabDrawer, { MenuButton } from "./TabDrawer";
-import useTabChats from "../hooks/useTabChats";
+import useTabChats, { newId } from "../hooks/useTabChats";
 import WebStudio from "./WebStudio";
+import { CloseIcon, PaperclipIcon, SendIcon } from "./Icons";
 
 const API = import.meta.env.VITE_API_URL || "";
 const STORE_KEY = "semblance_design_campaigns";
 const MODE_KEY = "semblance_design_mode"; // "ads" | "web"
-const keepLinks = list => (list || []).map(({ image, ...x }) => (image?.url ? { ...x, image } : x));
+const KIND_KEY = "semblance_design_kind"; // composer: "ads" | "video"
 const OLD_KEY = "semblance_design";
+const MAX_TURNS = 30;
+const MAX_REFS = 4;
+const RENDER_SECONDS = 600; // a typical Wan render, for the progress bar
 const PLACEMENTS = [
     ["fb_ig_feed", "FB/IG feed"], ["square", "Square"], ["story_reel", "Story/Reel/TikTok"],
     ["google_display", "Google Display"], ["whatsapp_status", "WhatsApp Status"],
 ];
-
-const btn = {
-    padding: "8px 12px", borderRadius: "10px", border: "1px solid var(--border)", background: "var(--surface)",
-    color: "var(--text)", fontSize: "13px", fontWeight: 600, cursor: "pointer",
-};
-const primary = { ...btn, background: "var(--accent)", color: "var(--accent-contrast)", border: "none" };
-const field = {
-    width: "100%", padding: "9px 11px", borderRadius: "10px", border: "1px solid var(--border)",
-    background: "var(--surface)", color: "var(--text)", fontSize: "14px", fontFamily: "inherit", boxSizing: "border-box",
-};
-const label = { fontSize: "11px", fontWeight: 600, letterSpacing: "1px", color: "var(--text-muted)", margin: "14px 0 6px" };
+const ASPECTS = [["9:16", "9:16 Reel"], ["16:9", "16:9 YouTube"], ["1:1", "1:1 Feed"]];
+const SUGGESTIONS = ["Weekend special: 2 loaves for R80, ends Sunday", "Grand opening — first 50 customers get 20% off",
+    "Book a free consultation this month"];
+const placementLabel = id => (PLACEMENTS.find(p => p[0] === id) || [])[1] || id;
+const keepLinks = list => (list || []).map(({ image, ...x }) => (image?.url ? { ...x, image } : x));
+// Saved images/videos are links (kept 7 days in S3); older or unsaved ones are inline base64.
+export const mediaSrc = m => m?.url || (m?.base64 ? `data:${m.mime};base64,${m.base64}` : "");
+const EXPIRED = "Image expired (kept 7 days) — tap New image";
+const linkAlive = url => { try { return Number(new URL(url).searchParams.get("exp")) * 1000 > Date.now(); } catch { return true; } };
 
 function loadSaved() {
     try { return JSON.parse(localStorage.getItem(OLD_KEY)) || {}; } catch { return {}; }
 }
-
-const MAX_REFS = 4;
 
 function canvasJpeg(source, w, h) {
     const scale = Math.min(1, 1024 / Math.max(w, h));
@@ -76,49 +76,12 @@ function videoToRefs(file) {
     });
 }
 
-function Inspiration({ refs, setRefs, style, disabled }) {
-    const [error, setError] = useState("");
-    const add = async (files) => {
-        setError("");
-        try {
-            let added = [];
-            for (const f of files) added = added.concat(f.type.startsWith("video/") ? await videoToRefs(f) : await imageToRef(f));
-            setRefs(r => [...r, ...added].slice(0, MAX_REFS));
-            if (refs.length + added.length > MAX_REFS) setError(`Kept the first ${MAX_REFS} — that's all the image model takes.`);
-        } catch (e) { setError(e.message); }
-    };
-    return (
-        <div>
-            <div style={label}>INSPIRATION (OPTIONAL)</div>
-            <div style={{ fontSize: "12px", color: "var(--text-muted)", marginBottom: "6px" }}>
-                Ads, posts, photos or a video you like. Sem copies the look (colours, layout, mood), not the content.
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center" }}>
-                {refs.map((r, i) => (
-                    <div key={i} style={{ position: "relative" }}>
-                        <img src={`data:${r.mime};base64,${r.base64}`} alt={r.name} title={r.name}
-                            style={{ width: "64px", height: "64px", objectFit: "cover", borderRadius: "8px", border: "1px solid var(--border)" }} />
-                        <button onClick={() => setRefs(x => x.filter((_, j) => j !== i))} aria-label="Remove"
-                            style={{ position: "absolute", top: "-6px", right: "-6px", width: "20px", height: "20px", borderRadius: "50%", border: "none", background: "var(--text)", color: "var(--bg)", fontSize: "11px", cursor: "pointer" }}>✕</button>
-                    </div>
-                ))}
-                {refs.length < MAX_REFS && (
-                    <label style={{ ...btn, display: "inline-flex", alignItems: "center", height: "64px", boxSizing: "border-box", opacity: disabled ? 0.5 : 1 }}>
-                        + Images / video
-                        <input type="file" accept="image/*,video/*" multiple disabled={disabled} style={{ display: "none" }}
-                            onChange={e => { add([...e.target.files]); e.target.value = ""; }} />
-                    </label>
-                )}
-            </div>
-            {error && <div style={{ fontSize: "12px", color: "var(--danger)", marginTop: "4px" }}>{error}</div>}
-            {style && (
-                <details style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "6px" }}>
-                    <summary style={{ cursor: "pointer" }}>Style Sem picked up</summary>
-                    <div style={{ whiteSpace: "pre-wrap", marginTop: "4px" }}>{style}</div>
-                </details>
-            )}
-        </div>
-    );
+// The old single-list save becomes the first round, so earlier ads aren't lost.
+function withTurns(c) {
+    if (Array.isArray(c.turns)) return c;
+    const ads = c.ads || [];
+    return { ...c, ads: [], turns: ads.length ? [{ id: "t0", kind: "ads", campaign: c.campaign || "", placements: c.placements || [],
+        count: c.count, ads, style: c.style, status: "done", created: c.updated || Date.now() }] : [] };
 }
 
 // Vicinic customer sites (DNRessay/Digital over MCP): pick one to fill the business brief.
@@ -149,186 +112,35 @@ function VicinicPicker({ headers, onBrief, disabled }) {
 
     if (!state) return null;
     if (!state.connected) return (
-        <details style={{ marginTop: "8px", fontSize: "12px", color: "var(--text-muted)" }}>
+        <details className="ds-muted">
             <summary style={{ cursor: "pointer" }}>Connect Vicinic (use a customer site's details)</summary>
             <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "6px" }}>
-                <input value={form.url} onChange={e => setForm({ ...form, url: e.target.value })} placeholder="https://… Vicinic backend address" style={field} />
-                <input value={form.key} onChange={e => setForm({ ...form, key: e.target.value })} placeholder="vic_… key (Vicinic Admin → Connect apps)" type="password" style={field} />
-                <button className="btn-primary" onClick={connect} disabled={!form.url || !form.key} style={{ ...btn, alignSelf: "flex-start" }}>Connect</button>
+                <input className="ds-field" value={form.url} onChange={e => setForm({ ...form, url: e.target.value })} placeholder="https://… Vicinic backend address" />
+                <input className="ds-field" value={form.key} onChange={e => setForm({ ...form, key: e.target.value })} placeholder="vic_… key (Vicinic Admin → Connect apps)" type="password" />
+                <button className="ds-btn" onClick={connect} disabled={!form.url || !form.key} style={{ alignSelf: "flex-start" }}>Connect</button>
                 {msg && <div>{msg}</div>}
             </div>
         </details>
     );
     return (
-        <div style={{ display: "flex", gap: "8px", marginTop: "8px", alignItems: "center", flexWrap: "wrap" }}>
-            <select value={slug} onChange={e => setSlug(e.target.value)} style={{ ...field, flex: 1, minWidth: "160px" }}>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+            <select className="ds-field" value={slug} onChange={e => setSlug(e.target.value)} style={{ flex: 1, minWidth: "160px" }}>
                 <option value="">Vicinic customer site…</option>
                 {state.sites.map(x => <option key={x.slug} value={x.slug}>{x.name} ({x.package})</option>)}
             </select>
-            <button onClick={use} disabled={!slug || disabled} style={btn}>Use its details</button>
-            {msg && <div style={{ fontSize: "12px", color: "var(--text-muted)", width: "100%" }}>{msg}</div>}
+            <button className="ds-btn" onClick={use} disabled={!slug || disabled}>Use its details</button>
+            {msg && <div className="ds-muted" style={{ width: "100%" }}>{msg}</div>}
         </div>
     );
 }
 
-// Saved images/videos are links (kept 7 days in S3); older or unsaved ones are inline base64.
-const mediaSrc = (m) => m?.url || (m?.base64 ? `data:${m.mime};base64,${m.base64}` : "");
-const EXPIRED = "Image expired (kept 7 days) — tap New image";
-
-function AdCard({ ad, onRetry, onExpired }) {
-    const text = `${ad.headline}\n\n${ad.primary_text}\n\n${(ad.hashtags || []).join(" ")}`;
-    return (
-        <div style={{ border: "1px solid var(--border)", borderRadius: "14px", overflow: "hidden", background: "var(--surface)" }}>
-            <div style={{ background: "var(--surface-2)", minHeight: "120px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                {ad.image ? (
-                    <img src={mediaSrc(ad.image)} alt={ad.headline} onError={onExpired} style={{ width: "100%", display: "block" }} />
-                ) : (
-                    <span style={{ fontSize: "12px", color: !ad.imageError ? "var(--text-muted)" : /limit|not kept|expired/i.test(ad.imageError) ? "var(--warning)" : "var(--danger)", padding: "16px", textAlign: "center" }}>
-                        {ad.imageError || "Making image…"}
-                    </span>
-                )}
-            </div>
-            <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" }}>
-                <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>{ad.placementLabel} · {ad.angle}</div>
-                <div style={{ fontWeight: 700, fontSize: "15px" }}>{ad.headline}</div>
-                <div style={{ fontSize: "14px", lineHeight: 1.5 }}>{ad.primary_text}</div>
-                <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>{(ad.hashtags || []).join(" ")}</div>
-                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
-                    <span style={{ ...btn, cursor: "default", fontSize: "12px" }}>{ad.cta}</span>
-                    <span style={{ flex: 1 }} />
-                    <button onClick={() => copyToClipboard(text)} style={{ ...btn, fontSize: "12px" }}>Copy text</button>
-                    {ad.image && (
-                        <a href={mediaSrc(ad.image)} download={`ad-${ad.placement}.png`} target="_blank" rel="noreferrer" style={{ ...btn, fontSize: "12px", textDecoration: "none" }}>Download</a>
-                    )}
-                    <button onClick={onRetry} style={{ ...btn, fontSize: "12px" }}>New image</button>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-const VIDEO_KEY = "semblance_last_video";
-
-function VideoStudio({ token, seedPrompt }) {
-    const [prompt, setPrompt] = useState("");
-    const [aspect, setAspect] = useState("9:16");
-    const [job, setJob] = useState(null);
-    const [status, setStatus] = useState("");
-    // The last finished video stays for its 7 days (its link's exp), across reloads.
-    const [video, setVideoState] = useState(() => {
-        try {
-            const v = JSON.parse(localStorage.getItem(VIDEO_KEY));
-            return v?.url && Number(new URL(v.url).searchParams.get("exp")) * 1000 > Date.now() ? v : null;
-        } catch { return null; }
-    });
-    const setVideo = (v) => {
-        setVideoState(v);
-        try { v?.url ? localStorage.setItem(VIDEO_KEY, JSON.stringify(v)) : localStorage.removeItem(VIDEO_KEY); } catch { /* private mode */ }
-    };
-    const [budget, setBudget] = useState(null);
-    const timer = useRef(null);
-    const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
-
-    useEffect(() => { if (seedPrompt) setPrompt(seedPrompt); }, [seedPrompt]);
-    useEffect(() => {
-        fetch(`${API}/design/video/budget`, { headers }).then(r => r.json()).then(d => d.ok && setBudget(d)).catch(() => {});
-        return () => clearTimeout(timer.current);
-    }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-    const poll = (id) => {
-        timer.current = setTimeout(async () => {
-            try {
-                const r = await fetch(`${API}/design/video/${id}`, { headers });
-                const d = await r.json();
-                if (d.status === "done") { setVideo(d); setStatus(`Done in ${Math.round((d.gpu_seconds || 0) / 60)} min of GPU time`); setJob(null); return; }
-                if (d.status === "failed" || !r.ok) { setStatus(d.error || d.detail || "Render failed"); setJob(null); return; }
-                setStatus("Rendering… (usually 5-10 minutes; you can leave this page open)");
-                poll(id);
-            } catch { poll(id); }
-        }, 10000);
-    };
-
-    const submit = async () => {
-        setVideo(null); setStatus("Starting…");
-        const r = await fetch(`${API}/design/video`, { method: "POST", headers, body: JSON.stringify({ prompt, aspect_ratio: aspect }) });
-        const d = await r.json().catch(() => ({}));
-        if (!r.ok) { setStatus(d.detail || `Failed (${r.status})`); return; }
-        setJob(d.job_id); setBudget({ used_usd: d.used_usd, cap_usd: d.cap_usd });
-        setStatus("Queued — warming up the GPU…");
-        poll(d.job_id);
-    };
-
-    return (
-        <div>
-            <div style={label}>VIDEO AD (OPEN-SOURCE WAN 2.1)</div>
-            <textarea value={prompt} onChange={e => setPrompt(e.target.value)} rows={3} style={field}
-                placeholder="Describe a 5-second clip, e.g. Slow close-up of steaming sourdough on a wooden board, warm morning light" />
-            <div style={{ display: "flex", gap: "8px", alignItems: "center", marginTop: "8px", flexWrap: "wrap" }}>
-                <select value={aspect} onChange={e => setAspect(e.target.value)} style={{ ...field, width: "auto" }}>
-                    <option value="9:16">9:16 Reel/Story</option>
-                    <option value="16:9">16:9 YouTube</option>
-                    <option value="1:1">1:1 Feed</option>
-                </select>
-                <button onClick={submit} disabled={!prompt.trim() || !!job} className="btn-primary" style={primary}>{job ? "Rendering…" : "Render video"}</button>
-                {budget && <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>Budget ${Number(budget.used_usd).toFixed(2)} / ${Number(budget.cap_usd).toFixed(2)} this month</span>}
-            </div>
-            {status && <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "8px" }}>{status}</div>}
-            {video && (
-                <div style={{ marginTop: "10px" }}>
-                    <video src={mediaSrc(video)} controls playsInline onError={() => video.url && setVideo(null)} style={{ width: "100%", borderRadius: "12px" }} />
-                    <a href={mediaSrc(video)} download="semblance-video-ad.mp4" target="_blank" rel="noreferrer" style={{ ...btn, display: "inline-block", marginTop: "6px", textDecoration: "none" }}>Download video</a>
-                    {video.url && <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px" }}>Kept for 7 days</div>}
-                </div>
-            )}
-        </div>
-    );
-}
-
-// Design tab: digital-marketing assistant. Learns the business from its own
-// website, then writes ad copy and makes matching images per placement
-// (Nano Banana, free tier) and short video ads (Wan 2.1 on Modal, capped).
-export default function DesignPage({ token, onNavigate, onUnauthorized, handoff, onHandoff }) {
-    // Each campaign is a saved "chat": the business brief, the campaign and its ad copy (images aren't stored).
-    const { chats, chat, updateChat, newChat, selectChat, deleteChat } = useTabChats(STORE_KEY, {
-        blank: () => ({ site: "", brief: "", campaign: "", placements: ["fb_ig_feed", "story_reel"], count: 2, ads: [] }),
-        legacy: () => { const s = loadSaved(); return { ...s, title: (s.campaign || "").slice(0, 60) }; },
-        // Saved images are short links and stay with the chat; inline (unsaved) ones are too big for the phone.
-        persist: c => ({
-            ...c, ads: (c.ads || []).map(({ image, ...ad }) => (image?.url ? { ...ad, image } : image ? { ...ad, imageError: "Image not kept — tap New image" } : ad)),
-            ...(c.web ? { web: { ...c.web, logos: keepLinks(c.web.logos),
-                ...(c.web.figma ? { figma: { ...c.web.figma, frames: (c.web.figma.frames || []).filter(f => f.url) } } : {}) } } : {}),
-        }),
-    });
-    const { site, brief, campaign, placements, count } = chat;
-    const field$ = key => v => updateChat(chat.id, c => ({ [key]: typeof v === "function" ? v(c[key]) : v,
-        ...(key === "campaign" ? { title: (typeof v === "function" ? v(c[key]) : v).slice(0, 60) } : {}) }));
-    const setSite = field$("site");
-    const setBrief = field$("brief");
-    const setCampaign = field$("campaign");
-    const setPlacements = field$("placements");
-    const setCount = field$("count");
-    const [menuOpen, setMenuOpen] = useState(false);
-    // The activity icon shows this chat's own log (tools, MCP calls, models, errors).
-    const feed = useAgentFeed(`design:${chat.id}`, token);
-    const [feedOpen, setFeedOpen] = useState(false);
-    // Inspiration images stay in memory only (too big for phone storage); the style text they produced is saved.
-    const [refs, setRefs] = useState([]);
-    useEffect(() => { setRefs([]); }, [chat.id]);
-    const references = refs.map(({ mime, base64 }) => ({ mime, base64 }));
-    const takenHandoff = useRef(0);
-    useEffect(() => {
-        if (handoff?.view !== "design" || takenHandoff.current === handoff.at) return;
-        takenHandoff.current = handoff.at;
-        newChat({ site, brief, placements, count, ads: [], campaign: handoff.task, title: handoff.task.slice(0, 60) });
-    }, [handoff]); // eslint-disable-line react-hooks/exhaustive-deps
-    const [model, setModel] = useState(() => loadModel("semblance_design_model"));
-    const ads = chat.ads || [];
-    const setAds = v => updateChat(chat.id, c => ({ ads: typeof v === "function" ? v(c.ads || []) : v }));
+// The business everything is made for: collapsed to one line once there's a brief.
+function BusinessCard({ chat, setSite, setBrief, headers, model, onUnauthorized, disabled }) {
+    const { site = "", brief = "" } = chat;
+    const [open, setOpen] = useState(!brief);
     const [busy, setBusy] = useState("");
     const [notice, setNotice] = useState("");
-    const [mode, setModeState] = useState(() => { try { return localStorage.getItem(MODE_KEY) === "web" ? "web" : "ads"; } catch { return "ads"; } });
-    const setMode = m => { setModeState(m); setNotice(""); try { localStorage.setItem(MODE_KEY, m); } catch { /* private mode */ } };
-    const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
+    useEffect(() => { setOpen(!chat.brief); setNotice(""); }, [chat.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const learn = async () => {
         setBusy("Reading your website…"); setNotice("");
@@ -343,143 +155,526 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
         setBusy("");
     };
 
-    // One ads run's events. Images aren't kept on the phone, so a resumed run replays from the start.
-    const applyEvent = (chatId, ev) => {
-        const set = v => updateChat(chatId, c => ({ ads: typeof v === "function" ? v(c.ads || []) : v }));
-        if (ev.type === "status") setBusy(ev.text);
-        else if (ev.type === "style") updateChat(chatId, () => ({ style: ev.text }));
-        else if (ev.type === "variants") {
-            set(ev.variants.map(v => ({ ...v, placementLabel: (PLACEMENTS.find(p => p[0] === v.placement) || [])[1] })));
-            setBusy("Making images…");
-        } else if (ev.type === "image") set(a => a.map((ad, i) => (i === ev.index ? { ...ad, image: ev.url ? { mime: ev.mime, url: ev.url } : { mime: ev.mime, base64: ev.base64 }, imageError: "" } : ad)));
-        else if (ev.type === "image_error") set(a => a.map((ad, i) => (i === ev.index ? { ...ad, imageError: ev.error } : ad)));
-        else if (ev.type === "error") setNotice(ev.text);
+    return (
+        <div className="ds-card" style={!brief ? { borderColor: "var(--gold)" } : undefined}>
+            <div className="ds-card-head" onClick={() => setOpen(o => !o)}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="ds-kicker">Your business</div>
+                    <div style={{ fontSize: "14px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: brief ? "var(--text)" : "var(--text-muted)" }}>
+                        {brief ? (site ? `${site} · ` : "") + brief.split("\n")[0] : "Tell Sem about the business first — or point it at the website"}
+                    </div>
+                </div>
+                <span className="ds-muted">{open ? "Hide" : "Edit"}</span>
+            </div>
+            {open && (
+                <div className="ds-card-body">
+                    <div style={{ display: "flex", gap: "8px" }}>
+                        <input className="ds-field" value={site} onChange={e => setSite(e.target.value)} placeholder="yourwebsite.co.za" style={{ flex: 1 }} />
+                        <button className="ds-btn" onClick={learn} disabled={!site.trim() || !!busy || disabled}>{busy ? <span className="ds-spin" /> : null}Learn from site</button>
+                    </div>
+                    <VicinicPicker headers={headers} disabled={disabled} onBrief={d => {
+                        setBrief([d.brief, d.phone && `Phone: ${d.phone}`, d.whatsapp && `WhatsApp: ${d.whatsapp}`,
+                            d.primary_color && `Brand colour: ${d.primary_color}`].filter(Boolean).join("\n"));
+                        if (d.domain) setSite(d.domain);
+                        setNotice(`Using ${d.slug}'s details from Vicinic. Edit anything that's off.`);
+                    }} />
+                    <textarea className="ds-field" value={brief} onChange={e => setBrief(e.target.value)} rows={brief ? 7 : 3}
+                        placeholder="Or describe the business: what you sell, who to, where, your tone…" />
+                    {(busy || notice) && <div className="ds-muted">{busy || notice}</div>}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function AdCard({ ad, onRetry, onExpired }) {
+    const text = `${ad.headline}\n\n${ad.primary_text}\n\n${(ad.hashtags || []).join(" ")}`;
+    const waiting = !ad.image && !ad.imageError;
+    return (
+        <div className="ds-ad">
+            <div className="ds-ad-media" style={{ aspectRatio: !ad.image ? (ad.aspect_ratio || "1:1").replace(":", "/") : undefined, minHeight: ad.image ? 0 : undefined }}>
+                {ad.image ? (
+                    <img src={mediaSrc(ad.image)} alt={ad.headline} onError={onExpired} />
+                ) : waiting ? (
+                    <><div className="ds-shimmer" /><span className="ds-muted">Making image…</span></>
+                ) : (
+                    <span style={{ fontSize: "12px", padding: "16px", textAlign: "center", color: /limit|not kept|expired|skipped/i.test(ad.imageError) ? "var(--warning)" : "var(--danger)" }}>{ad.imageError}</span>
+                )}
+                <span className="ds-badge">{placementLabel(ad.placement)}</span>
+            </div>
+            <div className="ds-ad-body">
+                {ad.angle && <div className="ds-kicker" style={{ letterSpacing: "0.5px" }}>{ad.angle}</div>}
+                <div style={{ fontWeight: 700, fontSize: "15px", lineHeight: 1.3 }}>{ad.headline}</div>
+                <div style={{ fontSize: "14px", lineHeight: 1.5 }}>{ad.primary_text}</div>
+                {ad.hashtags?.length > 0 && <div className="ds-muted">{ad.hashtags.join(" ")}</div>}
+                {ad.cta && <span className="ds-cta">{ad.cta}</span>}
+                <span style={{ flex: 1 }} />
+                <div className="ds-actions">
+                    <button className="ds-btn sm" onClick={() => copyToClipboard(text)}>Copy text</button>
+                    {ad.image && <a className="ds-btn sm" href={mediaSrc(ad.image)} download={`ad-${ad.placement}.png`} target="_blank" rel="noreferrer">Download</a>}
+                    <button className="ds-btn sm" onClick={onRetry} disabled={waiting}>New image</button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function AdsTurn({ turn, onRetry, onExpired, onAgain, onVideo, onBuild, disabled }) {
+    const working = turn.status === "working";
+    return (
+        <>
+            <div className="ds-user">
+                {turn.campaign}
+                <div className="ds-tags">
+                    {(turn.placements || []).map(p => <span key={p} className="ds-tag">{placementLabel(p)}</span>)}
+                    {turn.count > 1 && <span className="ds-tag">{turn.count} each</span>}
+                    {turn.refs > 0 && <span className="ds-tag">{turn.refs} inspiration</span>}
+                </div>
+            </div>
+            <div className="ds-sem">
+                <div className="ds-avatar">S</div>
+                <div className="ds-sem-body">
+                    {working && <div className="ds-status"><span className="ds-spin" />{turn.statusText || "Working…"}</div>}
+                    {turn.style && (
+                        <details className="ds-muted"><summary style={{ cursor: "pointer" }}>Style Sem picked up from your inspiration</summary>
+                            <div style={{ whiteSpace: "pre-wrap", marginTop: "4px" }}>{turn.style}</div></details>
+                    )}
+                    {turn.error && <div className="msg-error" style={{ margin: 0 }}>{turn.error}</div>}
+                    {turn.ads?.length > 0 && (
+                        <div className="ds-grid">
+                            {turn.ads.map((ad, i) => <AdCard key={i} ad={ad} onRetry={() => onRetry(i)} onExpired={() => onExpired(i)} />)}
+                        </div>
+                    )}
+                    {!working && (
+                        <div className="ds-actions">
+                            <button className="ds-btn sm" onClick={onAgain} disabled={disabled}>↻ Generate again</button>
+                            {turn.ads?.length > 0 && <button className="ds-btn sm" onClick={onVideo}>▶ Make a video of this</button>}
+                            {turn.ads?.length > 0 && onBuild && <button className="ds-btn sm" onClick={onBuild}>Build it with Code →</button>}
+                        </div>
+                    )}
+                </div>
+            </div>
+        </>
+    );
+}
+
+function VideoPlayer({ video, onGone }) {
+    return (
+        <div style={{ maxWidth: video.aspect_ratio === "16:9" ? "560px" : "320px" }}>
+            <video src={mediaSrc(video)} controls playsInline preload="metadata" onError={onGone}
+                style={{ width: "100%", borderRadius: "14px", background: "#000", display: "block" }} />
+            <div className="ds-actions" style={{ marginTop: "6px" }}>
+                <a className="ds-btn sm" href={mediaSrc(video)} download="semblance-video-ad.mp4" target="_blank" rel="noreferrer">Download</a>
+                {video.url && <span className="ds-muted">Kept for 7 days</span>}
+            </div>
+        </div>
+    );
+}
+
+function VideoTurn({ turn, onAgain, onGone, disabled }) {
+    const [, tick] = useState(0);
+    const rendering = turn.status === "rendering";
+    useEffect(() => {
+        if (!rendering) return;
+        const t = setInterval(() => tick(x => x + 1), 5000);
+        return () => clearInterval(t);
+    }, [rendering]);
+    const elapsed = Math.max(0, (Date.now() - (turn.created || Date.now())) / 1000);
+    return (
+        <>
+            <div className="ds-user">
+                {turn.prompt}
+                <div className="ds-tags"><span className="ds-tag">Video · {turn.aspect_ratio}</span></div>
+            </div>
+            <div className="ds-sem">
+                <div className="ds-avatar">S</div>
+                <div className="ds-sem-body">
+                    {rendering && (
+                        <div style={{ maxWidth: "360px", display: "flex", flexDirection: "column", gap: "6px" }}>
+                            <div className="ds-status"><span className="ds-spin" />Rendering on the GPU · {Math.floor(elapsed / 60)} min</div>
+                            <div className="ds-progress"><div style={{ width: `${Math.min(95, (elapsed / RENDER_SECONDS) * 100)}%` }} /></div>
+                            <div className="ds-muted">Usually 5–10 minutes. You can leave — it's saved here when it's done.</div>
+                        </div>
+                    )}
+                    {turn.status === "done" && turn.video && <VideoPlayer video={{ ...turn.video, aspect_ratio: turn.aspect_ratio }} onGone={onGone} />}
+                    {turn.status === "done" && turn.gpu_seconds > 0 && <div className="ds-muted">{Math.round(turn.gpu_seconds / 60)} min of GPU time</div>}
+                    {turn.status === "failed" && (
+                        <>
+                            <div className="msg-error" style={{ margin: 0 }}>{turn.error || "Render failed"}</div>
+                            <div className="ds-actions"><button className="ds-btn sm" onClick={onAgain} disabled={disabled}>↻ Try again</button></div>
+                        </>
+                    )}
+                </div>
+            </div>
+        </>
+    );
+}
+
+// Every render from the last 7 days (kept on the server), wherever it was started.
+function VideoLibrary({ videos, onClose }) {
+    return (
+        <div className="ds-sheet" onClick={onClose}>
+            <div onClick={e => e.stopPropagation()}>
+                <div style={{ display: "flex", alignItems: "center", padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
+                    <span style={{ fontWeight: 700, flex: 1 }}>Your videos</span>
+                    <button onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text)" }}><CloseIcon size={20} /></button>
+                </div>
+                <div style={{ flex: 1, overflowY: "auto", padding: "14px 16px", display: "flex", flexDirection: "column", gap: "18px" }}>
+                    {!videos.length && <div className="ds-muted">No videos in the last 7 days.</div>}
+                    {videos.map(v => (
+                        <div key={v.job_id} style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                            <div style={{ fontSize: "13px" }}>{v.prompt}</div>
+                            <div className="ds-muted">{v.created ? new Date(v.created * 1000).toLocaleString() : ""} · {v.aspect_ratio}</div>
+                            {v.url ? <VideoPlayer video={v} /> : v.status === "failed"
+                                ? <div className="msg-error" style={{ margin: 0 }}>{v.error || "Render failed"}</div>
+                                : <div className="ds-status"><span className="ds-spin" />Rendering…</div>}
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function Composer({ kind, setKind, draft, setDraft, onSend, disabled, placements, togglePlacement, count, setCount,
+                    aspect, setAspect, refs, setRefs, budget }) {
+    const [error, setError] = useState("");
+    const box = useRef(null);
+    useEffect(() => {
+        const el = box.current;
+        if (el) { el.style.height = "auto"; el.style.height = `${Math.min(160, el.scrollHeight)}px`; }
+    }, [draft]);
+    const addRefs = async (files) => {
+        setError("");
+        try {
+            let added = [];
+            for (const f of files) added = added.concat(f.type.startsWith("video/") ? await videoToRefs(f) : await imageToRef(f));
+            setRefs(r => [...r, ...added].slice(0, MAX_REFS));
+            if (refs.length + added.length > MAX_REFS) setError(`Kept the first ${MAX_REFS} — that's all the image model takes.`);
+        } catch (e) { setError(e.message); }
     };
-    const finishAds = chatId => updateChat(chatId, c => ({
-        pendingRun: null,
-        ads: (c.ads || []).map(ad => (ad.image || ad.imageError ? ad : { ...ad, imageError: "Skipped (image limit reached) — tap New image later" })),
+    const ready = draft.trim() && !disabled && (kind === "video" || placements.length);
+    return (
+        <div className="ds-composer">
+            <div className="ds-composer-box">
+                {kind === "ads" && refs.length > 0 && (
+                    <div style={{ display: "flex", gap: "8px", padding: "6px 4px 0" }}>
+                        {refs.map((r, i) => (
+                            <div key={i} className="ds-thumb">
+                                <img src={`data:${r.mime};base64,${r.base64}`} alt={r.name} title={r.name} />
+                                <button onClick={() => setRefs(x => x.filter((_, j) => j !== i))} aria-label="Remove">✕</button>
+                            </div>
+                        ))}
+                    </div>
+                )}
+                <textarea ref={box} rows={1} value={draft} onChange={e => setDraft(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && window.matchMedia("(pointer: fine)").matches) { e.preventDefault(); if (ready) onSend(); } }}
+                    placeholder={kind === "ads" ? "What are we promoting? e.g. Weekend special: 2 loaves for R80" : "Describe a 5-second clip, e.g. Slow close-up of steaming sourdough, warm morning light"} />
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <div className="ds-seg" role="tablist" aria-label="Make">
+                        {[["ads", "Ads"], ["video", "Video"]].map(([id, name]) => (
+                            <button key={id} role="tab" aria-selected={kind === id} onClick={() => setKind(id)}>{name}</button>
+                        ))}
+                    </div>
+                    <div className="ds-chips" style={{ flex: 1, minWidth: 0 }}>
+                        {kind === "ads" ? (<>
+                            {PLACEMENTS.map(([id, name]) => (
+                                <button key={id} onClick={() => togglePlacement(id)} aria-pressed={placements.includes(id)}
+                                    className={`ds-chip${placements.includes(id) ? " is-selected" : ""}`}>{name}</button>
+                            ))}
+                            <select className="ds-chip" value={count} onChange={e => setCount(Number(e.target.value))} aria-label="Variants per placement">
+                                {[1, 2, 3].map(n => <option key={n} value={n}>{n} each</option>)}
+                            </select>
+                        </>) : (<>
+                            {ASPECTS.map(([id, name]) => (
+                                <button key={id} onClick={() => setAspect(id)} aria-pressed={aspect === id}
+                                    className={`ds-chip${aspect === id ? " is-selected" : ""}`}>{name}</button>
+                            ))}
+                            {budget && <span className="ds-muted" style={{ alignSelf: "center", whiteSpace: "nowrap" }}>${Number(budget.used_usd).toFixed(2)} / ${Number(budget.cap_usd).toFixed(2)} this month</span>}
+                        </>)}
+                    </div>
+                    {kind === "ads" && refs.length < MAX_REFS && (
+                        <label className="ds-send" title="Inspiration: ads, photos or a video whose look Sem should copy" style={{ color: "var(--text-muted)" }}>
+                            <PaperclipIcon size={18} />
+                            <input type="file" accept="image/*,video/*" multiple disabled={disabled} style={{ display: "none" }}
+                                onChange={e => { addRefs([...e.target.files]); e.target.value = ""; }} />
+                        </label>
+                    )}
+                    <button className="ds-send btn-primary" onClick={onSend} disabled={!ready} aria-label="Send" style={{ border: "none" }}><SendIcon size={18} /></button>
+                </div>
+            </div>
+            {error && <div className="ds-muted" style={{ color: "var(--danger)", maxWidth: "920px", margin: "6px auto 0" }}>{error}</div>}
+        </div>
+    );
+}
+
+// Design tab: digital-marketing assistant as a chat. Learns the business from its own website, then each
+// message is a round of ads (copy + Nano Banana images per placement) or a video ad (Wan 2.1 on Modal, capped).
+// Every round stays in the chat, so earlier ads are never lost when a new one fails.
+export default function DesignPage({ token, onNavigate, onUnauthorized, handoff, onHandoff }) {
+    const { chats, chat: rawChat, updateChat, newChat, selectChat, deleteChat } = useTabChats(STORE_KEY, {
+        blank: () => ({ site: "", brief: "", placements: ["fb_ig_feed", "story_reel"], count: 2, turns: [] }),
+        legacy: () => { const s = loadSaved(); return { ...s, title: (s.campaign || "").slice(0, 60) }; },
+        // Saved images are short links and stay with the chat; inline (unsaved) ones are too big for the phone.
+        persist: c => ({
+            ...c,
+            turns: (c.turns || []).map(t => (t.kind !== "ads" ? t : { ...t, ads: (t.ads || []).map(({ image, ...ad }) => (
+                image?.url ? { ...ad, image } : image ? { ...ad, imageError: "Image not kept — tap New image" } : ad)) })),
+            ...(c.web ? { web: { ...c.web, logos: keepLinks(c.web.logos),
+                ...(c.web.figma ? { figma: { ...c.web.figma, frames: (c.web.figma.frames || []).filter(f => f.url) } } : {}) } } : {}),
+        }),
+    });
+    const chat = withTurns(rawChat);
+    const { site = "", brief = "", placements = [], count = 2, turns } = chat;
+    const set = (key, v) => updateChat(chat.id, c => ({ [key]: typeof v === "function" ? v(c[key]) : v }));
+    const [menuOpen, setMenuOpen] = useState(false);
+    const feed = useAgentFeed(`design:${chat.id}`, token);
+    const [feedOpen, setFeedOpen] = useState(false);
+    // Inspiration images stay in memory only (too big for phone storage); the style text they produced is saved.
+    const [refs, setRefs] = useState([]);
+    const [draft, setDraft] = useState("");
+    const [kind, setKindState] = useState(() => { try { return localStorage.getItem(KIND_KEY) === "video" ? "video" : "ads"; } catch { return "ads"; } });
+    const setKind = k => { setKindState(k); try { localStorage.setItem(KIND_KEY, k); } catch { /* private mode */ } };
+    const [aspect, setAspect] = useState("9:16");
+    const [budget, setBudget] = useState(null);
+    const [library, setLibrary] = useState(null); // null = closed
+    const [videos, setVideos] = useState([]);
+    const [model, setModel] = useState(() => loadModel("semblance_design_model"));
+    const [busy, setBusy] = useState(""); // Web mode's running step
+    const [notice, setNotice] = useState("");
+    const [mode, setModeState] = useState(() => { try { return localStorage.getItem(MODE_KEY) === "web" ? "web" : "ads"; } catch { return "ads"; } });
+    const setMode = m => { setModeState(m); setNotice(""); try { localStorage.setItem(MODE_KEY, m); } catch { /* private mode */ } };
+    const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
+    const scroller = useRef(null);
+    const chatsRef = useRef(chats);
+    chatsRef.current = chats;
+    const references = refs.map(({ mime, base64 }) => ({ mime, base64 }));
+    const working = turns.some(t => t.kind === "ads" && t.status === "working");
+
+    const setTurn = (chatId, turnId, fn) => updateChat(chatId, c => ({
+        turns: withTurns(c).turns.map(t => (t.id === turnId ? { ...t, ...(typeof fn === "function" ? fn(t) : fn) } : t)),
     }));
+    const addTurn = (chatId, turn, extra = {}) => updateChat(chatId, c => ({
+        ...withTurns(c), ...extra, turns: [...withTurns(c).turns, turn].slice(-MAX_TURNS),
+    }));
+
+    // Switching chats: migrate an old save, and mark a round that died with the page (no run to resume) as interrupted.
+    useEffect(() => {
+        setRefs([]); setDraft(""); setNotice("");
+        const stuck = turns.some(t => t.kind === "ads" && t.status === "working" && chat.pendingRun?.turnId !== t.id);
+        if (!Array.isArray(rawChat.turns) || stuck) updateChat(chat.id, c => ({
+            ...withTurns(c),
+            turns: withTurns(c).turns.map(t => (t.kind === "ads" && t.status === "working" && c.pendingRun?.turnId !== t.id
+                ? { ...t, status: "error", error: t.error || "Interrupted before it finished — tap Generate again" } : t)),
+        }));
+    }, [chat.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const takenHandoff = useRef(0);
+    useEffect(() => {
+        if (handoff?.view !== "design" || takenHandoff.current === handoff.at) return;
+        takenHandoff.current = handoff.at;
+        newChat({ site, brief, placements, count, title: handoff.task.slice(0, 60) });
+        setMode("ads"); setKind("ads");
+        setTimeout(() => setDraft(handoff.task), 0);
+    }, [handoff]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    useEffect(() => {
+        const el = scroller.current;
+        if (el) el.scrollTop = el.scrollHeight;
+    }, [chat.id, turns.length, mode]);
+
+    // ── Videos: renders are tracked on the server, so they finish into S3 even when nobody's watching ──
+    const loadVideos = () => fetch(`${API}/design/videos`, { headers }).then(r => (r.ok ? r.json() : null))
+        .then(d => d && setVideos(d.videos || [])).catch(() => {});
+    useEffect(() => {
+        fetch(`${API}/design/video/budget`, { headers }).then(r => r.json()).then(d => d.ok && setBudget(d)).catch(() => {});
+        loadVideos();
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    useEffect(() => {
+        const inFlight = new Set();
+        const check = async () => {
+            for (const c of chatsRef.current) {
+                for (const t of c.turns || []) {
+                    if (t.kind !== "video" || t.status !== "rendering" || !t.jobId || inFlight.has(t.jobId)) continue;
+                    inFlight.add(t.jobId);
+                    try {
+                        const r = await fetch(`${API}/design/video/${t.jobId}`, { headers });
+                        const d = await r.json().catch(() => ({}));
+                        if (d.status === "done") {
+                            setTurn(c.id, t.id, { status: "done", gpu_seconds: d.gpu_seconds,
+                                video: d.url ? { url: d.url, mime: d.mime } : { mime: d.mime, base64: d.base64 } });
+                            loadVideos();
+                        } else if (d.status === "failed" || (!r.ok && r.status !== 401 && r.status < 500)) {
+                            setTurn(c.id, t.id, { status: "failed", error: d.error || d.detail || "Render failed" });
+                        }
+                    } catch { /* offline: next round */ }
+                    inFlight.delete(t.jobId);
+                }
+            }
+        };
+        check();
+        const timer = setInterval(check, 10000);
+        return () => clearInterval(timer);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const renderVideo = async (prompt, ratio) => {
+        const chatId = chat.id;
+        const turnId = newId();
+        addTurn(chatId, { id: turnId, kind: "video", prompt, aspect_ratio: ratio, status: "rendering", created: Date.now() },
+            { title: chat.title || prompt.slice(0, 60) });
+        try {
+            const r = await fetch(`${API}/design/video`, { method: "POST", headers, body: JSON.stringify({ prompt, aspect_ratio: ratio, chat_id: chatId }) });
+            if (r.status === 401) { onUnauthorized(); return; }
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(d.detail || `Failed (${r.status})`);
+            setTurn(chatId, turnId, { jobId: d.job_id, created: Date.now() });
+            setBudget({ used_usd: d.used_usd, cap_usd: d.cap_usd });
+            loadVideos();
+        } catch (e) { setTurn(chatId, turnId, { status: "failed", error: e.message }); }
+    };
+
+    // ── Ads: each send is a new round; events land in that round only ──
+    const applyEvent = (chatId, turnId, ev) => {
+        if (ev.type === "status") setTurn(chatId, turnId, { statusText: ev.text });
+        else if (ev.type === "style") { setTurn(chatId, turnId, { style: ev.text }); updateChat(chatId, () => ({ style: ev.text })); }
+        else if (ev.type === "variants") setTurn(chatId, turnId, { ads: ev.variants, statusText: "Making images…" });
+        else if (ev.type === "image") setTurn(chatId, turnId, t => ({ ads: (t.ads || []).map((ad, i) => (i === ev.index
+            ? { ...ad, image: ev.url ? { mime: ev.mime, url: ev.url } : { mime: ev.mime, base64: ev.base64 }, imageError: "" } : ad)) }));
+        else if (ev.type === "image_error") setTurn(chatId, turnId, t => ({ ads: (t.ads || []).map((ad, i) => (i === ev.index ? { ...ad, imageError: ev.error } : ad)) }));
+        else if (ev.type === "error") setTurn(chatId, turnId, { error: ev.text });
+    };
+    const finishAds = (chatId, turnId, error) => {
+        updateChat(chatId, () => ({ pendingRun: null }));
+        setTurn(chatId, turnId, t => ({
+            status: "done", statusText: "", error: error || t.error || "",
+            ads: (t.ads || []).map(ad => (ad.image || ad.imageError ? ad : { ...ad, imageError: "Skipped (image limit reached) — tap New image later" })),
+        }));
+    };
     useResumeRun(chat.id, chat.pendingRun, {
-        headers, apply: ev => applyEvent(chat.id, ev),
-        onStart: () => { setBusy("Picking your ads back up…"); updateChat(chat.id, () => ({ ads: [] })); },
-        done: () => { finishAds(chat.id); setBusy(""); },
+        headers, apply: ev => applyEvent(chat.id, chat.pendingRun.turnId, ev),
+        onStart: () => setTurn(chat.id, chat.pendingRun.turnId, { ads: [], status: "working", statusText: "Picking your ads back up…" }),
+        done: () => finishAds(chat.id, chat.pendingRun?.turnId),
     });
 
-    const create = async () => {
+    const createAds = async (campaign, opts = {}) => {
         const chatId = chat.id;
-        setBusy("Writing ads…"); setNotice(""); setAds([]);
+        const turnId = newId();
+        const round = { placements: opts.placements || placements, count: opts.count || count };
+        addTurn(chatId, { id: turnId, kind: "ads", campaign, ...round, refs: refs.length, ads: [], status: "working",
+            statusText: refs.length ? "Studying your inspiration…" : "Writing ads…", created: Date.now() },
+            { title: chat.title || campaign.slice(0, 60) });
+        let error = "";
         try {
             const r = await runStream("/design/ads", {
-                headers, body: { brief, campaign, placements, count, model, references, chat_id: chatId },
-                onEvent: ev => applyEvent(chatId, ev),
-                onRun: (id, seq) => seq === 0 && updateChat(chatId, () => ({ pendingRun: { id, seq: 0 } })),
+                headers, body: { brief, campaign, ...round, model, references, chat_id: chatId },
+                onEvent: ev => applyEvent(chatId, turnId, ev),
+                onRun: (id, seq) => seq === 0 && updateChat(chatId, () => ({ pendingRun: { id, seq: 0, turnId } })),
             });
             if (r.status === 401) { onUnauthorized(); return; }
-            if (r.error) throw new Error(r.error);
-        } catch (e) { setNotice(e.message); }
-        finishAds(chatId);
-        setBusy("");
+            if (r.error) error = r.error;
+        } catch (e) { error = e.message; }
+        finishAds(chatId, turnId, error);
     };
 
-    const retryImage = async (index) => {
-        const ad = ads[index];
-        setAds(a => a.map((x, i) => (i === index ? { ...x, image: null, imageError: "" } : x)));
+    const retryImage = async (turnId, index) => {
+        const ad = turns.find(t => t.id === turnId)?.ads?.[index];
+        if (!ad) return;
+        const patch = fn => setTurn(chat.id, turnId, t => ({ ads: t.ads.map((x, i) => (i === index ? { ...x, ...fn(x) } : x)) }));
+        patch(() => ({ image: null, imageError: "" }));
         try {
             const r = await fetch(`${API}/design/image`, { method: "POST", headers, body: JSON.stringify({ prompt: ad.image_prompt, aspect_ratio: ad.aspect_ratio, references }) });
             const d = await r.json();
             if (!r.ok) throw new Error(d.detail || `Failed (${r.status})`);
-            setAds(a => a.map((x, i) => (i === index ? { ...x, image: d.url ? { mime: d.mime, url: d.url } : { mime: d.mime, base64: d.base64 } } : x)));
-        } catch (e) { setAds(a => a.map((x, i) => (i === index ? { ...x, imageError: e.message } : x))); }
+            patch(() => ({ image: d.url ? { mime: d.mime, url: d.url } : { mime: d.mime, base64: d.base64 } }));
+        } catch (e) { patch(() => ({ imageError: e.message })); }
     };
 
-    const toggle = (id) => setPlacements(p => (p.includes(id) ? p.filter(x => x !== id) : [...p, id]));
+    const send = () => {
+        const text = draft.trim();
+        if (!text) return;
+        setDraft("");
+        if (kind === "video") renderVideo(text, aspect);
+        else createAds(text);
+    };
+
+    const buildWithCode = turn => onHandoff && (() => onHandoff("code", [
+        "Build this campaign into my website: a landing section (or page) that matches the site's existing style,",
+        "linked from the navigation, using this copy. Then open a PR.",
+        `Campaign: ${turn.campaign}`,
+        ...turn.ads.slice(0, 3).map(a => `- ${a.headline}: ${a.primary_text} [${a.cta}]`),
+        site ? `Website: ${site}` : "",
+    ].filter(Boolean).join("\n")));
+
+    const business = (
+        <BusinessCard chat={chat} setSite={v => set("site", v)} setBrief={v => set("brief", v)} headers={headers} model={model}
+            onUnauthorized={onUnauthorized} disabled={working || !!busy} />
+    );
 
     return (
         <div style={{ position: "fixed", inset: 0, background: "var(--bg)", zIndex: 25, display: "flex", flexDirection: "column" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "12px 16px", borderBottom: "1px solid var(--border)" }}>
                 <MenuButton onClick={() => setMenuOpen(true)} />
-                <span style={{ fontWeight: 700, color: "var(--text)" }}>Sem Design</span>
-                <div role="tablist" aria-label="Design mode" style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: "999px", padding: "2px" }}>
+                <span style={{ fontWeight: 700, color: "var(--text)", whiteSpace: "nowrap" }}>Sem Design</span>
+                <div className="ds-seg" role="tablist" aria-label="Design mode">
                     {[["ads", "Ads"], ["web", "Web"]].map(([id, name]) => (
-                        <button key={id} role="tab" aria-selected={mode === id} disabled={!!busy && mode !== id} onClick={() => setMode(id)}
-                            style={{ border: "none", borderRadius: "999px", padding: "4px 10px", fontSize: "12px", fontWeight: 600, cursor: "pointer",
-                                background: mode === id ? "var(--accent)" : "transparent", color: mode === id ? "var(--accent-contrast)" : "var(--text-muted)" }}>{name}</button>
+                        <button key={id} role="tab" aria-selected={mode === id} disabled={!!busy && mode !== id} onClick={() => setMode(id)}>{name}</button>
                     ))}
                 </div>
                 <span style={{ flex: 1 }} />
-                <HeaderStatus token={token} onFeed={() => { setFeedOpen(true); feed.acknowledgeErrors(); }} hasError={feed.hasError} busy={!!busy} />
+                <button className="ds-btn sm" onClick={() => { setLibrary(true); loadVideos(); }} title="Your videos (last 7 days)">
+                    ▶ {videos.filter(v => v.url).length || ""}
+                </button>
+                <HeaderStatus token={token} onFeed={() => { setFeedOpen(true); feed.acknowledgeErrors(); }} hasError={feed.hasError} busy={working || !!busy} />
                 <ModelPicker token={token} value={model} onChange={setModel} storageKey="semblance_design_model" />
             </div>
             <AgentFeedPanel open={feedOpen} onClose={() => setFeedOpen(false)} events={feed.events}
                 title={`Activity · ${chat.title || "New chat"}`} />
             <TabDrawer open={menuOpen} onClose={() => setMenuOpen(false)} title="Sem Design" current="design"
                 onNavigate={onNavigate} newLabel="+ New campaign" disabled={!!busy}
-                onNew={() => { newChat({ site, brief, placements, count }); setNotice(""); }}
-                chats={chats} activeId={chat.id} onSelect={id => { selectChat(id); setNotice(""); }} onDelete={deleteChat}
+                onNew={() => newChat({ site, brief, placements, count })}
+                chats={chats} activeId={chat.id} onSelect={selectChat} onDelete={deleteChat}
                 subtitle={c => c.site || ""} />
+            {library && <VideoLibrary videos={videos.filter(v => !v.url || linkAlive(v.url))} onClose={() => setLibrary(null)} />}
 
-            <div style={{ flex: 1, overflowY: "auto", padding: "4px 16px 32px" }}>
-                <div style={label}>YOUR BUSINESS</div>
-                <div style={{ display: "flex", gap: "8px" }}>
-                    <input value={site} onChange={e => setSite(e.target.value)} placeholder="yourwebsite.co.za" style={{ ...field, flex: 1 }} />
-                    <button onClick={learn} disabled={!site.trim() || !!busy} style={btn}>Learn from site</button>
-                </div>
-                <VicinicPicker headers={headers} disabled={!!busy} onBrief={d => {
-                    setBrief([d.brief, d.phone && `Phone: ${d.phone}`, d.whatsapp && `WhatsApp: ${d.whatsapp}`,
-                        d.primary_color && `Brand colour: ${d.primary_color}`].filter(Boolean).join("\n"));
-                    if (d.domain) setSite(d.domain);
-                    setNotice(`Using ${d.slug}'s details from Vicinic. Edit anything that's off.`);
-                }} />
-                <textarea value={brief} onChange={e => setBrief(e.target.value)} rows={brief ? 9 : 3} style={{ ...field, marginTop: "8px" }}
-                    placeholder="Or describe the business: what you sell, who to, where, your tone…" />
-
-                {mode === "web" ? (
-                    <>
-                        <WebStudio headers={headers} chat={chat} updateChat={updateChat} brief={brief} site={site} model={model}
-                            busy={busy} setBusy={setBusy} setNotice={setNotice} onUnauthorized={onUnauthorized} onHandoff={onHandoff} />
-                        {(busy || notice) && <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "8px" }}>{busy || notice}</div>}
-                    </>
-                ) : (<>
-                <Inspiration refs={refs} setRefs={setRefs} style={chat.style} disabled={!!busy} />
-
-                <div style={label}>CAMPAIGN</div>
-                <textarea value={campaign} onChange={e => setCampaign(e.target.value)} rows={2} style={field}
-                    placeholder="e.g. Weekend special: 2 loaves for R80, ends Sunday" />
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "8px" }}>
-                    {PLACEMENTS.map(([id, name]) => (
-                        <button key={id} onClick={() => toggle(id)} aria-pressed={placements.includes(id)}
-                            className={placements.includes(id) ? "is-selected" : ""} style={{ ...btn, fontSize: "12px", fontWeight: 500 }}>
-                            {name}
-                        </button>
-                    ))}
-                </div>
-                <div style={{ display: "flex", gap: "8px", alignItems: "center", marginTop: "10px" }}>
-                    <select value={count} onChange={e => setCount(Number(e.target.value))} style={{ ...field, width: "auto" }}>
-                        {[1, 2, 3].map(n => <option key={n} value={n}>{n} per placement</option>)}
-                    </select>
-                    <button onClick={create} disabled={!brief.trim() || !campaign.trim() || !placements.length || !!busy} className="btn-primary" style={primary}>Create ads</button>
-                </div>
-                {(busy || notice) && <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "8px" }}>{busy || notice}</div>}
-
-                {ads.length > 0 && onHandoff && (
-                    <button onClick={() => onHandoff("code", [
-                        "Build this campaign into my website: a landing section (or page) that matches the site's existing style,",
-                        "linked from the navigation, using this copy. Then open a PR.",
-                        `Campaign: ${campaign}`,
-                        ...ads.slice(0, 3).map(a => `- ${a.headline}: ${a.primary_text} [${a.cta}]`),
-                        site ? `Website: ${site}` : "",
-                    ].filter(Boolean).join("\n"))} style={{ ...btn, marginTop: "12px" }}>Build it with Code →</button>
-                )}
-                {ads.length > 0 && (
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "12px", marginTop: "14px" }}>
-                        {ads.map((ad, i) => <AdCard key={i} ad={ad} onRetry={() => retryImage(i)}
-                            onExpired={() => ad.image?.url && setAds(x => x.map((y, j) => (j === i ? { ...y, image: null, imageError: EXPIRED } : y)))} />)}
+            {mode === "web" ? (
+                <WebStudio headers={headers} chat={chat} updateChat={updateChat} brief={brief} site={site} model={model}
+                    busy={busy} setBusy={setBusy} notice={notice} setNotice={setNotice} onUnauthorized={onUnauthorized} onHandoff={onHandoff} top={business} />
+            ) : (<>
+                <div className="ds-feed" ref={scroller}>
+                    <div className="ds-col">
+                        {business}
+                        {!turns.length && (
+                            <div className="ds-empty">
+                                <h2>What are we promoting?</h2>
+                                <div className="ds-muted" style={{ marginBottom: "14px" }}>
+                                    Describe the campaign below. Sem writes the copy and makes an image for every placement — or switch to Video for a 5-second clip.
+                                </div>
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", justifyContent: "center" }}>
+                                    {SUGGESTIONS.map(s => <button key={s} className="ds-chip" onClick={() => setDraft(s)}>{s}</button>)}
+                                </div>
+                            </div>
+                        )}
+                        {turns.map(t => (t.kind === "video" ? (
+                            <VideoTurn key={t.id} turn={t} disabled={working} onAgain={() => renderVideo(t.prompt, t.aspect_ratio)}
+                                onGone={() => t.video?.url && setTurn(chat.id, t.id, { status: "failed", video: null, error: "Video expired (kept 7 days)" })} />
+                        ) : (
+                            <AdsTurn key={t.id} turn={t} disabled={working || !brief.trim()}
+                                onRetry={i => retryImage(t.id, i)}
+                                onExpired={i => t.ads[i]?.image?.url && setTurn(chat.id, t.id, x => ({ ads: x.ads.map((y, j) => (j === i ? { ...y, image: null, imageError: EXPIRED } : y)) }))}
+                                onAgain={() => createAds(t.campaign, { placements: t.placements, count: t.count })}
+                                onVideo={() => { setKind("video"); setDraft(t.ads[0]?.image_prompt || t.campaign); }}
+                                onBuild={buildWithCode(t)} />
+                        )))}
+                        {!brief.trim() && turns.length > 0 && <div className="ds-muted" style={{ textAlign: "center" }}>Add the business brief above to make more.</div>}
                     </div>
-                )}
-
-                <VideoStudio token={token} seedPrompt={ads[0]?.image_prompt || ""} />
-                </>)}
-            </div>
+                </div>
+                <Composer kind={kind} setKind={setKind} draft={draft} setDraft={setDraft} onSend={send}
+                    disabled={kind === "ads" ? working || !brief.trim() : false}
+                    placements={placements} togglePlacement={id => set("placements", p => (p.includes(id) ? p.filter(x => x !== id) : [...p, id]))}
+                    count={count} setCount={v => set("count", v)} aspect={aspect} setAspect={setAspect}
+                    refs={refs} setRefs={setRefs} budget={budget} />
+            </>)}
         </div>
     );
 }

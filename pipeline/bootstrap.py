@@ -192,7 +192,9 @@ class Bootstrap:
             await db.save_memory(session_id, reply, embedding=reply_embedding)
 
     async def _tool_reply(self, messages: list[dict], session_id: str, provider: str):
-        tools, active = await chat_tools.available(session_id)
+        last_user = next((m for m in reversed(messages) if m.get("role") == "user"), {})
+        query = last_user.get("content") if isinstance(last_user.get("content"), str) else ""
+        tools, active = await chat_tools.available(session_id, query[-4000:], messages[:-1])
         deadline = time.monotonic() + 240
         used, tokens = [], 0
         for step in range(_MAX_TOOL_STEPS + 1):
