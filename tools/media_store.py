@@ -13,8 +13,8 @@ from urllib.parse import quote
 from config import settings
 
 KEEP_SECONDS = 7 * 24 * 3600
-KEY_RE = re.compile(r"(ads|video|web)/\d{4}-\d{2}-\d{2}/[a-f0-9]{32}\.(png|jpg|webp|mp4)")
-_EXT = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "video/mp4": "mp4"}
+KEY_RE = re.compile(r"(ads|video|web|speech)/\d{4}-\d{2}-\d{2}/[a-f0-9]{32}\.(png|jpg|webp|mp4|wav)")
+_EXT = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "video/mp4": "mp4", "audio/wav": "wav"}
 
 
 def enabled() -> bool:
@@ -56,3 +56,17 @@ async def save(data_b64: str, mime: str, kind: str) -> str | None:
 
 def presigned(key: str) -> str:
     return _client().generate_presigned_url("get_object", Params={"Bucket": settings.MEDIA_BUCKET, "Key": key}, ExpiresIn=600)
+
+
+async def save_speech(data_b64: str) -> str | None:
+    """A voice-mode sentence: stored like the rest, but handed back as a 10-minute S3 link so the phone
+    fetches it straight from S3 (no hop through the API)."""
+    if not enabled():
+        return None
+    key = f"speech/{time.strftime('%Y-%m-%d')}/{uuid.uuid4().hex}.wav"
+    try:
+        await asyncio.to_thread(_client().put_object, Bucket=settings.MEDIA_BUCKET, Key=key,
+                                Body=base64.b64decode(data_b64), ContentType="audio/wav")
+        return await asyncio.to_thread(presigned, key)
+    except Exception:
+        return None

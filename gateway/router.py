@@ -71,6 +71,7 @@ from pipeline.ultraplan_intent import (
     run_ultraplan_intent,
     ultraplan_status_label,
 )
+from pipeline.voice_stream import with_speech
 from pipeline.web_context import detect_web_intent, run_web_intent, status_label
 from storage.embeddings import embed_text
 from storage.neon_store import get_store
@@ -588,7 +589,9 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
 
         yield "data: [DONE]\n\n"
 
-    return durable(stream_gen(), _account["account_id"], body, "chat")
+    # Voice mode with the natural voice: the server speaks each sentence as it's written (pipeline/voice_stream.py).
+    lines = with_speech(stream_gen(), body.get("voice_name") or "Kore") if body.get("voice") else stream_gen()
+    return durable(lines, _account["account_id"], body, "chat")
 
 
 @router.get("/status/{session_id}")

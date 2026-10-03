@@ -33,8 +33,9 @@ export function speakableCut(text, min) {
 }
 
 // Hands-free conversation: listens, sends what you said when you pause, and
-// reads Sem's reply out while it is still being written (sentence by sentence,
-// fetching the next piece's audio while this one plays), then listens again.
+// reads Sem's reply out while it is still being written, then listens again.
+// Natural voice: the server makes each sentence's audio while the reply streams and sends it in the same
+// stream (pipeline/voice_stream.py). Fast voice: the phone reads the text itself.
 // Tap the orb to cut Sem off and talk; End to stop. The chat keeps every turn.
 export default function VoiceMode({ token, send, busy, lastReply, liveReply = "", onClose }) {
     const [phase, setPhase] = useState("listening"); // listening | thinking | speaking | paused
@@ -53,7 +54,7 @@ export default function VoiceMode({ token, send, busy, lastReply, liveReply = ""
     const engineRef = useRef(engine); engineRef.current = engine;
     const [said, setSaid] = useState("");     // what Sem is saying (captions)
     // The reply being read out: how much of it is queued, the queue, and whether the reply is complete.
-    const turn = useRef(null); // { before, sawBusy, consumed, spoken, final, queue, playing, gen, tts, ttsDown }
+    const turn = useRef(null); // { before, sawBusy, consumed, spoken, final, queue, playing, gen, server, heard }
     const gen = useRef(0);
     const audioCtx = () => {
         if (!ctx.current) ctx.current = new (window.AudioContext || window.webkitAudioContext)();
@@ -97,32 +98,39 @@ export default function VoiceMode({ token, send, busy, lastReply, liveReply = ""
             const text = (finalText || latest).trim();
             if (text) {
                 setPhase("thinking"); setSaid("");
-                turn.current = { before: lastReplyRef.current, sawBusy: false, consumed: 0, spoken: 0, final: false,
-                                 queue: [], playing: false, gen: gen.current, tts: Promise.resolve(), ttsDown: false };
-                send(text);
+                const t = { before: lastReplyRef.current, sawBusy: false, consumed: 0, spoken: 0, final: false,
+                            queue: [], playing: false, gen: gen.current,
+                            server: engineRef.current === "natural", heard: 0 };
+                turn.current = t;
+                send(text, t.server ? { voice: true, onSpeech: ev => onSpeech(t, ev) } : {});
             } else setTimeout(() => open.current && phaseRef.current === "listening" && listen(), 250);
         };
         recog.current = r;
         try { r.start(); } catch { /* already started */ }
     };
 
-    // Natural voice: Gemini TTS, one request at a time (its rate limit is tight), started as soon as a piece is
-    // queued so it's ready when the previous piece ends. A rate limit switches the rest of the reply to the phone voice.
-    const fetchSpeech = (t, text) => {
-        if (engineRef.current !== "natural" || t.ttsDown) return Promise.resolve(null);
-        const job = t.tts.then(async () => {
-            if (t.ttsDown) return null;
-            try {
-                const r = await fetch(`${API}/media/speech`, {
-                    method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-                    body: JSON.stringify({ text }),
-                });
-                if (r.status === 429) t.ttsDown = true;
-                return r.ok ? await r.json() : null;
-            } catch { return null; }
-        });
-        t.tts = job;
-        return job;
+    // A sentence's audio from the server: an S3 link (fetched now, while the previous piece plays) or inline.
+    const loadAudio = async (sp) => {
+        if (sp.base64) return { base64: sp.base64 };
+        if (!sp.url) return null;
+        try {
+            const blob = await (await fetch(sp.url)).blob();
+            return await new Promise(resolve => {
+                const r = new FileReader();
+                r.onload = () => resolve({ base64: String(r.result).split(",")[1] });
+                r.onerror = () => resolve(null);
+                r.readAsDataURL(blob);
+            });
+        } catch { return null; }
+    };
+
+    const onSpeech = (t, ev) => {
+        if (t.gen !== gen.current || !open.current) return;
+        if (ev.speech) {
+            t.heard += 1;
+            t.queue.push({ text: ev.speech.text, audio: loadAudio(ev.speech) });
+            playQueue(t);
+        }
     };
 
     const playPiece = async (text, wav, face) => {
@@ -183,7 +191,7 @@ export default function VoiceMode({ token, send, busy, lastReply, liveReply = ""
         if (!piece || t.spoken >= MAX_SPOKEN) return;
         if (t.spoken + piece.length > MAX_SPOKEN) piece = `${piece.slice(0, MAX_SPOKEN - t.spoken).replace(/[^.!?]*$/, "")} The rest is in the chat.`;
         t.spoken += piece.length;
-        t.queue.push({ text: piece, audio: fetchSpeech(t, piece) });
+        t.queue.push({ text: piece, audio: Promise.resolve(null) });
         playQueue(t);
     };
 
@@ -196,13 +204,15 @@ export default function VoiceMode({ token, send, busy, lastReply, liveReply = ""
         if (!t || t.final || t.gen !== gen.current) return;
         if (busy) {
             t.sawBusy = true;
-            if (liveReply) feed(t, liveReply);
+            if (liveReply && !t.server) feed(t, liveReply);
             return;
         }
         if (!t.sawBusy && lastReply === t.before) return;
         t.final = true;
         const reply = lastReply !== t.before ? lastReply : liveReply;
-        if (reply) feed(t, reply);
+        // The server spoke nothing (an error, or an old server): read it with the phone voice instead.
+        if (t.server && !t.heard) t.server = false;
+        if (reply && !t.server) feed(t, reply);
         if (!t.queue.length && !t.playing) { turn.current = null; listen(); }
     }, [busy, lastReply, liveReply]); // eslint-disable-line react-hooks/exhaustive-deps
 

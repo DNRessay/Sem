@@ -144,14 +144,14 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
         setPendingReply(null);
     }, [pendingReply, revealed, fullResponse, sessionId, onTitle]);
 
-    const submit = async (retry = null, useModel = model) => {
+    const submit = async (retry = null, useModel = model, opts = {}) => {
         if (streaming) return;
         if (!retry && !input.trim() && attachments.length === 0) return;
         const msg = retry ?? input.trim();
         const files = retry ? [] : attachments;
         if (!retry) { setInput(""); setAttachments([]); }
         setHistory(h => [...h, { role: "user", content: msg, files: files.map(f => ({ name: f.name, source: f.source, mime: f.mime })) }]);
-        const { reply, tool: toolResult, title, handoff, suggest } = await send(msg, sessionId, history, files, webSearchEnabled, useModel, research);
+        const { reply, tool: toolResult, title, handoff, suggest } = await send(msg, sessionId, history, files, webSearchEnabled, useModel, research, opts);
         if (reply || handoff) setPendingReply({ reply, tool: toolResult, title, handoff, suggest, retry: suggest ? msg : null });
         else if (title) onTitle?.(sessionId, title);
     };
@@ -295,7 +295,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
                     </div>
                 </div>
             </div>
-            {voiceOn && <VoiceMode token={token} send={m => submit(m)} busy={streaming || !!pendingReply} onClose={() => setVoiceOn(false)}
+            {voiceOn && <VoiceMode token={token} send={(m, opts) => submit(m, undefined, opts)} busy={streaming || !!pendingReply} onClose={() => setVoiceOn(false)}
                 lastReply={[...history].reverse().find(m => m.role === "assistant")?.content || ""}
                 liveReply={streaming ? chunks.join("") : ""} />}
         </div>
