@@ -538,10 +538,25 @@ async def fetch_repo(provider: str, request: Request, account: dict = Depends(re
             await db.set_active_repo(session_id, provider, repo, ref)
             cloned = True
 
+    if cloned:
+        # The clone is live and the chat has repo_read/repo_grep, so send only the file tree: files are read
+        # when a question needs them instead of ~12K characters riding along in every later turn's history.
+        content = _tree_only(content, repo)
     return {
         "provider": provider, "repo": repo, "content": content,
         "truncated": truncated, "file_count": file_count, "cloned": cloned,
     }
+
+
+_MAX_TREE_CHARS = 4_000
+
+
+def _tree_only(bundle: str, repo: str) -> str:
+    tree = bundle.split("</repo_tree>")[0]
+    if len(tree) > _MAX_TREE_CHARS:
+        tree = tree[:_MAX_TREE_CHARS].rsplit("\n", 1)[0] + "\n…"
+    return (f"{tree}\n</repo_tree>\n<system_note>{repo} is cloned and attached to this chat. Read files with "
+            "repo_read / repo_grep / repo_list only when a question needs them.</system_note>")
 
 
 def _bundle_repo_files(repo: str, all_paths: list[str], blobs: list[dict]) -> tuple[list[str], int]:

@@ -167,3 +167,14 @@ async def test_run_repo_intent_grep_returns_empty_with_no_matches(monkeypatch):
     monkeypatch.setattr("pipeline.repo_context.get_registry", lambda: FakeRegistry())
     result = await run_repo_intent("nonexistent_term", "sess1")
     assert result == ""
+
+
+def test_needs_repo_only_for_code_questions_or_follow_ups():
+    from pipeline.repo_context import needs_repo
+    assert needs_repo("why does gateway/router.py crash?")
+    assert needs_repo("fix the bug in the login function")
+    assert needs_repo("what's in `config.py`")
+    assert not needs_repo("what's the weather in Joburg tomorrow?")
+    assert not needs_repo("draft a WhatsApp message to my landlord")
+    follow = [{"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "repo_read", "arguments": "{}"}}]}]
+    assert needs_repo("and the other one?", follow)

@@ -19,7 +19,7 @@ async def test_chat_model_calls_a_tool_then_answers(monkeypatch):
         seen.append((provider, [t["function"]["name"] for t in tools or []], messages[-1]))
         return replies.pop(0)
 
-    async def fake_available(session_id):
+    async def fake_available(session_id, query="", recent=None):
         return chat_tools.BASE, None
 
     async def fake_run(name, args, session_id, active):
@@ -79,7 +79,7 @@ async def test_chat_reports_tokens_used(monkeypatch):
     async def fake_complete(provider, messages, tools=None, **kw):
         return {"role": "assistant", "content": "hi", "_tokens": 120}
 
-    async def fake_available(session_id):
+    async def fake_available(session_id, query="", recent=None):
         return chat_tools.BASE, None
 
     monkeypatch.setattr(bootstrap_mod.llm_providers, "complete", fake_complete)
@@ -92,3 +92,18 @@ async def test_chat_reports_tokens_used(monkeypatch):
 def test_token_estimate_when_provider_is_silent():
     from pipeline import llm_providers
     assert llm_providers.estimate_tokens([{"content": "a" * 400}], {"content": "b" * 40}) == 110
+
+
+@pytest.mark.asyncio
+async def test_repo_tools_join_only_when_the_turn_is_about_code(monkeypatch):
+    class Store:
+        async def get_active_repo(self, session_id):
+            return {"provider": "github", "repo": "o/r"}
+
+    async def store():
+        return Store()
+
+    monkeypatch.setattr(chat_tools, "get_store", store)
+    names = lambda tools: [t["function"]["name"] for t in tools]  # noqa: E731
+    assert "repo_read" not in names((await chat_tools.available("s", "plan my weekend"))[0])
+    assert "repo_read" in names((await chat_tools.available("s", "what does main.py do?"))[0])

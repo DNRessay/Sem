@@ -52,6 +52,32 @@ def detect_repo_intent(query: str) -> tuple[str, str] | None:
     return None
 
 
+# Words and shapes that mean a message is about the attached code. Anything else ("what's the weather",
+# "draft an email") doesn't get the repo tools at all — fewer tool schemas per turn, and the model can't
+# wander off reading files it doesn't need.
+_CODE_WORDS = re.compile(
+    r"\b(repo|repository|codebase|code|source|file|files|folder|director(?:y|ies)|readme|function|class|method|"
+    r"module|package|import|bug|error|exception|traceback|stack ?trace|crash|fix|implement|refactor|commit|branch|"
+    r"pull request|pr|merge|test|tests|lint|build|deploy|config|endpoint|route|api|schema|migration|variable|"
+    r"component|hook|script|workflow|dependency|dependencies|requirements)\b", re.I)
+_CODE_SHAPES = re.compile(r"`[^`]+`|\b[\w-]+\.(?:py|jsx?|tsx?|md|json|ya?ml|toml|html|css|go|rs|java|kt|sql|sh|txt|ini|env)\b"
+                          r"|\b[\w.-]+/[\w./-]+")
+
+
+def needs_repo(query: str, recent: list[dict] | None = None) -> bool:
+    """True when this turn is about the attached repo: the message itself reads like a code question, or
+    the conversation was just in the repo (a follow-up like "and the other one?")."""
+    if _CODE_WORDS.search(query or "") or _CODE_SHAPES.search(query or ""):
+        return True
+    for m in (recent or [])[-4:]:
+        text = m.get("content") if isinstance(m.get("content"), str) else ""
+        if m.get("tool_calls") and any(str((c.get("function") or {}).get("name", "")).startswith("repo_") for c in m["tool_calls"]):
+            return True
+        if '"kind": "read"' in text[:200] or "<repo_" in text[:2000]:
+            return True
+    return False
+
+
 def repo_status_label(kind: str, target: str) -> str:
     if kind == "read":
         return f"Reading {target}…"
