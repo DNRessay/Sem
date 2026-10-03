@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
 from config import settings
-from gateway import mcp_server
+from gateway import mcp_oauth, mcp_server
 from gateway.auth import current_version, issue_token, require_account
 from storage.neon_store import get_store
 from tools.mcp_client import MCPClient
@@ -17,8 +17,19 @@ MCP_KEY_TTL_SECONDS = 365 * 24 * 60 * 60
 
 # --- SEMBLANCE as an MCP server ----------------------------------------------
 
+async def mcp_account(request: Request) -> dict:
+    """require_account, plus the header that tells an MCP client (e.g. Claude) where to sign in."""
+    try:
+        return await require_account(request)
+    except HTTPException as e:
+        if e.status_code != 401:
+            raise
+        from gateway.oauth_router import base_url
+        raise HTTPException(401, e.detail, headers={"WWW-Authenticate": mcp_oauth.www_authenticate(base_url(request))})
+
+
 @router.post("")
-async def mcp_endpoint(request: Request, account: dict = Depends(require_account)):
+async def mcp_endpoint(request: Request, account: dict = Depends(mcp_account)):
     try:
         payload = await request.json()
     except ValueError:

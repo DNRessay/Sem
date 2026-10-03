@@ -44,9 +44,12 @@ def store(monkeypatch):
 
 @pytest.fixture
 def client(store):
-    app.dependency_overrides[require_account] = lambda: {"account_id": "owner", "role": "owner"}
+    from gateway.mcp_router import mcp_account
+    for dep in (require_account, mcp_account):
+        app.dependency_overrides[dep] = lambda: {"account_id": "owner", "role": "owner"}
     yield TestClient(app)
-    app.dependency_overrides.pop(require_account, None)
+    for dep in (require_account, mcp_account):
+        app.dependency_overrides.pop(dep, None)
 
 
 def _rpc(client, method, params=None, mid=1):
