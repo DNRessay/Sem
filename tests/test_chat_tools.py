@@ -19,7 +19,7 @@ async def test_chat_model_calls_a_tool_then_answers(monkeypatch):
         seen.append((provider, [t["function"]["name"] for t in tools or []], messages[-1]))
         return replies.pop(0)
 
-    async def fake_available(session_id, query="", recent=None):
+    async def fake_available(session_id, query="", recent=None, repo=None):
         return chat_tools.BASE, None
 
     async def fake_run(name, args, session_id, active):
@@ -79,7 +79,7 @@ async def test_chat_reports_tokens_used(monkeypatch):
     async def fake_complete(provider, messages, tools=None, **kw):
         return {"role": "assistant", "content": "hi", "_tokens": 120}
 
-    async def fake_available(session_id, query="", recent=None):
+    async def fake_available(session_id, query="", recent=None, repo=None):
         return chat_tools.BASE, None
 
     monkeypatch.setattr(bootstrap_mod.llm_providers, "complete", fake_complete)

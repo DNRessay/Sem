@@ -9,12 +9,12 @@ from cache.conv_cache import ConvCache
 from cache.sys_cache import SysCache
 from config import settings
 from memory.sem_retrieval import SEMRetrieval
-from pipeline import chat_tools, llm_providers
+from pipeline import chat_tools, llm_providers, turn_router
 from pipeline.ctx_assembly import CTXAssembly
 from pipeline.ctx_pressure import CTXPressure
 from pipeline.query_engine import QueryEngine, RateLimitError
 from storage.embeddings import embed_text
-from storage.neon_store import get_store
+from storage.neon_store import PINNED_SALIENCE, get_store
 
 _SAST = timezone(timedelta(hours=2))  # South Africa Standard Time — no DST
 
@@ -82,9 +82,15 @@ class Bootstrap:
         ctx = self.ctx_assembly.inject_tau_context(ctx, self.tau_context)
         ctx = self._inject_current_time(ctx)
 
-        # Step 3 - memory load
-        memories = await self.sem_retrieval.retrieve(query)
-        memory_block = self._format_memories(memories)
+        # Step 3 - memory load. Laya (pipeline/turn_router.py) first decides what this message needs:
+        # long-term memory search only when it refers back to something, and "remember X" pins X.
+        self.route = await turn_router.route(save_query, history)
+        if self.route["remember"]:
+            pinned = await self._pin(save_query, session_id)
+            if pinned:
+                yield {"tool": {"kind": "memory", "label": "Remembered", "detail": save_query[:500]}}
+        memories = await self.sem_retrieval.retrieve(query) if self.route["recall"] else []
+        memory_block = self._format_memories(memories) + await self._pinned_block()
 
         skills_block = await self._skills_context(query)
 
@@ -194,7 +200,8 @@ class Bootstrap:
     async def _tool_reply(self, messages: list[dict], session_id: str, provider: str):
         last_user = next((m for m in reversed(messages) if m.get("role") == "user"), {})
         query = last_user.get("content") if isinstance(last_user.get("content"), str) else ""
-        tools, active = await chat_tools.available(session_id, query[-4000:], messages[:-1])
+        route = getattr(self, "route", None) or {}
+        tools, active = await chat_tools.available(session_id, query[-4000:], messages[:-1], repo=route.get("repo"))
         deadline = time.monotonic() + 240
         used, tokens = [], 0
         for step in range(_MAX_TOOL_STEPS + 1):
@@ -318,6 +325,24 @@ class Bootstrap:
         # would be worse than no answer at all.
         now = datetime.now(_SAST)
         return f"{ctx}\n\nCurrent date and time: {now.strftime('%A, %d %B %Y, %H:%M')} SAST (South Africa)."
+
+    async def _pin(self, text: str, session_id: str) -> bool:
+        try:
+            db = await get_store()
+            await db.save_memory(session_id, text.strip()[:1000], salience=PINNED_SALIENCE, embedding=await embed_text(text))
+            return True
+        except Exception:
+            return False
+
+    async def _pinned_block(self) -> str:
+        try:
+            pinned = await (await get_store()).get_pinned_memories()
+        except Exception:
+            return ""
+        if not pinned:
+            return ""
+        lines = "\n".join(f"  - {p['content']}" for p in pinned)
+        return f"\n<remembered_by_request note=\"The user asked you to remember these. Treat them as true unless they say otherwise.\">\n{lines}\n</remembered_by_request>"
 
     def _format_memories(self, memories: list) -> str:
         if not memories:
