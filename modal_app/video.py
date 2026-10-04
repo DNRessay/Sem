@@ -72,6 +72,20 @@ def _download():
     snapshot_download(IMAGE_MODEL_ID, ignore_patterns=["flux1-schnell.safetensors", "*.md"])
 
 
+MUSIC_MODEL_ID = os.environ.get("SEMBLANCE_MUSIC_MODEL", "stabilityai/stable-audio-open-1.0")
+MUSIC_MAX_SECONDS = 47  # the model's longest clip; longer videos loop it
+
+
+def _download_music():
+    # Gated on Hugging Face (accept its licence once, free under $1M revenue). If that's not done the deploy still
+    # works; videos just come out without music.
+    from huggingface_hub import snapshot_download
+    try:
+        snapshot_download(MUSIC_MODEL_ID, ignore_patterns=["*.ckpt", "*.md"])
+    except Exception as e:
+        print("Background music unavailable:", e)
+
+
 gpu_image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("ffmpeg")
@@ -83,6 +97,8 @@ gpu_image = (
     .run_function(_download, secrets=[modal.Secret.from_dict({"HF_TOKEN": os.environ.get("HF_TOKEN", "")})])
     # Added last so the model downloads above stay cached: LoRA loading (fast mode) needs peft and a newer diffusers.
     .pip_install("peft>=0.15", "diffusers>=0.35")
+    .pip_install("soundfile", "torchsde")
+    .run_function(_download_music, secrets=[modal.Secret.from_dict({"HF_TOKEN": os.environ.get("HF_TOKEN", "")})])
 )
 api_image = modal.Image.debian_slim(python_version="3.12").pip_install("fastapi>=0.115.0")
 # Every container imports this whole file, so each image needs fastapi (the import at the top), or the
@@ -215,6 +231,40 @@ class Generator:
                 **({"fast_error": self.fast_error} if self.fast_error else {})}
 
 
+@app.cls(gpu=GPU, image=gpu_image, timeout=600, scaledown_window=60, max_containers=1, volumes={CLIPS: clips},
+         secrets=[modal.Secret.from_name("semblance-video-secret")])
+class Music:
+    """Background music (Stable Audio Open, ~1B params): a few seconds of GPU per track, written to the clips
+    Volume as <job_id>.wav for the join to mix under the voice."""
+    @modal.enter()
+    def load(self):
+        import torch
+        from diffusers import StableAudioPipeline
+
+        self.pipe = StableAudioPipeline.from_pretrained(MUSIC_MODEL_ID, torch_dtype=torch.float16).to("cuda")
+
+    @modal.method()
+    def generate(self, prompt: str, seconds: int = 15, callback: str = "") -> dict:
+        import soundfile as sf
+        import torch
+
+        started = time.monotonic()
+        ok = False
+        try:
+            audio = self.pipe(prompt=prompt, negative_prompt="Low quality, vocals, singing, speech.", num_inference_steps=100,
+                              audio_end_in_s=float(max(5, min(int(seconds), MUSIC_MAX_SECONDS))),
+                              generator=torch.Generator("cuda").manual_seed(int(time.time()) % 100000)).audios[0]
+            sf.write(f"{CLIPS}/{modal.current_function_call_id()}.wav", audio.T.float().cpu().numpy(),
+                     self.pipe.vae.sampling_rate)
+            clips.commit()
+            ok = True
+        finally:
+            gpu_seconds = time.monotonic() - started
+            _charge(gpu_seconds, GPU_USD_PER_HOUR)
+            _finished(ok, callback)
+        return {"ok": True, "gpu_seconds": round(gpu_seconds)}
+
+
 def _enhance(path: str) -> str:
     """Wan renders 480p at 16 fps. ffmpeg smooths it to 24 fps (motion-compensated in-between frames), scales it
     1.5x to 720p with lanczos and sharpens a little: a few seconds of CPU, much less soft and choppy."""
@@ -269,11 +319,11 @@ class ImageGenerator:
 
 @app.function(image=stitch_image, cpu=2.0, memory=4096, timeout=600, volumes={CLIPS: clips},
               secrets=[modal.Secret.from_name("semblance-video-secret")])
-def stitch(job_ids: list[str], audio_url: str = "", upload_url: str = "", callback: str = "") -> dict:
-    """Long videos: the finished 5-second scenes joined in order, with the voiceover (if any) laid over them.
-    CPU only, so it doesn't count toward the GPU cap."""
+def stitch(job_ids: list[str], audio_url: str = "", upload_url: str = "", callback: str = "", music_job: str = "") -> dict:
+    """Long videos: the finished 5-second scenes joined in order, with the voiceover and background music (if any)
+    mixed over them. CPU only, so it doesn't count toward the GPU cap."""
     try:
-        result = _stitch(job_ids, audio_url, upload_url)
+        result = _stitch(job_ids, audio_url, upload_url, music_job)
     except Exception as e:
         _stage("failed", f"{type(e).__name__}: {e}"[:300])
         _finished(False, callback)
@@ -282,7 +332,7 @@ def stitch(job_ids: list[str], audio_url: str = "", upload_url: str = "", callba
     return result
 
 
-def _stitch(job_ids: list[str], audio_url: str, upload_url: str = "") -> dict:
+def _stitch(job_ids: list[str], audio_url: str, upload_url: str = "", music_job: str = "") -> dict:
     import subprocess
     import tempfile
 
@@ -309,28 +359,76 @@ def _stitch(job_ids: list[str], audio_url: str, upload_url: str = "") -> dict:
         # Re-encoding (rather than -c copy) keeps the joins clean whatever each clip's timestamps look like.
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", f"{tmp}/list.txt",
                         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20", joined], check=True)
-        out = joined
+        voice, voice_error = "", ""
         if audio_url:
+            _stage("adding the voiceover")
             try:
                 audio = httpx.get(audio_url, follow_redirects=True, timeout=60)
                 audio.raise_for_status()
-                with open(f"{tmp}/voice.wav", "wb") as f:
+                voice = f"{tmp}/voice.wav"
+                with open(voice, "wb") as f:
                     f.write(audio.content)
-                out = f"{tmp}/final.mp4"
-                # The voice runs as long as the video: padded with silence if shorter, cut if longer.
-                subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", joined, "-i", f"{tmp}/voice.wav",
-                                "-filter_complex", "[1:a]apad[a]", "-map", "0:v", "-map", "[a]", "-c:v", "copy",
-                                "-c:a", "aac", "-b:a", "128k", "-shortest", out], check=True)
-            except Exception:
+            except Exception as e:
+                voice, voice_error = "", f"couldn't fetch the voiceover: {type(e).__name__}: {e}"[:200]
+                print(voice_error)
+        music = f"{CLIPS}/{music_job}.wav" if music_job else ""
+        music = music if music and os.path.exists(music) else ""
+        out = joined
+        if voice or music:
+            out = f"{tmp}/final.mp4"
+            try:
+                subprocess.run(mix_command(joined, voice, music, _duration(joined), out), check=True,
+                               capture_output=True, text=True)
+            except subprocess.CalledProcessError as e:
+                voice_error = f"couldn't mix the audio: {(e.stderr or '')[-200:]}"
+                print(voice_error)
                 out = joined  # a silent video beats no video
+        extra = {"voice": bool(voice) and out != joined, "music": bool(music) and out != joined,
+                 **({"voice_error": voice_error} if voice_error else {})}
         if upload_url:
             _stage("uploading")
             for _ in range(3):
                 if _upload(out, upload_url):
-                    return {"mime": "video/mp4", "uploaded": True, "voice": out != joined}
+                    return {"mime": "video/mp4", "uploaded": True, **extra}
             _stage("upload failed", "couldn't upload the joined video to storage")
         with open(out, "rb") as f:
-            return {"mime": "video/mp4", "base64": base64.b64encode(f.read()).decode(), "voice": out != joined}
+            return {"mime": "video/mp4", "base64": base64.b64encode(f.read()).decode(), **extra}
+
+
+def _duration(path: str) -> float:
+    import subprocess
+
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+                         capture_output=True, text=True).stdout.strip()
+    try:
+        return float(out)
+    except ValueError:
+        return 0.0
+
+
+def mix_command(video: str, voice: str, music: str, seconds: float, out: str) -> list[str]:
+    """ffmpeg: the video as is, the voice at full volume, the music looped quietly under it (louder with no voice),
+    fading out over the last 1.5 s. Everything is cut to the video's length."""
+    cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", video]
+    graph, mixed = [], []
+    if voice:
+        cmd += ["-i", voice]
+        graph.append("[1:a]aresample=44100,aformat=channel_layouts=stereo,apad[v]")
+        mixed.append("[v]")
+    if music:
+        cmd += ["-stream_loop", "-1", "-i", music]
+        n = 2 if voice else 1
+        fade = f",afade=t=out:st={max(seconds - 1.5, 0):.2f}:d=1.5" if seconds else ""
+        graph.append(f"[{n}:a]aresample=44100,aformat=channel_layouts=stereo,volume={0.18 if voice else 0.6}{fade}[m]")
+        mixed.append("[m]")
+    if len(mixed) == 2:
+        graph.append("[v][m]amix=inputs=2:duration=longest:normalize=0[a]")
+        label = "[a]"
+    else:
+        label = mixed[0]
+    cmd += ["-filter_complex", ";".join(graph), "-map", "0:v", "-map", label, "-c:v", "copy", "-c:a", "aac", "-b:a", "160k"]
+    cmd += ["-t", f"{seconds:.3f}"] if seconds else ["-shortest"]
+    return cmd + [out]
 
 
 def _state(job_id: str) -> dict:
@@ -392,6 +490,14 @@ def api(body: dict, request: Request):
             return {"ok": False, "error": f"Monthly Modal budget reached (${used:.2f} of ${cap:.2f})"}
         call = ImageGenerator().generate.spawn(prompt[:1500], body.get("aspect_ratio") or "1:1")
         return {"ok": True, "job_id": _spawned(call)}
+    if action == "music":
+        prompt = (body.get("prompt") or "").strip()
+        if not prompt:
+            return {"ok": False, "error": "prompt required"}
+        if used >= cap:
+            return {"ok": False, "error": f"Monthly Modal budget reached (${used:.2f} of ${cap:.2f})"}
+        call = Music().generate.spawn(prompt[:500], int(body.get("seconds") or 15), body.get("callback") or "")
+        return {"ok": True, "job_id": _spawned(call)}
     if action == "peek":
         # Done or not, without the video itself (long videos check every scene often).
         state = _state(body.get("job_id") or "")
@@ -400,7 +506,8 @@ def api(body: dict, request: Request):
         ids = [i for i in body.get("job_ids") or [] if isinstance(i, str)]
         if not ids:
             return {"ok": False, "error": "job_ids required"}
-        call = stitch.spawn(ids[:12], body.get("audio_url") or "", body.get("upload_url") or "", body.get("callback") or "")
+        call = stitch.spawn(ids[:12], body.get("audio_url") or "", body.get("upload_url") or "", body.get("callback") or "",
+                            body.get("music_job") or "")
         return {"ok": True, "job_id": _spawned(call)}
     if action == "status":
         job_id = body.get("job_id") or ""

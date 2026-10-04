@@ -419,3 +419,47 @@ async def test_a_join_that_keeps_failing_says_so_instead_of_hanging(monkeypatch,
          "stitch_started": 1, "rejoins": 2, "scenes": [{"job_id": "s1", "status": "done", "prompt": "a"}], "created": 1}
     out = await design_router._advance("owner", p)
     assert out["status"] == "failed" and "Retry join" in out["error"]
+
+
+def test_background_music_renders_with_the_scenes_and_is_mixed_into_the_join(client, monkeypatch, moto_cache_table):
+    from gateway import design_router
+
+    calls, state = [], {"music_done": False}
+
+    async def fake_video(action, timeout=60, **kw):
+        calls.append((action, kw))
+        if action == "budget":
+            return {"ok": False}
+        if action == "submit":
+            return {"ok": True, "job_id": "scene-1"}
+        if action == "music":
+            return {"ok": True, "job_id": "music-1"}
+        if action == "peek":
+            if kw["job_id"] == "music-1":
+                return {"ok": True, "status": "done" if state["music_done"] else "rendering"}
+            return {"ok": True, "status": "done"}
+        if action == "stitch":
+            return {"ok": True, "job_id": "join-1"}
+
+    monkeypatch.setattr(design_router, "video_call", fake_video)
+    monkeypatch.setattr(design_router.media_store, "enabled", lambda: True)
+    monkeypatch.setattr(design_router.media_store, "exists", lambda key: False)
+    monkeypatch.setattr(design_router.media_store, "presign_put", lambda key, mime: f"https://s3.example/{key}?put")
+    p = client.post("/design/video/project", json={"scenes": [{"prompt": "a"}], "aspect_ratio": "9:16", "music": True,
+                                                   "music_prompt": "lo-fi, 85 BPM, piano"}).json()
+    music = next(kw for a, kw in calls if a == "music")
+    assert music["prompt"] == "lo-fi, 85 BPM, piano" and music["seconds"] == 5 and p["music_status"] == "rendering"
+
+    waiting = client.get(f"/design/video/project/{p['id']}").json()
+    assert waiting["status"] == "rendering" and not any(a == "stitch" for a, _ in calls)  # scenes done, music not yet
+
+    state["music_done"] = True
+    joining = client.get(f"/design/video/project/{p['id']}").json()
+    assert joining["status"] == "joining" and next(kw for a, kw in calls if a == "stitch")["music_job"] == "music-1"
+
+
+def test_the_storyboard_carries_a_music_line():
+    from pipeline.video_studio import parse_plan
+
+    plan = parse_plan('{"title": "t", "style": "s", "music": "warm lo-fi, 85 BPM", "scenes": [{"prompt": "p"}]}', 1, False)
+    assert plan["music"] == "warm lo-fi, 85 BPM"

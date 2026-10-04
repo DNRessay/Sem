@@ -201,7 +201,7 @@ def _save_project(account_id: str, project: dict):
     ids = [project["id"], *[i for i in _project_ids(account_id) if i != project["id"]]][:MAX_PROJECTS]
     ddb_backend.set(VIDEO_PROJECTS, account_id, json.dumps(ids), ttl=media_store.KEEP_SECONDS)
     ref = f"{account_id}:{project['id']}"
-    for job in [s.get("job_id") for s in project["scenes"]] + [project.get("stitch_job")]:
+    for job in [s.get("job_id") for s in project["scenes"]] + [project.get("stitch_job"), project.get("music_job")]:
         if job:  # lets Modal's "done" callback find the project from a job id
             ddb_backend.set("video_job_owner", job, ref, ttl=media_store.KEEP_SECONDS)
     active = _active()
@@ -294,9 +294,18 @@ async def video_project(request: Request, account: dict = Depends(require_accoun
     audio, note = ("", "")
     if body.get("voiceover"):
         audio, note = await _voiceover([j["narration"] for j in jobs], body.get("voice") or "Kore")
+    music_job, music_prompt = "", str(body.get("music_prompt") or "").strip()[:300]
+    if body.get("music"):
+        music_prompt = music_prompt or f"instrumental background music for: {style or scenes[0]['prompt']}"[:300]
+        made = await video_call("music", prompt=music_prompt, seconds=len(jobs) * 5, callback=_callback_url())
+        if made.get("ok"):
+            music_job = made["job_id"]
+        else:
+            note = (note + " " if note else "") + f"No background music ({made.get('error') or 'Modal refused it'})."
     project = {"id": uuid.uuid4().hex[:12], "title": str(body.get("title") or "")[:80] or scenes[0]["prompt"][:60],
                "style": style[:400], "format": body.get("format") or "short", "aspect_ratio": aspect, "scenes": jobs,
                "audio_url": audio, "note": note, "status": "rendering", "fast": bool(body.get("fast")), "chat_id": body.get("chat_id") or "",
+               "music_job": music_job, "music_prompt": music_prompt, "music_status": "rendering" if music_job else "",
                "created": int(time.time())}
     _save_project(account["account_id"], project)
     return project
@@ -313,6 +322,13 @@ async def _advance(account_id: str, project: dict) -> dict:
             if peek.get("status") in ("done", "failed"):
                 s["status"], s["error"] = peek["status"], peek.get("error", "")
                 changed = True
+    if project.get("music_status") == "rendering":
+        peek = await video_call("peek", job_id=project["music_job"])
+        if peek.get("status") in ("done", "failed"):
+            project["music_status"] = peek["status"]
+            if peek["status"] == "failed":
+                project["note"] = (project.get("note", "") + " No background music this time.").strip()
+            changed = True
     if any(s.get("status") == "failed" for s in project["scenes"]):
         if not any(s.get("status") == "rendering" for s in project["scenes"]):
             project["status"] = "scene_failed"
@@ -326,7 +342,11 @@ async def _advance(account_id: str, project: dict) -> dict:
         # The joined video in S3 is the truth: once it's there the video is done, whatever Modal says.
         if project.get("stitch_job") and project.get("final_key") and \
                 await asyncio.to_thread(media_store.exists, project["final_key"]):
-            project.update(status="done", url=media_store.link(project["final_key"]), error="")
+            result = await video_call("status", job_id=project["stitch_job"], timeout=60)  # small: the video went to S3
+            if result.get("voice_error"):
+                project["note"] = f"No voiceover: {result['voice_error']}"
+            project.update(status="done", url=media_store.link(project["final_key"]), error="",
+                           voice=bool(result.get("voice")), music=bool(result.get("music")))
             _save_project(account_id, project)
             return project
         stale = media_store.enabled() and project.get("stitch_job") and (
@@ -337,6 +357,12 @@ async def _advance(account_id: str, project: dict) -> dict:
                 _save_project(account_id, project)
                 return project
             project.update(stitch_job="", rejoins=project.get("rejoins", 0) + 1)
+        # The music renders alongside the scenes and is usually done first; wait for it a few minutes at most.
+        waiting_for_music = project.get("music_status") == "rendering" and time.time() - project.get("created", 0) < 900
+        if not project.get("stitch_job") and waiting_for_music:
+            if changed:
+                _save_project(account_id, project)
+            return project
         if not project.get("stitch_job"):
             # Modal uploads the joined video straight to S3 (a presigned PUT): a long video sent back through the
             # API timed out, so finished videos never arrived.
@@ -344,9 +370,12 @@ async def _advance(account_id: str, project: dict) -> dict:
             if media_store.enabled():
                 key = media_store.new_key("video", "video/mp4")
                 upload_url = await asyncio.to_thread(media_store.presign_put, key, "video/mp4")
+            audio_url = project.get("audio_url") or ""
+            if audio_url and media_store.enabled():
+                audio_url = await asyncio.to_thread(media_store.direct, audio_url)
             joined = await video_call("stitch", job_ids=[s["job_id"] for s in project["scenes"]],
-                                      audio_url=project.get("audio_url") or "", upload_url=upload_url,
-                                      callback=_callback_url())
+                                      audio_url=audio_url, upload_url=upload_url, callback=_callback_url(),
+                                      music_job=project["music_job"] if project.get("music_status") == "done" else "")
             if joined.get("ok"):
                 project.update(stitch_job=joined["job_id"], status="joining", final_key=key, stitch_started=time.time())
             else:
@@ -362,8 +391,11 @@ async def _advance(account_id: str, project: dict) -> dict:
                 changed = True
             elif peek.get("status") == "done":
                 result = await video_call("status", job_id=project["stitch_job"], timeout=240)
+                if result.get("voice_error"):
+                    project["note"] = f"No voiceover: {result['voice_error']}"
                 if result.get("uploaded") and project.get("final_key"):
-                    project.update(status="done", url=media_store.link(project["final_key"]), voice=bool(result.get("voice")))
+                    project.update(status="done", url=media_store.link(project["final_key"]), voice=bool(result.get("voice")),
+                                   music=bool(result.get("music")))
                     changed = True
                 elif result.get("base64"):  # joined before uploads existed: copy it to S3 once
                     url = await media_store.save(result["base64"], "video/mp4", "video")
