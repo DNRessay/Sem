@@ -330,7 +330,7 @@ async def _advance(account_id: str, project: dict) -> dict:
             _save_project(account_id, project)
             return project
         stale = media_store.enabled() and project.get("stitch_job") and (
-            not project.get("final_key") or time.time() - project.get("stitch_started", 0) > 600)
+            not project.get("final_key") or time.time() - project.get("stitch_started", 0) > 660)
         if stale:
             if project.get("rejoins", 0) >= 2:
                 project.update(status="failed", error="Joining the scenes kept failing — tap Retry join")
@@ -354,6 +354,9 @@ async def _advance(account_id: str, project: dict) -> dict:
             changed = True
         else:
             peek = await video_call("peek", job_id=project["stitch_job"])
+            if peek.get("stage") and peek["stage"] != project.get("join_stage"):
+                project["join_stage"] = peek["stage"]  # e.g. "fetching scene 2 of 3": shows where a join is
+                changed = True
             if peek.get("status") == "failed":
                 project.update(status="failed", error=peek.get("error") or "couldn't join the scenes")
                 changed = True
