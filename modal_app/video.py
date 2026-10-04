@@ -85,7 +85,9 @@ gpu_image = (
     .pip_install("peft>=0.15", "diffusers>=0.35")
 )
 api_image = modal.Image.debian_slim(python_version="3.12").pip_install("fastapi>=0.115.0")
-stitch_image = modal.Image.debian_slim(python_version="3.12").apt_install("ffmpeg").pip_install("httpx")
+# Every container imports this whole file, so each image needs fastapi (the import at the top), or the
+# function dies before it starts: joins never ran at all without it.
+stitch_image = modal.Image.debian_slim(python_version="3.12").apt_install("ffmpeg").pip_install("httpx", "fastapi>=0.115.0")
 spend = modal.Dict.from_name("semblance-video-spend", create_if_missing=True)
 # job_id -> {"started"} at submit, {"done", "ok"} when it ends. "Is it done?" reads this instead of asking Modal
 # for the result with timeout=0, which never succeeded once finished videos got big (720p): fetching a large
