@@ -515,7 +515,7 @@ def test_music_tab_makes_a_track_that_lands_in_s3(client, monkeypatch, moto_cach
     assert client.post("/design/music", json={"prompt": ""}).status_code == 400
     made = client.post("/design/music", json={"prompt": "amapiano, 112 BPM", "seconds": 25}).json()
     music = next(kw for a, kw in calls if a == "music")
-    assert made["job_id"] == "music-9" and music["seconds"] == 20 and music["upload_url"].startswith("https://s3.example/music/")
+    assert made["job_id"] == "music-9" and music["seconds"] == 30 and music["upload_url"].startswith("https://s3.example/music/")
     assert client.get("/design/music/music-9").json()["status"] == "rendering"
     state["uploaded"] = True
     done = client.get("/design/music/music-9").json()

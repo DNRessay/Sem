@@ -80,18 +80,16 @@ def _download():
     snapshot_download(IMAGE_MODEL_ID, ignore_patterns=["flux1-schnell.safetensors", "*.md"])
 
 
-MUSIC_MODEL_ID = os.environ.get("SEMBLANCE_MUSIC_MODEL", "stabilityai/stable-audio-open-1.0")
-MUSIC_MAX_SECONDS = 47  # the model's longest clip; longer videos loop it
+# Music: ACE-Step (Apache 2.0, open weights, no Hugging Face approval needed). Instrumentals or songs with lyrics,
+# up to 4 minutes, a few seconds of GPU per minute of audio.
+MUSIC_MODEL_ID = os.environ.get("SEMBLANCE_MUSIC_MODEL", "ACE-Step/ACE-Step-v1-3.5B")
+MUSIC_DIR = "/models/ace-step"
+MUSIC_MAX_SECONDS = 240
 
 
 def _download_music():
-    # Gated on Hugging Face (accept its licence once, free under $1M revenue). If that's not done the deploy still
-    # works; videos just come out without music.
     from huggingface_hub import snapshot_download
-    try:
-        snapshot_download(MUSIC_MODEL_ID, ignore_patterns=["*.ckpt", "*.md"])
-    except Exception as e:
-        print("Background music unavailable:", e)
+    snapshot_download(MUSIC_MODEL_ID, local_dir=MUSIC_DIR)
 
 
 gpu_image = (
@@ -105,8 +103,14 @@ gpu_image = (
     .run_function(_download, secrets=[modal.Secret.from_dict({"HF_TOKEN": os.environ.get("HF_TOKEN", "")})])
     # Added last so the model downloads above stay cached: LoRA loading (fast mode) needs peft and a newer diffusers.
     .pip_install("peft>=0.15", "diffusers>=0.35")
-    .pip_install("soundfile", "torchsde")
-    .run_function(_download_music, secrets=[modal.Secret.from_dict({"HF_TOKEN": os.environ.get("HF_TOKEN", "")})])
+)
+# ACE-Step brings its own pinned libraries, so it gets its own image rather than disturbing the video one.
+music_image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .apt_install("git", "ffmpeg", "libsndfile1")
+    .pip_install("torch==2.5.1", "torchaudio==2.5.1")
+    .pip_install("git+https://github.com/ace-step/ACE-Step.git", "fastapi>=0.115.0", "huggingface_hub")
+    .run_function(_download_music)
 )
 api_image = modal.Image.debian_slim(python_version="3.12").pip_install("fastapi>=0.115.0")
 # Every container imports this whole file, so each image needs fastapi (the import at the top), or the
@@ -246,32 +250,48 @@ class Generator:
                 **({"fast_error": self.fast_error} if self.fast_error else {})}
 
 
-@app.cls(gpu=GPU, image=gpu_image, timeout=600, scaledown_window=60, max_containers=1, volumes={CLIPS: clips},
+@app.cls(gpu=GPU, image=music_image, timeout=900, scaledown_window=60, max_containers=1, volumes={CLIPS: clips},
          secrets=[modal.Secret.from_name("semblance-video-secret")])
 class Music:
-    """Background music (Stable Audio Open, ~1B params): a few seconds of GPU per track, written to the clips
-    Volume as <job_id>.wav for the join to mix under the voice."""
+    """Music with ACE-Step: background tracks for videos and the Music tab, written to the clips Volume as
+    <job_id>.wav (the join mixes it under the voice) and, for the Music tab, uploaded to the app's storage."""
     @modal.enter()
     def load(self):
-        import torch
-        from diffusers import StableAudioPipeline
-
-        # Only from the copy baked into the image at deploy: if Hugging Face refused that download (the model is
-        # gated), fetching it here fails the same way, and a crash in load() makes Modal restart the GPU container
-        # over and over. So the music fails fast with a clear reason instead.
+        # A crash here would make Modal restart the GPU container over and over, so a broken model fails each
+        # track fast with the reason instead.
         self.pipe, self.error = None, ""
         try:
-            self.pipe = StableAudioPipeline.from_pretrained(MUSIC_MODEL_ID, torch_dtype=torch.float16,
-                                                            local_files_only=True).to("cuda")
+            from acestep.pipeline_ace_step import ACEStepPipeline
+
+            self.pipe = ACEStepPipeline(checkpoint_dir=MUSIC_DIR, dtype="bfloat16", torch_compile=False)
         except Exception as e:
-            self.error = (f"The music model isn't installed: Hugging Face hasn't given your HF_TOKEN access to "
-                          f"{MUSIC_MODEL_ID}. Accept its licence there, then redeploy Modal. ({type(e).__name__})")
+            self.error = f"The music model didn't load: {type(e).__name__}: {e}"[:300]
             print(self.error)
 
+    def _render(self, prompt: str, lyrics: str, seconds: int, out_dir: str) -> str:
+        """Runs ACE-Step and returns the audio file it wrote (its arguments vary a little between versions, so
+        only the ones this version accepts are passed)."""
+        import glob
+        import inspect
+
+        wanted = {"audio_duration": float(seconds), "prompt": prompt, "lyrics": lyrics, "infer_step": 60,
+                  "guidance_scale": 15.0, "scheduler_type": "euler", "cfg_type": "apg", "omega_scale": 10.0,
+                  "manual_seeds": [int(time.time()) % 100000], "format": "wav", "save_path": out_dir}
+        accepted = inspect.signature(self.pipe.__call__).parameters
+        result = self.pipe(**{k: v for k, v in wanted.items() if k in accepted})
+        found = [str(p) for p in (result if isinstance(result, (list, tuple)) else [result])
+                 if isinstance(p, str) and p.rsplit(".", 1)[-1] in ("wav", "mp3", "flac", "ogg") and os.path.exists(p)]
+        found += sorted(glob.glob(f"{out_dir}/**/*.*", recursive=True), key=os.path.getmtime, reverse=True)
+        audio = [p for p in found if p.rsplit(".", 1)[-1] in ("wav", "mp3", "flac", "ogg")]
+        if not audio:
+            raise RuntimeError("ACE-Step finished but wrote no audio file")
+        return audio[0]
+
     @modal.method()
-    def generate(self, prompt: str, seconds: int = 15, callback: str = "", upload_url: str = "") -> dict:
-        import soundfile as sf
-        import torch
+    def generate(self, prompt: str, seconds: int = 15, callback: str = "", upload_url: str = "",
+                 lyrics: str = "") -> dict:
+        import subprocess
+        import tempfile
 
         if self.pipe is None:
             _stage("failed", self.error)
@@ -280,15 +300,19 @@ class Music:
         started = time.monotonic()
         ok = False
         try:
-            audio = self.pipe(prompt=prompt, negative_prompt="Low quality, vocals, singing, speech.", num_inference_steps=100,
-                              audio_end_in_s=float(max(5, min(int(seconds), MUSIC_MAX_SECONDS))),
-                              generator=torch.Generator("cuda").manual_seed(int(time.time()) % 100000)).audios[0]
-            path = f"{CLIPS}/{modal.current_function_call_id()}.wav"
-            sf.write(path, audio.T.float().cpu().numpy(), self.pipe.vae.sampling_rate)
+            seconds = max(5, min(int(seconds), MUSIC_MAX_SECONDS))
+            with tempfile.TemporaryDirectory() as tmp:
+                made = self._render(prompt, lyrics.strip() or "[instrumental]", seconds, tmp)
+                path = f"{CLIPS}/{modal.current_function_call_id()}.wav"
+                subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", made, "-t", str(seconds), "-ar", "44100",
+                                "-ac", "2", path], check=True)
             clips.commit()
             if upload_url and not _upload(path, upload_url, "audio/wav"):  # a track for the Music tab
                 raise RuntimeError("couldn't upload the track to storage")
             ok = True
+        except Exception as e:
+            _stage("failed", f"{type(e).__name__}: {e}"[:300])
+            raise
         finally:
             gpu_seconds = time.monotonic() - started
             _charge(gpu_seconds, GPU_USD_PER_HOUR)
@@ -528,7 +552,7 @@ def api(body: dict, request: Request):
         if used >= cap:
             return {"ok": False, "error": f"Monthly Modal budget reached (${used:.2f} of ${cap:.2f})"}
         call = Music().generate.spawn(prompt[:500], int(body.get("seconds") or 15), body.get("callback") or "",
-                                      body.get("upload_url") or "")
+                                      body.get("upload_url") or "", (body.get("lyrics") or "")[:3000])
         return {"ok": True, "job_id": _spawned(call)}
     if action == "peek":
         # Done or not, without the video itself (long videos check every scene often).

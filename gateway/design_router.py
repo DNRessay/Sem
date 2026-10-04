@@ -230,12 +230,12 @@ async def video_formats(_account: dict = Depends(require_account)):
             "voices": list(gemini_media.VOICES)}
 
 
-MUSIC_SECONDS = (10, 20, 30, 47)
+MUSIC_SECONDS = (15, 30, 60, 120)
 
 
 @router.post("/music")
 async def music(request: Request, account: dict = Depends(require_account)):
-    """Music tab: an instrumental track (Stable Audio Open on Modal), uploaded straight to S3 when it's done."""
+    """Music tab: an instrumental, or a song when lyrics are given (ACE-Step on Modal), uploaded to S3 when done."""
     body = await request.json()
     prompt = (body.get("prompt") or "").strip()
     if not prompt:
@@ -245,7 +245,8 @@ async def music(request: Request, account: dict = Depends(require_account)):
     seconds = min(MUSIC_SECONDS, key=lambda s: abs(s - int(body.get("seconds") or 30)))
     key = media_store.new_key("music", "audio/wav")
     upload_url = await asyncio.to_thread(media_store.presign_put, key, "audio/wav")
-    made = await video_call("music", prompt=prompt[:500], seconds=seconds, upload_url=upload_url)
+    made = await video_call("music", prompt=prompt[:500], seconds=seconds, upload_url=upload_url,
+                            lyrics=str(body.get("lyrics") or "")[:3000])
     if not made.get("ok"):
         raise HTTPException(400, made.get("error") or "Modal couldn't start the track")
     ddb_backend.set("music_job", made["job_id"], json.dumps({"key": key, "account": account["account_id"]}),
@@ -265,8 +266,7 @@ async def music_status(job_id: str, account: dict = Depends(require_account)):
     if peek.get("status") == "failed":
         error = peek.get("error") or ""
         return {"status": "failed", "error": error if error and "render failed" not in error else
-                "The music model failed. If it never worked, accept its licence on Hugging Face "
-                "(stabilityai/stable-audio-open-1.0) and redeploy Modal."}
+                "The music model failed on Modal — try again, or check the Music function's logs there."}
     return {"status": "rendering"}
 
 
