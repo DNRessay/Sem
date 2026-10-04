@@ -291,7 +291,7 @@ export default function VideoStudio({ headers, chat, updateChat, brief, model, o
                                 className={`ds-chip${seconds === s ? " is-selected" : ""}`}>{s}s</button>
                         ))}
                         <button onClick={() => setFast(!fast)} aria-pressed={fast} className={`ds-chip${fast ? " is-selected" : ""}`}
-                            title="Fast: ~2 min a scene instead of ~10. Turn off if the motion looks worse.">⚡ Fast</button>
+                            title="Fast: ~2 min a scene instead of ~10, for drafts. It skips the quality guard (more extra fingers, odd hands, blur): turn it off for the final video.">⚡ Fast</button>
                         <button onClick={() => setMusic(!music)} aria-pressed={music} className={`ds-chip${music ? " is-selected" : ""}`}
                             title="Background music made for this video (ACE-Step), mixed under the voice.">🎵 Music</button>
                         <button onClick={() => setVoiceover(v => !v)} aria-pressed={voiceover} className={`ds-chip${voiceover ? " is-selected" : ""}`}>🎙 Voiceover</button>
