@@ -93,18 +93,49 @@ spend = modal.Dict.from_name("semblance-video-spend", create_if_missing=True)
 jobs = modal.Dict.from_name("semblance-video-jobs", create_if_missing=True)
 
 
-def _finished(ok: bool):
+def _finished(ok: bool, callback: str = ""):
+    """Notes the job as done in the jobs Dict and, when the app passed a callback URL, tells it right away, so
+    the next step (joining the scenes, saving the video) happens even with nobody's app open."""
+    job_id = ""
     try:
-        jobs[modal.current_function_call_id()] = {"done": time.time(), "ok": ok}
+        job_id = modal.current_function_call_id()
+        jobs[job_id] = {"done": time.time(), "ok": ok}
     except Exception:
         pass
+    if callback and job_id:
+        import json
+        import urllib.request
+
+        req = urllib.request.Request(callback, data=json.dumps({"job_id": job_id, "ok": ok}).encode(), method="POST",
+                                     headers={"Content-Type": "application/json",
+                                              "Authorization": f"Bearer {os.environ.get('VIDEO_SECRET', '')}"})
+        try:
+            urllib.request.urlopen(req, timeout=20).read()
+        except Exception as e:
+            print("callback failed:", e)
+
+
+def _upload(path: str, url: str) -> bool:
+    """PUTs the finished video to the app's storage (a presigned S3 URL), so it never travels back through the
+    API as one huge response — those timed out, and finished long videos never reached the app."""
+    import urllib.request
+
+    with open(path, "rb") as f:
+        req = urllib.request.Request(url, data=f.read(), method="PUT", headers={"Content-Type": "video/mp4"})
+    try:
+        urllib.request.urlopen(req, timeout=120).read()
+        return True
+    except Exception as e:
+        print("upload failed:", e)
+        return False
 
 
 def _month() -> str:
     return time.strftime("%Y-%m", time.gmtime())
 
 
-@app.cls(gpu=GPU, image=gpu_image, timeout=1500, scaledown_window=120, max_containers=1)
+@app.cls(gpu=GPU, image=gpu_image, timeout=1500, scaledown_window=120, max_containers=1,
+         secrets=[modal.Secret.from_name("semblance-video-secret")])
 class Generator:
     @modal.enter()
     def load(self):
@@ -132,7 +163,8 @@ class Generator:
             self.pipe.vae.enable_tiling()
 
     @modal.method()
-    def generate(self, prompt: str, aspect_ratio: str = "9:16", seconds: int = 5, fast: bool = False) -> dict:
+    def generate(self, prompt: str, aspect_ratio: str = "9:16", seconds: int = 5, fast: bool = False,
+                 callback: str = "") -> dict:
         from diffusers.utils import export_to_video
 
         started = time.monotonic()
@@ -155,7 +187,7 @@ class Generator:
         finally:
             gpu_seconds = time.monotonic() - started
             _charge(gpu_seconds, GPU_USD_PER_HOUR)
-            _finished(ok)
+            _finished(ok, callback)
         return {"mime": "video/mp4", "base64": data, "gpu_seconds": round(gpu_seconds), "fast": fast,
                 **({"fast_error": self.fast_error} if self.fast_error else {})}
 
@@ -212,20 +244,21 @@ class ImageGenerator:
         return {"mime": "image/png", "base64": base64.b64encode(buf.getvalue()).decode()}
 
 
-@app.function(image=stitch_image, cpu=2.0, memory=2048, timeout=600)
-def stitch(job_ids: list[str], audio_url: str = "") -> dict:
+@app.function(image=stitch_image, cpu=2.0, memory=2048, timeout=600,
+              secrets=[modal.Secret.from_name("semblance-video-secret")])
+def stitch(job_ids: list[str], audio_url: str = "", upload_url: str = "", callback: str = "") -> dict:
     """Long videos: the finished 5-second scenes joined in order, with the voiceover (if any) laid over them.
     CPU only, so it doesn't count toward the GPU cap."""
     try:
-        result = _stitch(job_ids, audio_url)
+        result = _stitch(job_ids, audio_url, upload_url)
     except Exception:
-        _finished(False)
+        _finished(False, callback)
         raise
-    _finished(True)
+    _finished(True, callback)
     return result
 
 
-def _stitch(job_ids: list[str], audio_url: str) -> dict:
+def _stitch(job_ids: list[str], audio_url: str, upload_url: str = "") -> dict:
     import subprocess
     import tempfile
 
@@ -259,6 +292,8 @@ def _stitch(job_ids: list[str], audio_url: str) -> dict:
                                 "-c:a", "aac", "-b:a", "128k", "-shortest", out], check=True)
             except Exception:
                 out = joined  # a silent video beats no video
+        if upload_url and _upload(out, upload_url):
+            return {"mime": "video/mp4", "uploaded": True, "voice": out != joined}
         with open(out, "rb") as f:
             return {"mime": "video/mp4", "base64": base64.b64encode(f.read()).decode(), "voice": out != joined}
 
@@ -309,7 +344,7 @@ def api(body: dict, request: Request):
             return {"ok": False, "error": f"Monthly video budget reached (${used:.2f} of ${cap:.2f}) — raise "
                                           "VIDEO_MONTHLY_CAP_USD in the Modal secret or wait for next month"}
         call = Generator().generate.spawn(prompt[:1500], body.get("aspect_ratio") or "9:16", body.get("seconds") or 5,
-                                          bool(body.get("fast")))
+                                          bool(body.get("fast")), body.get("callback") or "")
         return {"ok": True, "job_id": _spawned(call), "used_usd": used, "cap_usd": cap}
     if action == "image":
         prompt = (body.get("prompt") or "").strip()
@@ -327,7 +362,7 @@ def api(body: dict, request: Request):
         ids = [i for i in body.get("job_ids") or [] if isinstance(i, str)]
         if not ids:
             return {"ok": False, "error": "job_ids required"}
-        call = stitch.spawn(ids[:12], body.get("audio_url") or "")
+        call = stitch.spawn(ids[:12], body.get("audio_url") or "", body.get("upload_url") or "", body.get("callback") or "")
         return {"ok": True, "job_id": _spawned(call)}
     if action == "status":
         job_id = body.get("job_id") or ""

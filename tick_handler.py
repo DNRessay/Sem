@@ -42,5 +42,12 @@ async def _run():
     except Exception as e:  # a broken automation must not take KAIROS/DREAM down with it
         automation = {"error": str(e)[:300]}
 
+    # Videos: finish any whose Modal "done" callback was missed (gateway/design_router.advance_all).
+    try:
+        from gateway.design_router import advance_all
+        videos = await advance_all()
+    except Exception as e:
+        videos = {"error": str(e)[:300]}
+
     return {"status": "ok", "kairos_audit": kairos.get_audit(), "dream": dream_result, "pacific": pacific,
-            "automation": automation}
+            "automation": automation, "videos": videos}

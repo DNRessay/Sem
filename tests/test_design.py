@@ -234,7 +234,7 @@ def test_long_video_renders_every_scene_then_joins_them_with_the_voiceover(clien
     joining = client.get(f"/design/video/project/{p['id']}").json()
     assert joining["status"] == "joining" and joining["stitch_job"] == "joined-1"
     stitch = next(kw for a, kw in calls if a == "stitch")
-    assert stitch == {"job_ids": ["scene-1", "scene-2"], "audio_url": p["audio_url"]}
+    assert stitch["job_ids"] == ["scene-1", "scene-2"] and stitch["audio_url"] == p["audio_url"]
     done = client.get(f"/design/video/project/{p['id']}").json()
     assert done["status"] == "done" and done["url"].endswith("x.mp4") and done["voice"]
     listed = client.get("/design/videos").json()["videos"]
@@ -302,3 +302,64 @@ def test_a_storyboard_cut_off_mid_scene_keeps_the_complete_scenes():
     assert plan["title"] == "Teaser" and plan["style"] == "dark gold"
     assert [s["prompt"] for s in plan["scenes"]] == ["black surface, gold line widens", 'logo glows "softly"', 'logo glows "softly"']
     assert plan["scenes"][1]["narration"] == "Coming soon."
+
+
+def test_modal_callbacks_finish_a_video_with_nobody_watching(client, monkeypatch, moto_cache_table):
+    from config import settings
+    from gateway import design_router
+
+    state = {"scenes_done": False, "stitch_done": False}
+    calls = []
+
+    async def fake_video(action, timeout=60, **kw):
+        calls.append((action, kw))
+        if action == "budget":
+            return {"ok": True, "used_usd": 0, "cap_usd": 10}
+        if action == "submit":
+            return {"ok": True, "job_id": f"scene-{sum(1 for a, _ in calls if a == 'submit')}"}
+        if action == "peek":
+            done = state["stitch_done"] if kw["job_id"] == "join-1" else state["scenes_done"]
+            return {"ok": True, "status": "done" if done else "rendering"}
+        if action == "stitch":
+            return {"ok": True, "job_id": "join-1"}
+        if action == "status":
+            return {"ok": True, "status": "done", "uploaded": True, "voice": False}
+
+    monkeypatch.setattr(design_router, "video_call", fake_video)
+    monkeypatch.setattr(settings, "PUBLIC_API_URL", "https://api.example")
+    monkeypatch.setattr(settings, "MODAL_VIDEO_SECRET", "s3cret")
+    monkeypatch.setattr(design_router.media_store, "enabled", lambda: True)
+    monkeypatch.setattr(design_router.media_store, "presign_put", lambda key, mime: f"https://s3.example/{key}?put")
+    monkeypatch.setattr(design_router.media_store, "link", lambda key: f"https://api.example/media/file/{key}")
+
+    p = client.post("/design/video/project", json={"scenes": [{"prompt": "a"}, {"prompt": "b"}], "aspect_ratio": "9:16"}).json()
+    submit = next(kw for a, kw in calls if a == "submit")
+    assert submit["callback"] == "https://api.example/design/video/callback"
+    assert client.post("/design/video/callback", json={"job_id": "scene-1"}).status_code == 401  # Modal signs it
+
+    state["scenes_done"] = True
+    auth = {"Authorization": "Bearer s3cret"}
+    assert client.post("/design/video/callback", json={"job_id": "scene-2"}, headers=auth).json()["status"] == "joining"
+    stitch = next(kw for a, kw in calls if a == "stitch")
+    assert stitch["upload_url"].startswith("https://s3.example/video/") and stitch["callback"].endswith("/callback")
+
+    state["stitch_done"] = True
+    assert client.post("/design/video/callback", json={"job_id": "join-1"}, headers=auth).json()["status"] == "done"
+    done = client.get(f"/design/video/project/{p['id']}").json()
+    assert done["url"].startswith("https://api.example/media/file/video/") and done["url"].endswith(".mp4")
+    assert design_router._active() == []  # finished: off the safety-net list
+
+
+async def test_the_tick_moves_unfinished_videos_on(monkeypatch):
+    from gateway import design_router
+
+    seen = []
+    monkeypatch.setattr(design_router, "_active", lambda: ["owner:abc", "owner:gone"])
+    monkeypatch.setattr(design_router, "_project", lambda acct, pid: {"id": pid, "status": "joining"} if pid == "abc" else None)
+
+    async def advance(acct, project):
+        seen.append((acct, project["id"]))
+        return {**project, "status": "done"}
+
+    monkeypatch.setattr(design_router, "_advance", advance)
+    assert await design_router.advance_all() == {"abc": "done"} and seen == [("owner", "abc")]
