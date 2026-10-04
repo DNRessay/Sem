@@ -521,3 +521,27 @@ def test_music_tab_makes_a_track_that_lands_in_s3(client, monkeypatch, moto_cach
     done = client.get("/design/music/music-9").json()
     assert done["status"] == "done" and done["url"].startswith("https://api.example/media/file/music/")
     assert client.get("/design/music/nope").status_code == 404
+
+
+def test_a_reply_cut_off_mid_array_keeps_the_finished_posts():
+    text = ('```json\n[{"placement": "instagram", "image_prompt": "a \\"quoted\\" {brace}", "caption": "c"},\n'
+            ' {"placement": "story", "image_prompt": "b", "hashtags": ["#Mzansi"]},\n {"placement": "story", "image_pro')
+    assert [v["placement"] for v in ad_studio.parse_variants(text)] == ["instagram", "story"]
+
+
+async def test_a_picked_model_that_fails_falls_back_to_the_free_ones(monkeypatch):
+    asked = []
+
+    async def fake_complete(choice, messages, max_tokens=4096, **k):
+        asked.append(choice)
+        if choice == "bonsai":
+            return {"content": "Sure, here are some ideas for your posts!", "_provider": "bonsai"}
+        if choice == "gemini":
+            return {"error": "Gemini Flash error 503: high demand"}
+        return {"content": '[{"placement": "instagram", "image_prompt": "x"}]', "_provider": choice}
+
+    for pid in ("bonsai", "gemini", "groq"):
+        monkeypatch.setattr(ad_studio.llm_providers.PROVIDERS[pid].__class__, "configured", property(lambda self: True))
+    monkeypatch.setattr(ad_studio.llm_providers, "complete", fake_complete)
+    out = await ad_studio.write_variants("bakery", "intro", ["instagram"], 1, "bonsai")
+    assert out["ok"] and asked == ["bonsai", "gemini", "groq"]
