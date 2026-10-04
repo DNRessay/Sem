@@ -33,4 +33,5 @@ export const WarningIcon = (p) => <Svg {...p}><path d="M10.3 3.9 1.8 18a2 2 0 0 
 export const CheckIcon = (p) => <Svg {...p}><path d="M20 6 9 17l-5-5" /></Svg>;
 
 // The tab icons used in both side menus.
-export const TAB_ICONS = { chat: ChatIcon, code: CodeIcon, cowork: SparkleIcon, design: BrushIcon, finance: WalletIcon };
+export const BotIcon = (p) => <Svg {...p}><rect x="4" y="8" width="16" height="12" rx="3" /><path d="M12 4v4M9 13h.01M15 13h.01M9 17h6" /></Svg>;
+export const TAB_ICONS = { chat: ChatIcon, code: CodeIcon, cowork: SparkleIcon, design: BrushIcon, finance: WalletIcon, bots: BotIcon };
