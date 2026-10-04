@@ -131,10 +131,17 @@ def _finished(ok: bool, callback: str = ""):
         req = urllib.request.Request(callback, data=json.dumps({"job_id": job_id, "ok": ok}).encode(), method="POST",
                                      headers={"Content-Type": "application/json",
                                               "Authorization": f"Bearer {os.environ.get('VIDEO_SECRET', '')}"})
-        try:
-            urllib.request.urlopen(req, timeout=20).read()
-        except Exception as e:
-            print("callback failed:", e)
+        # AWS caps the app at a few Lambdas at once, so a burst of callbacks gets 429s: back off and try again
+        # (the app's 15-minute check catches any that still don't get through).
+        for wait in (3, 10, 30, 0):
+            try:
+                urllib.request.urlopen(req, timeout=20).read()
+                return
+            except Exception as e:
+                print("callback failed:", e)
+                if not wait or (getattr(e, "code", 500) < 500 and getattr(e, "code", 0) != 429):
+                    return
+                time.sleep(wait)
 
 
 def _stage(stage: str, error: str = ""):
