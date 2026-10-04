@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import time
@@ -9,6 +10,7 @@ from cache.cache_ctrl import CacheController
 from cache.conv_cache import ConvCache
 from cache.sys_cache import SysCache
 from config import settings
+from memory import fact_memory
 from memory.sem_retrieval import SEMRetrieval
 from pipeline import chat_tools, llm_providers, turn_router
 from pipeline.ctx_assembly import CTXAssembly
@@ -86,6 +88,10 @@ class Bootstrap:
 
         # Step 3 - memory load. Laya (pipeline/turn_router.py) first decides what this message needs:
         # long-term memory search only when it refers back to something, and "remember X" pins X.
+        # Facts about the user and the skill list are looked up while Laya routes, not after (fact_memory: the
+        # lookups run beside the turn's other prep, so memory doesn't add to the wait, which voice mode hears).
+        facts_task = asyncio.create_task(fact_memory.recall(save_query))
+        skills_task = asyncio.create_task(self._skills_context(query))
         self.route = await turn_router.route(save_query, history)
         if self.route["remember"]:
             pinned = await self._pin(save_query, session_id)
@@ -94,12 +100,13 @@ class Bootstrap:
         memories = []
         if self.route["recall"]:
             try:
-                memories = await self.sem_retrieval.retrieve(query)
+                memories = await self.sem_retrieval.retrieve(query, top_k=3 if spoken else 5)
             except Exception:  # Neon or pgvector down: answer without long-term memory rather than fail the turn
                 logging.getLogger("semblance.chat").warning("memory recall failed", exc_info=True)
-        memory_block = self._format_memories(memories) + await self._pinned_block()
+        facts_block = await facts_task
+        memory_block = (facts_block + "\n" if facts_block else "") + self._format_memories(memories) + await self._pinned_block()
 
-        skills_block = await self._skills_context(query)
+        skills_block = await skills_task
 
         # Step 6 - ctx pressure before we hit the LLM
         full_ctx = self.ctx_pressure.apply(f"{ctx}\n\n{memory_block}\n\n{skills_block}")

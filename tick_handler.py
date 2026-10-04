@@ -55,5 +55,12 @@ async def _run():
     except Exception as e:
         videos = {"error": str(e)[:300]}
 
+    # Facts about the user from the messages since last tick (memory/fact_memory.py).
+    try:
+        from memory.fact_memory import learn_recent
+        facts = await learn_recent()
+    except Exception as e:
+        facts = {"error": str(e)[:300]}
+
     return {"status": "ok", "kairos_audit": kairos.get_audit(), "dream": dream_result, "pacific": pacific,
-            "automation": automation, "videos": videos}
+            "automation": automation, "videos": videos, "facts": facts}

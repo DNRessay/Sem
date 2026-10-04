@@ -133,6 +133,20 @@ class NeonStore:
                 )
             """)
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_session ON memories (session_id)")
+            # Short facts about the user, pulled out of conversations (memory/fact_memory.py): kind "fact" (who,
+            # what, where) or "persona" (feelings, preferences, style), searched separately.
+            await conn.execute(f"""
+                CREATE TABLE IF NOT EXISTS user_facts (
+                    id BIGSERIAL PRIMARY KEY,
+                    kind TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    embedding vector({_EMBED_DIM}),
+                    session_id TEXT,
+                    created_at BIGINT NOT NULL,
+                    updated_at BIGINT NOT NULL
+                )
+            """)
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_user_facts_kind ON user_facts (kind)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_salience ON memories (salience DESC)")
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS conversations (
@@ -442,6 +456,49 @@ class NeonStore:
                    LIMIT $2""",
                 _to_vector_literal(embedding), top_k,
             )
+            return [dict(r) for r in rows]
+
+    async def upsert_fact(self, kind: str, content: str, embedding: list[float] | None, session_id: str = "",
+                          same: float = 0.12) -> int:
+        """Saves a fact, or updates the one it restates (closer than `same` in cosine distance), so "I live in
+        Soweto" said ten times is one fact, and "I moved to Durban" can replace it."""
+        now = int(time.time())
+        vec = _to_vector_literal(embedding)
+        async with self._pool.acquire() as conn:
+            if vec:
+                near = await conn.fetchrow(
+                    """SELECT id, embedding <=> $2::vector AS distance FROM user_facts
+                       WHERE kind = $1 AND embedding IS NOT NULL ORDER BY embedding <=> $2::vector LIMIT 1""",
+                    kind, vec)
+                if near and float(near["distance"]) < same:
+                    await conn.execute("UPDATE user_facts SET content=$2, embedding=$3::vector, updated_at=$4 WHERE id=$1",
+                                       near["id"], content, vec, now)
+                    return near["id"]
+            row = await conn.fetchrow(
+                """INSERT INTO user_facts (kind, content, embedding, session_id, created_at, updated_at)
+                   VALUES ($1, $2, $3::vector, $4, $5, $5) RETURNING id""", kind, content, vec, session_id, now)
+            return row["id"]
+
+    async def search_facts(self, embedding: list[float], kind: str, top_k: int = 3) -> list[dict]:
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT id, content, embedding <=> $1::vector AS distance FROM user_facts
+                   WHERE kind = $2 AND embedding IS NOT NULL ORDER BY embedding <=> $1::vector LIMIT $3""",
+                _to_vector_literal(embedding), kind, top_k)
+            return [dict(r) for r in rows]
+
+    async def recent_facts(self, kind: str, limit: int = 3) -> list[dict]:
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch("SELECT id, content FROM user_facts WHERE kind = $1 ORDER BY updated_at DESC LIMIT $2",
+                                    kind, limit)
+            return [dict(r) for r in rows]
+
+    async def user_turns_after(self, after_id: int, limit: int = 60) -> list[dict]:
+        """The user's own messages since `after_id` (oldest first), for learning facts from them."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT id, session_id, content FROM conversations WHERE id > $1 AND role = 'user'
+                   ORDER BY id LIMIT $2""", after_id, limit)
             return [dict(r) for r in rows]
 
     async def save_turn(self, session_id: str, role: str, content: str):
