@@ -18,7 +18,7 @@ CLIP_MINUTES = 10
 CLIP_USD = round(CLIP_MINUTES / 60 * 0.80, 2)
 FAST_CLIP_MINUTES = 2  # fast mode (CausVid LoRA, ~6 steps)
 FAST_CLIP_USD = round(FAST_CLIP_MINUTES / 60 * 0.80, 2)
-WORDS_PER_SECOND = 2.3  # a relaxed voiceover pace
+WORDS_PER_SECOND = 2.6  # TTS reads briskly: lines written at a slower pace left silence at the end
 
 # How Wan 2.1 wants to be prompted: its demos all run through "prompt extension", which turns a short idea into one
 # dense English paragraph like this. Short prompts are the main reason our clips looked worse than the demos.
@@ -135,7 +135,8 @@ async def plan_video(brief: str, idea: str, seconds: int, fmt: str, voiceover: b
     prompt = _PROMPT.format(
         length=n * CLIP_SECONDS, kind=FORMATS[fmt]["label"], brief=(brief or "(no brief: keep it general)").strip()[:2000],
         idea=idea.strip()[:1500], n=n, clip=CLIP_SECONDS, aspect=FORMATS[fmt]["aspect_ratio"], guide=WAN_GUIDE,
-        voice=(f"- Write a voiceover line for every scene, at most {words} words, spoken while that scene plays; "
+        voice=(f"- Write a voiceover line for every scene, {words - 3}-{words} words (fill the scene, no dead air), "
+               "spoken while that scene plays; "
                "together they read as one script. South African English if the business is in South Africa.\n")
         if voiceover else "",
         narration=f'"voiceover line, max {words} words"' if voiceover else '""')
