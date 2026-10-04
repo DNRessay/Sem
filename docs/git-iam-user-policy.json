@@ -48,6 +48,18 @@
       "Effect": "Allow",
       "Action": "events:*",
       "Resource": "arn:aws:events:*:053097418755:rule/semblance-*"
+    },
+    {
+      "Sid": "SAMTransform",
+      "Effect": "Allow",
+      "Action": "cloudformation:CreateChangeSet",
+      "Resource": "arn:aws:cloudformation:*:aws:transform/Serverless-2016-10-31"
+    },
+    {
+      "Sid": "WebAdapterLayer",
+      "Effect": "Allow",
+      "Action": "lambda:GetLayerVersion",
+      "Resource": "arn:aws:lambda:*:753240598075:layer:LambdaAdapterLayerX86:*"
     }
   ]
 }

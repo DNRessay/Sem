@@ -1,13 +1,14 @@
 import asyncio
+import logging
 
-from memory.working_mem import WorkingMem
 from tools.registry import get_registry
+
+log = logging.getLogger("semblance.cables")
 
 
 class CablesMan:
     def __init__(self):
         self.registry = get_registry()
-        self.working_mem = WorkingMem()
         self._agents = {}
 
     async def route(self, task: dict) -> dict:
@@ -15,7 +16,6 @@ class CablesMan:
         session = task.get("session_id", "default")
         agent_type = task.get("agent", self._classify(query))
 
-        self.working_mem.append(session, f"routing:{agent_type}:{query[:60]}")
         await self._persist_event(session, agent_type, f"routing:{query[:60]}")
 
         from tools.agent_tool import AgentTool
@@ -24,9 +24,6 @@ class CablesMan:
 
         status = result.get("status") if isinstance(result, dict) else None
         await self._persist_event(session, agent_type, f"{status or 'error'}")
-        if status == "complete":
-            self.working_mem.clear(session)
-
         return result
 
     async def _persist_event(self, session_id: str, agent: str, action: str) -> None:
@@ -37,7 +34,7 @@ class CablesMan:
             db = await get_store()
             await db.save_agent_event(session_id, agent, action)
         except Exception:
-            pass
+            log.warning("agent event not saved (%s %s)", agent, action, exc_info=True)
 
     def _classify(self, query: str) -> str:
         q = query.lower()

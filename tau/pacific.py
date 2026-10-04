@@ -28,10 +28,10 @@ async def refresh_profile() -> dict | None:
     today = datetime.now(_SAST).strftime("%Y-%m-%d")
     if await db.get_state("pacific:last_refresh") == today:
         return None
-    await db.set_state("pacific:last_refresh", today)
     memories = sorted(await db.get_recent_memories(limit=300), key=lambda m: m.get("created_at", 0))[-150:]
     texts = [m["content"][:300] for m in memories if m.get("content")]
     if len(texts) < _MIN_MESSAGES:
+        await db.set_state("pacific:last_refresh", today)  # too little to read: try again tomorrow
         return None
     result = await llm_providers.complete(
         "auto", [{"role": "user", "content": _PROMPT.format(messages="\n".join(f"- {t}" for t in texts))}], max_tokens=500,
@@ -50,6 +50,10 @@ async def refresh_profile() -> dict | None:
     if isinstance(data.get("style"), str) and data["style"].strip():
         model["observed_style"] = data["style"].strip()[:400]
     await db.save_user_model(owner, model)
+    # Only a refresh that worked counts for today: a failed model call or a bad reply is retried on the next tick.
+    await db.set_state("pacific:last_refresh", today)
+    from cache.tau_cache import TAUCache
+    TAUCache().bump_version()  # every chat picks up the new profile on its next message
     return {"ocean": ocean, "messages_read": len(texts)}
 
 

@@ -512,9 +512,9 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
             yield f"data: {json.dumps({'status': status_label(kind, target)})}\n\n"
             web_block = await run_web_intent(kind, target, session_id=session_id)
             if web_block:
-                # Explicit framing, not just the raw block: the models this
-                # app runs have no real tool-calling wired up, but SEMBLANCE.md
-                # tells them to "prefer web search" — without this note a model
+                # Explicit framing, not just the raw block: this search ran before the
+                # model was asked (an intent match, not the model's own tool call), and
+                # SEMBLANCE.md tells it to prefer web search — without this note a model
                 # reads that instruction, sees data already sitting in context,
                 # and narrates a fake in-progress fetch ("let me grab that for
                 # you") instead of just answering from what's already here.

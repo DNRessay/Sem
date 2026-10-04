@@ -28,8 +28,8 @@ class ExploreAgent(BaseAgent):
             results["code"] = await self._code_search(query)
 
         # See agents/plan_agent.py's identical comment — CablesMan.route
-        # reads "status" for the agent_events audit trail and working_mem
-        # cleanup; without it a successful search logged as "error".
+        # reads "status" for the agent_events audit trail; without it a
+        # successful search logged as "error".
         return {
             "status": "complete",
             "query": query,

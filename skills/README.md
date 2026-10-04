@@ -46,5 +46,5 @@ If you've found a skill written for Claude (e.g. from
 [skills.sh](https://skills.sh)) that you want SEMBLANCE to use too, ask
 Claude Code to adapt it into this format — the instructional core usually
 translates directly; anything about invoking Claude-specific tools doesn't
-apply here and should be dropped, since SEMBLANCE's model has no real
-tool-calling and only ever sees this content as plain injected text.
+apply here and should be dropped: a skill reaches the model as plain
+instructions in its context, and the model can only use SEMBLANCE's own tools.

@@ -1,7 +1,7 @@
 ---
 name: Promptimizer
 description: Writes and improves prompts for any LLM — task prompts, system prompts, image-gen prompts. Clarifies length and the one or two things that actually matter, then delivers a copy-paste-ready prompt.
-triggers: prompt, write a prompt, optimize this prompt, improve my prompt, system prompt, rewrite this for, how should I ask, midjourney, stable diffusion, dall-e, image prompt, agent instructions
+triggers: write a prompt, optimize this prompt, improve my prompt, system prompt, rewrite this for, how should I ask, midjourney, stable diffusion, dall-e, image prompt, agent instructions
 ---
 
 # Promptimizer

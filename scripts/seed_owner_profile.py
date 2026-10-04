@@ -9,6 +9,7 @@ import asyncpg
 async def main():
     database_url = os.environ["NEON_DATABASE_URL"]
     profile = json.loads(os.environ["OWNER_PROFILE_JSON"])
+    owner = os.environ.get("OWNER_ACCOUNT_ID", "owner")
 
     conn = await asyncpg.connect(database_url)
     try:
@@ -19,11 +20,13 @@ async def main():
                    updated_at BIGINT NOT NULL
                )"""
         )
+        # Merged over what's there, so edits made in Settings and what Sem learned (OCEAN, observed style) stay
+        # unless this profile sets the same field.
         await conn.execute(
             """INSERT INTO user_models (session_id, data, updated_at)
-               VALUES ('owner', $1, $2)
-               ON CONFLICT (session_id) DO UPDATE SET data = $1, updated_at = $2""",
-            json.dumps(profile), int(time.time()),
+               VALUES ($3, $1::jsonb, $2)
+               ON CONFLICT (session_id) DO UPDATE SET data = user_models.data || $1::jsonb, updated_at = $2""",
+            json.dumps(profile), int(time.time()), owner,
         )
     finally:
         await conn.close()

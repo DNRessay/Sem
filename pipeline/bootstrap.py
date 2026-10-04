@@ -91,7 +91,12 @@ class Bootstrap:
             pinned = await self._pin(save_query, session_id)
             if pinned:
                 yield {"tool": {"kind": "memory", "label": "Remembered", "detail": save_query[:500]}}
-        memories = await self.sem_retrieval.retrieve(query) if self.route["recall"] else []
+        memories = []
+        if self.route["recall"]:
+            try:
+                memories = await self.sem_retrieval.retrieve(query)
+            except Exception:  # Neon or pgvector down: answer without long-term memory rather than fail the turn
+                logging.getLogger("semblance.chat").warning("memory recall failed", exc_info=True)
         memory_block = self._format_memories(memories) + await self._pinned_block()
 
         skills_block = await self._skills_context(query)
