@@ -330,6 +330,7 @@ def test_modal_callbacks_finish_a_video_with_nobody_watching(client, monkeypatch
     monkeypatch.setattr(settings, "MODAL_VIDEO_SECRET", "s3cret")
     monkeypatch.setattr(design_router.media_store, "enabled", lambda: True)
     monkeypatch.setattr(design_router.media_store, "presign_put", lambda key, mime: f"https://s3.example/{key}?put")
+    monkeypatch.setattr(design_router.media_store, "exists", lambda key: False)
     monkeypatch.setattr(design_router.media_store, "link", lambda key: f"https://api.example/media/file/{key}")
 
     p = client.post("/design/video/project", json={"scenes": [{"prompt": "a"}, {"prompt": "b"}], "aspect_ratio": "9:16"}).json()
@@ -380,9 +381,41 @@ async def test_a_join_from_before_uploads_is_redone_with_a_direct_upload(monkeyp
     monkeypatch.setattr(design_router, "video_call", fake_video)
     monkeypatch.setattr(design_router.media_store, "enabled", lambda: True)
     monkeypatch.setattr(design_router.media_store, "presign_put", lambda key, mime: f"https://s3.example/{key}?put")
+    monkeypatch.setattr(design_router.media_store, "exists", lambda key: False)
     old = {"id": "p1", "status": "joining", "aspect_ratio": "9:16", "audio_url": "", "stitch_job": "join-1",
            "scenes": [{"job_id": "s1", "status": "done", "prompt": "a"}], "created": 1}
     out = await design_router._advance("owner", old)
     stitch = next(kw for a, kw in calls if a == "stitch")
     assert out["stitch_job"] == "join-2" and out["rejoins"] == 1 and out["final_key"].startswith("video/")
     assert stitch["upload_url"].startswith("https://s3.example/video/")
+
+
+async def test_a_video_already_in_s3_is_done_whatever_modal_says(monkeypatch, moto_cache_table):
+    from gateway import design_router
+
+    async def fake_video(action, timeout=60, **kw):
+        return {"ok": True, "status": "rendering"}
+
+    monkeypatch.setattr(design_router, "video_call", fake_video)
+    monkeypatch.setattr(design_router.media_store, "enabled", lambda: True)
+    monkeypatch.setattr(design_router.media_store, "exists", lambda key: key == "video/2026-10-04/x.mp4")
+    monkeypatch.setattr(design_router.media_store, "link", lambda key: f"https://api.example/media/file/{key}")
+    p = {"id": "p2", "status": "joining", "aspect_ratio": "9:16", "stitch_job": "join-1", "final_key": "video/2026-10-04/x.mp4",
+         "stitch_started": 1, "rejoins": 2, "scenes": [{"job_id": "s1", "status": "done", "prompt": "a"}], "created": 1}
+    out = await design_router._advance("owner", p)
+    assert out["status"] == "done" and out["url"].endswith("x.mp4")
+
+
+async def test_a_join_that_keeps_failing_says_so_instead_of_hanging(monkeypatch, moto_cache_table):
+    from gateway import design_router
+
+    async def fake_video(action, timeout=60, **kw):
+        raise AssertionError("no more joins")
+
+    monkeypatch.setattr(design_router, "video_call", fake_video)
+    monkeypatch.setattr(design_router.media_store, "enabled", lambda: True)
+    monkeypatch.setattr(design_router.media_store, "exists", lambda key: False)
+    p = {"id": "p3", "status": "joining", "aspect_ratio": "9:16", "stitch_job": "join-3", "final_key": "video/2026-10-04/y.mp4",
+         "stitch_started": 1, "rejoins": 2, "scenes": [{"job_id": "s1", "status": "done", "prompt": "a"}], "created": 1}
+    out = await design_router._advance("owner", p)
+    assert out["status"] == "failed" and "Retry join" in out["error"]
