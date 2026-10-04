@@ -73,7 +73,7 @@ def client():
 
 
 def test_ads_stream_sends_copy_then_images(client, monkeypatch):
-    async def fake_write(brief, campaign, placements, count, model, style=""):
+    async def fake_write(brief, campaign, placements, count, model, style="", area=""):
         return {"ok": True, "variants": [
             {"placement": "square", "headline": "A", "image_prompt": "a", "aspect_ratio": "1:1"},
             {"placement": "story_reel", "headline": "B", "image_prompt": "b", "aspect_ratio": "9:16"},
@@ -110,7 +110,7 @@ def test_inspiration_images_shape_the_copy_and_the_images(client, monkeypatch):
         seen["described"] = len(refs)
         return {"ok": True, "text": "warm terracotta palette, hand-drawn type"}
 
-    async def fake_write(brief, campaign, placements, count, model, style=""):
+    async def fake_write(brief, campaign, placements, count, model, style="", area=""):
         seen["style"] = style
         return {"ok": True, "variants": [{"placement": "square", "headline": "A", "image_prompt": "a", "aspect_ratio": "1:1"}]}
 
@@ -463,3 +463,32 @@ def test_the_storyboard_carries_a_music_line():
 
     plan = parse_plan('{"title": "t", "style": "s", "music": "warm lo-fi, 85 BPM", "scenes": [{"prompt": "p"}]}', 1, False)
     assert plan["music"] == "warm lo-fi, 85 BPM"
+
+
+def test_each_platform_gets_its_own_playbook_and_the_area(monkeypatch):
+    import asyncio
+
+    seen = {}
+
+    async def fake_complete(choice, messages, max_tokens=4096, **k):
+        seen["prompt"] = messages[0]["content"]
+        return {"content": '[{"placement": "pinterest", "image_prompt": "x", "caption": "c"}]', "_provider": "gemini"}
+
+    monkeypatch.setattr(ad_studio.llm_providers, "complete", fake_complete)
+    out = asyncio.run(ad_studio.write_variants("web design studio", "launch", ["pinterest", "fb_ig_feed"], 1, "gemini",
+                                               area="Soweto, Johannesburg"))
+    assert out["ok"] and out["variants"][0]["aspect_ratio"] == "2:3"
+    prompt = seen["prompt"]
+    assert "Soweto, Johannesburg" in prompt and "pin built to be clicked" in prompt
+    assert "gallery-worthy" in prompt and "keywords" in prompt  # fb_ig_feed (old id) now means Instagram
+
+
+def test_hashtags_are_cleaned_and_capped_per_platform():
+    text = ('[{"placement": "instagram", "image_prompt": "a", "hashtags": ' + str([f"tag {i}" for i in range(20)]).replace("'", '"')
+            + ', "keywords": ["websites Soweto"]},'
+            ' {"placement": "google_display", "image_prompt": "b", "hashtags": ["#x"]},'
+            ' {"placement": "facebook", "image_prompt": "c", "hashtags": ["Mzansi", "#Mzansi", "#SouthAfrica"], "primary_text": "old"}]')
+    ig, banner, fb = ad_studio.parse_variants(text)
+    assert len(ig["hashtags"]) == 12 and ig["hashtags"][0] == "#tag0" and ig["keywords"] == ["websites Soweto"]
+    assert banner["hashtags"] == []
+    assert fb["hashtags"] == ["#Mzansi", "#SouthAfrica"] and fb["caption"] == "old"

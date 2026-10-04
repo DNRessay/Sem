@@ -13,19 +13,27 @@ import { CloseIcon, PaperclipIcon, SendIcon } from "./Icons";
 
 const API = import.meta.env.VITE_API_URL || "";
 const STORE_KEY = "semblance_design_campaigns";
-const MODE_KEY = "semblance_design_mode"; // "ads" | "video" | "web"
+const MODE_KEY = "semblance_design_mode"; // "ads" (the Images tab) | "video" | "web"
 const OLD_KEY = "semblance_design";
 const MAX_TURNS = 30;
 const MAX_REFS = 4;
 const RENDER_SECONDS = 600; // a typical Wan render, for the progress bar
+// Each platform gets its own look, caption, hashtags and search words (pipeline/ad_studio.py PLAYBOOK).
 const PLACEMENTS = [
-    ["fb_ig_feed", "FB/IG feed"], ["square", "Square"], ["story_reel", "Story/Reel/TikTok"],
-    ["google_display", "Google Display"], ["whatsapp_status", "WhatsApp Status"],
+    ["instagram", "Instagram", "Scroll-stopping, beautiful photos people save — no text on the image"],
+    ["facebook", "Facebook", "Clear, informative page posts and boosted ads: the offer, why it's good value, what to do"],
+    ["pinterest", "Pinterest", "Tall, clickable pins with a bold title and keyword-rich description"],
+    ["linkedin", "LinkedIn", "Professional, credible images and insight-led posts"],
+    ["story", "Stories & Status", "Instagram/Facebook Stories and WhatsApp Status"],
+    ["tiktok", "TikTok photo", "TikTok is mostly video (use the Video tab); this makes a photo post"],
+    ["google_display", "Google Display", "Wide web banners"],
 ];
+const ALIASES = { fb_ig_feed: "instagram", square: "facebook", story_reel: "story", whatsapp_status: "story" };
+const platform = id => ALIASES[id] || id;
 const ASPECTS = [["9:16", "9:16 Reel"], ["16:9", "16:9 YouTube"], ["1:1", "1:1 Feed"]];
 const SUGGESTIONS = ["Weekend special: 2 loaves for R80, ends Sunday", "Grand opening — first 50 customers get 20% off",
     "Book a free consultation this month"];
-const placementLabel = id => (PLACEMENTS.find(p => p[0] === id) || [])[1] || id;
+const placementLabel = id => (PLACEMENTS.find(p => p[0] === platform(id)) || [])[1] || id;
 const keepLinks = list => (list || []).map(({ image, ...x }) => (image?.url ? { ...x, image } : x));
 // Saved images/videos are links (kept 7 days in S3); older or unsaved ones are inline base64.
 export const mediaSrc = m => m?.url || (m?.base64 ? `data:${m.mime};base64,${m.base64}` : "");
@@ -135,8 +143,8 @@ function VicinicPicker({ headers, onBrief, disabled }) {
 }
 
 // The business everything is made for: collapsed to one line once there's a brief.
-function BusinessCard({ chat, setSite, setBrief, headers, model, onUnauthorized, disabled }) {
-    const { site = "", brief = "" } = chat;
+function BusinessCard({ chat, setSite, setBrief, setArea, headers, model, onUnauthorized, disabled }) {
+    const { site = "", brief = "", area = "" } = chat;
     const [open, setOpen] = useState(!brief);
     const [busy, setBusy] = useState("");
     const [notice, setNotice] = useState("");
@@ -180,6 +188,8 @@ function BusinessCard({ chat, setSite, setBrief, headers, model, onUnauthorized,
                     }} />
                     <textarea className="ds-field" value={brief} onChange={e => setBrief(e.target.value)} rows={brief ? 7 : 3}
                         placeholder="Or describe the business: what you sell, who to, where, your tone…" />
+                    <input className="ds-field" value={area} onChange={e => setArea(e.target.value)}
+                        placeholder="Area to target, e.g. Soweto, Johannesburg (goes into captions, hashtags and search words)" />
                     {(busy || notice) && <div className="ds-muted">{busy || notice}</div>}
                 </div>
             )}
@@ -188,13 +198,15 @@ function BusinessCard({ chat, setSite, setBrief, headers, model, onUnauthorized,
 }
 
 function AdCard({ ad, onRetry, onExpired }) {
-    const text = `${ad.headline}\n\n${ad.primary_text}\n\n${(ad.hashtags || []).join(" ")}`;
+    const caption = ad.caption || ad.primary_text || "";
+    const tags = (ad.hashtags || []).join(" ");
+    const text = [ad.headline && platform(ad.placement) !== "instagram" ? ad.headline : "", caption, tags].filter(Boolean).join("\n\n");
     const waiting = !ad.image && !ad.imageError;
     return (
         <div className="ds-ad">
             <div className="ds-ad-media" style={{ aspectRatio: !ad.image ? (ad.aspect_ratio || "1:1").replace(":", "/") : undefined, minHeight: ad.image ? 0 : undefined }}>
                 {ad.image ? (
-                    <img src={mediaSrc(ad.image)} alt={ad.headline} onError={onExpired} />
+                    <img src={mediaSrc(ad.image)} alt={ad.alt_text || ad.headline} onError={onExpired} />
                 ) : waiting ? (
                     <><div className="ds-shimmer" /><span className="ds-muted">Making image…</span></>
                 ) : (
@@ -204,13 +216,20 @@ function AdCard({ ad, onRetry, onExpired }) {
             </div>
             <div className="ds-ad-body">
                 {ad.angle && <div className="ds-kicker" style={{ letterSpacing: "0.5px" }}>{ad.angle}</div>}
-                <div style={{ fontWeight: 700, fontSize: "15px", lineHeight: 1.3 }}>{ad.headline}</div>
-                <div style={{ fontSize: "14px", lineHeight: 1.5 }}>{ad.primary_text}</div>
-                {ad.hashtags?.length > 0 && <div className="ds-muted">{ad.hashtags.join(" ")}</div>}
+                {ad.headline && <div style={{ fontWeight: 700, fontSize: "15px", lineHeight: 1.3 }}>{ad.headline}</div>}
+                <div style={{ fontSize: "14px", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{caption}</div>
+                {tags && <div style={{ fontSize: "13px", color: "var(--gold)", lineHeight: 1.5 }}>{tags}</div>}
                 {ad.cta && <span className="ds-cta">{ad.cta}</span>}
+                {(ad.keywords?.length > 0 || ad.alt_text) && (
+                    <details className="ds-muted"><summary style={{ cursor: "pointer" }}>Search words & alt text</summary>
+                        {ad.keywords?.length > 0 && <div style={{ marginTop: "4px" }}>People searching: {ad.keywords.join(" · ")}</div>}
+                        {ad.alt_text && <div style={{ marginTop: "4px" }}>Alt text: {ad.alt_text}</div>}
+                    </details>
+                )}
                 <span style={{ flex: 1 }} />
                 <div className="ds-actions">
-                    <button className="ds-btn sm" onClick={() => copyToClipboard(text)}>Copy text</button>
+                    <button className="ds-btn sm" onClick={() => copyToClipboard(text)}>Copy post</button>
+                    {tags && <button className="ds-btn sm" onClick={() => copyToClipboard(tags)}>Copy hashtags</button>}
                     {ad.image && <a className="ds-btn sm" href={mediaSrc(ad.image)} download={`ad-${ad.placement}.png`} target="_blank" rel="noreferrer">Download</a>}
                     <button className="ds-btn sm" onClick={onRetry} disabled={waiting}>New image</button>
                 </div>
@@ -369,15 +388,15 @@ function Composer({ kind, draft, setDraft, onSend, disabled, placements, toggleP
                 )}
                 <textarea ref={box} rows={1} value={draft} onChange={e => setDraft(e.target.value)}
                     onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && window.matchMedia("(pointer: fine)").matches) { e.preventDefault(); if (ready) onSend(); } }}
-                    placeholder={kind === "ads" ? "What are we promoting? e.g. Weekend special: 2 loaves for R80" : "Describe a 5-second clip, e.g. Slow close-up of steaming sourdough, warm morning light"} />
+                    placeholder={kind === "ads" ? "What's the post about? e.g. Free website check for Soweto businesses this month" : "Describe a 5-second clip, e.g. Slow close-up of steaming sourdough, warm morning light"} />
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                     <div className="ds-chips" style={{ flex: 1, minWidth: 0 }}>
                         {kind === "ads" ? (<>
-                            {PLACEMENTS.map(([id, name]) => (
-                                <button key={id} onClick={() => togglePlacement(id)} aria-pressed={placements.includes(id)}
+                            {PLACEMENTS.map(([id, name, hint]) => (
+                                <button key={id} title={hint} onClick={() => togglePlacement(id)} aria-pressed={placements.includes(id)}
                                     className={`ds-chip${placements.includes(id) ? " is-selected" : ""}`}>{name}</button>
                             ))}
-                            <select className="ds-chip" value={count} onChange={e => setCount(Number(e.target.value))} aria-label="Variants per placement">
+                            <select className="ds-chip" value={count} onChange={e => setCount(Number(e.target.value))} aria-label="Posts per platform">
                                 {[1, 2, 3].map(n => <option key={n} value={n}>{n} each</option>)}
                             </select>
                         </>) : (<>
@@ -408,7 +427,7 @@ function Composer({ kind, draft, setDraft, onSend, disabled, placements, toggleP
 // Every round stays in the chat, so earlier ads are never lost when a new one fails.
 export default function DesignPage({ token, onNavigate, onUnauthorized, handoff, onHandoff }) {
     const { chats, chat: rawChat, updateChat, newChat, selectChat, deleteChat } = useTabChats(STORE_KEY, {
-        blank: () => ({ site: "", brief: "", placements: ["fb_ig_feed", "story_reel"], count: 2, turns: [] }),
+        blank: () => ({ site: "", brief: "", area: "", placements: ["instagram", "facebook"], count: 2, turns: [] }),
         legacy: () => { const s = loadSaved(); return { ...s, title: (s.campaign || "").slice(0, 60) }; },
         // Saved images are short links and stay with the chat; inline (unsaved) ones are too big for the phone.
         persist: c => ({
@@ -420,7 +439,8 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
         }),
     });
     const chat = withTurns(rawChat);
-    const { site = "", brief = "", placements = [], count = 2, turns } = chat;
+    const { site = "", brief = "", area = "", count = 2, turns } = chat;
+    const placements = [...new Set((chat.placements || []).map(platform))].filter(id => PLACEMENTS.some(p => p[0] === id));
     const set = (key, v) => updateChat(chat.id, c => ({ [key]: typeof v === "function" ? v(c[key]) : v }));
     const [menuOpen, setMenuOpen] = useState(false);
     const feed = useAgentFeed(`design:${chat.id}`, token);
@@ -561,7 +581,7 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
         let error = "";
         try {
             const r = await runStream("/design/ads", {
-                headers, body: { brief, campaign, ...round, model, references, chat_id: chatId },
+                headers, body: { brief, campaign, ...round, area, model, references, chat_id: chatId },
                 onEvent: ev => applyEvent(chatId, turnId, ev),
                 onRun: (id, seq) => seq === 0 && updateChat(chatId, () => ({ pendingRun: { id, seq: 0, turnId } })),
             });
@@ -600,7 +620,7 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
     ].filter(Boolean).join("\n")));
 
     const business = (
-        <BusinessCard chat={chat} setSite={v => set("site", v)} setBrief={v => set("brief", v)} headers={headers} model={model}
+        <BusinessCard chat={chat} setSite={v => set("site", v)} setBrief={v => set("brief", v)} setArea={v => set("area", v)} headers={headers} model={model}
             onUnauthorized={onUnauthorized} disabled={working || !!busy} />
     );
 
@@ -610,7 +630,7 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
                 <MenuButton onClick={() => setMenuOpen(true)} />
                 <span style={{ fontWeight: 700, color: "var(--text)", whiteSpace: "nowrap" }}>Sem Design</span>
                 <div className="ds-seg" role="tablist" aria-label="Design mode">
-                    {[["ads", "Ads"], ["video", "Video"], ["web", "Web"]].map(([id, name]) => (
+                    {[["ads", "Images"], ["video", "Video"], ["web", "Web"]].map(([id, name]) => (
                         <button key={id} role="tab" aria-selected={mode === id} disabled={!!busy && mode !== id} onClick={() => setMode(id)}>{name}</button>
                     ))}
                 </div>
@@ -642,9 +662,9 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
                         {business}
                         {!turns.length && (
                             <div className="ds-empty">
-                                <h2>What are we promoting?</h2>
+                                <h2>What are we posting?</h2>
                                 <div className="ds-muted" style={{ marginBottom: "14px" }}>
-                                    Describe the campaign below. Sem writes the copy and makes an image for every placement. Videos have their own tab.
+                                    Pick the platforms below. Each gets an image made for how people use it, a ready-to-paste caption, hashtags and the words people search for. Videos have their own tab.
                                 </div>
                                 <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", justifyContent: "center" }}>
                                     {SUGGESTIONS.map(s => <button key={s} className="ds-chip" onClick={() => setDraft(s)}>{s}</button>)}
@@ -667,7 +687,7 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
                 </div>
                 <Composer kind="ads" draft={draft} setDraft={setDraft} onSend={send}
                     disabled={working || !brief.trim()}
-                    placements={placements} togglePlacement={id => set("placements", p => (p.includes(id) ? p.filter(x => x !== id) : [...p, id]))}
+                    placements={placements} togglePlacement={id => set("placements", p => { const now = (p || []).map(platform); return now.includes(id) ? now.filter(x => x !== id) : [...now, id]; })}
                     count={count} setCount={v => set("count", v)} aspect={aspect} setAspect={setAspect}
                     refs={refs} setRefs={setRefs} budget={budget} />
             </>)}

@@ -6,7 +6,7 @@ const TABS = [
     { view: "chat", label: "Chat" },
     { view: "code", label: "Code" },
     { view: "cowork", label: "Co-work" },
-    { view: "design", label: "Design & ads" },
+    { view: "design", label: "Design" },
     { view: "finance", label: "Finance" },
     { view: "bots", label: "Bots" },
 ];
@@ -25,7 +25,7 @@ function timeAgo(ms) {
     return `${Math.floor(diff / 86400)}d ago`;
 }
 
-const TAB_NAMES = { chat: "Chat", code: "Code", cowork: "Co-work", design: "Design & ads", finance: "Finance", bots: "Bots" };
+const TAB_NAMES = { chat: "Chat", code: "Code", cowork: "Co-work", design: "Design", finance: "Finance", bots: "Bots" };
 
 // "Continue in another tab" button, shown when an agent hands work off.
 export function HandoffCard({ tab, task, onHandoff }) {

@@ -50,7 +50,7 @@ async def ads(request: Request, _account: dict = Depends(require_account)):
     session = session_for("design", body)
 
     async def stream():
-        await log(session, "design", f"ok:create ads · {len(refs)} inspiration image(s) · {campaign[:100]}")
+        await log(session, "design", f"ok:create images · {len(refs)} inspiration image(s) · {campaign[:100]}")
         style = ""
         if refs:
             yield f"data: {json.dumps({'type': 'status', 'text': 'Studying your inspiration…'})}\n\n"
@@ -61,8 +61,8 @@ async def ads(request: Request, _account: dict = Depends(require_account)):
                 style = described["text"]
                 yield f"data: {json.dumps({'type': 'style', 'text': style})}\n\n"
         written = await write_variants(brief, campaign, body.get("placements") or [], body.get("count") or 2,
-                                       body.get("model") or "auto", style=style)
-        await log(session, "design", f"{'ok' if written['ok'] else 'blocked'}:ad copy — "
+                                       body.get("model") or "auto", style=style, area=body.get("area") or "")
+        await log(session, "design", f"{'ok' if written['ok'] else 'blocked'}:post copy — "
                                      f"{len(written.get('variants') or [])} variant(s){'' if written['ok'] else ': ' + written['error']}")
         if not written["ok"]:
             yield f"data: {json.dumps({'type': 'error', 'text': written['error']})}\n\n"
