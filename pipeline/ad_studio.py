@@ -21,10 +21,15 @@ Write {count} distinct ad variants for each of these placements: {placements}.
 Return ONLY a JSON array. Each item:
 {{"placement": one of {keys}, "angle": short name of the creative angle,
 "headline": <= 40 chars, "primary_text": <= 125 chars for the main ad text, "cta": a call-to-action button label,
-"hashtags": [up to 5], "image_prompt": a detailed prompt for an image generator — layout, subject, colours, lighting,
-and any short on-image text in quotes (keep on-image text under 6 words)}}
+"hashtags": [up to 5], "image_prompt": an art director's brief for the image model, 60-100 words: the real subject
+(product, food, person or place from the brief, with specific looks, materials and colours), what is happening, the
+setting, composition for the placement's shape (leave clean space where the text goes), lighting (source, direction,
+mood), camera and lens (e.g. 50mm, shallow depth of field, eye level), style (photorealistic product photography,
+lifestyle photo, flat illustration...) and colour palette in words, not hex codes. On-image text: at most ONE short
+line in quotes, under 6 words, with its placement and font style (e.g. bold white sans-serif across the top)}}
 
-Vary the angles (benefit, social proof, urgency/offer, problem/solution, local pride). Write for the audience and
+Vary the angles (benefit, social proof, urgency/offer, problem/solution, local pride). Show the actual business,
+not abstract shapes or symbols (no floating question marks or generic icons). Write for the audience and
 location in the brief; South African English and Rand pricing if the business is in South Africa. No false claims.{style}"""
 
 

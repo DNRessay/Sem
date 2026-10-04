@@ -57,6 +57,14 @@ async def test_learn_site_reads_pages_and_asks_the_model(monkeypatch):
     assert "Sourdough from R45" in seen["prompt"] and "Since 2009" in seen["prompt"] and "#c0392b" in seen["prompt"]
 
 
+@pytest.fixture(autouse=True)
+def no_prompt_extension(monkeypatch):
+    async def same(prompt, aspect, brief="", model="auto"):
+        return prompt
+
+    monkeypatch.setattr("gateway.design_router.extend_prompt", same)
+
+
 @pytest.fixture
 def client():
     app.dependency_overrides[require_account] = lambda: {"account_id": "owner", "role": "owner"}
@@ -240,3 +248,25 @@ def test_long_video_is_refused_when_the_budget_cant_cover_it(client, monkeypatch
     monkeypatch.setattr("gateway.design_router.video_call", fake_video)
     r = client.post("/design/video/project", json={"scenes": [{"prompt": f"shot {i}"} for i in range(12)]})
     assert r.status_code == 400 and "$1.56" in r.json()["detail"]
+
+
+async def test_short_video_prompts_are_extended_for_wan(monkeypatch):
+    from pipeline import video_studio
+
+    seen = {}
+    long = " ".join(["word"] * 60)
+
+    async def fake_complete(model, messages, **kw):
+        seen["prompt"] = messages[0]["content"]
+        return {"content": f"<think>hmm</think>{long}"}
+
+    monkeypatch.setattr(video_studio.llm_providers, "complete", fake_complete)
+    assert await video_studio.extend_prompt("bread rising", "9:16", "Vicinic Bakes") == long
+    assert "80-120 English words" in seen["prompt"] and "on-screen text" in seen["prompt"]
+    assert await video_studio.extend_prompt(long, "9:16") == long  # already detailed: left alone
+
+    async def broken(model, messages, **kw):
+        return {"error": "down"}
+
+    monkeypatch.setattr(video_studio.llm_providers, "complete", broken)
+    assert await video_studio.extend_prompt("bread rising", "9:16") == "bread rising"

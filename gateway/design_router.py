@@ -11,7 +11,7 @@ from pipeline.activity import log, session_for
 from pipeline.ad_studio import PLACEMENTS, write_variants
 from pipeline.runs import durable
 from pipeline.site_brief import learn_site
-from pipeline.video_studio import CLIP_USD, FORMATS, estimate, plan_video
+from pipeline.video_studio import CLIP_USD, FORMATS, estimate, extend_prompt, needs_extending, plan_video
 from pipeline.web_studio import LOGO_STYLES, figma_frames, figma_me, logo_prompt, make_page
 from storage.neon_store import get_store
 from tools import gemini_media, image_gen, media_store
@@ -135,6 +135,9 @@ async def _video_result(job_id: str) -> dict:
 async def video_submit(request: Request, account: dict = Depends(require_account)):
     body = await request.json()
     prompt, aspect = (body.get("prompt") or "").strip(), body.get("aspect_ratio") or "9:16"
+    if not prompt:
+        raise HTTPException(400, "Describe the clip first")
+    prompt = await _extended(prompt, aspect, body.get("brief") or "", body.get("model") or "auto")
     result = await video_call("submit", prompt=prompt, aspect_ratio=aspect, seconds=body.get("seconds") or 5)
     if not result.get("ok"):
         raise HTTPException(400, result.get("error") or "video submit failed")
@@ -162,6 +165,16 @@ async def video_history(account: dict = Depends(require_account)):
                          "status": "done", "created": p["created"], "mime": "video/mp4"})
     jobs.sort(key=lambda j: -int(j.get("created") or 0))
     return {"videos": jobs}
+
+
+async def _extended(prompt: str, aspect: str, brief: str, model: str) -> str:
+    """Short prompts become the dense paragraph Wan renders well (what its demos do). Never blocks a render."""
+    if not needs_extending(prompt):
+        return prompt
+    try:
+        return await asyncio.wait_for(extend_prompt(prompt, aspect, brief, model), timeout=20)
+    except Exception:
+        return prompt
 
 
 # ── Video studio: short and long videos as storyboards of 5-second scenes ─────
@@ -238,9 +251,11 @@ async def video_project(request: Request, account: dict = Depends(require_accoun
             raise HTTPException(400, f"This video needs about ${cost:.2f} of GPU time and ${max(left, 0):.2f} is left this "
                                      "month. Make it shorter, or raise VIDEO_MONTHLY_CAP_USD in the Modal secret.")
     style = str(body.get("style") or "").strip()
+    # Scenes the user shortened or typed themselves get extended too (all at once, so it stays quick).
+    prompts = await asyncio.gather(*[_extended(str(s["prompt"]).strip(), aspect, body.get("brief") or "", body.get("model") or "auto")
+                                     for s in scenes])
     jobs = []
-    for s in scenes:
-        prompt = str(s["prompt"]).strip()
+    for s, prompt in zip(scenes, prompts):
         result = await video_call("submit", prompt=prompt, aspect_ratio=aspect, seconds=5)
         if not result.get("ok"):
             if not jobs:

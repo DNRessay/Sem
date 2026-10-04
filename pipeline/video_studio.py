@@ -18,6 +18,29 @@ CLIP_MINUTES = 10
 CLIP_USD = round(CLIP_MINUTES / 60 * 0.80, 2)
 WORDS_PER_SECOND = 2.3  # a relaxed voiceover pace
 
+# How Wan 2.1 wants to be prompted: its demos all run through "prompt extension", which turns a short idea into one
+# dense English paragraph like this. Short prompts are the main reason our clips looked worse than the demos.
+WAN_GUIDE = """Write each scene prompt the way Wan 2.1 was trained: ONE paragraph of 80-120 English words, concrete and visual:
+1. Main subject with specific looks: age, build, skin, hair, clothing (colours, materials), or the product's shape,
+   texture and colour.
+2. One simple, continuous action with natural motion words (slowly pours, steam rises, turns to the camera, smiles).
+3. Setting and background details: place, props, time of day, weather.
+4. Lighting: source, direction and quality (soft morning window light, golden-hour backlight, warm tungsten).
+5. Camera: shot size, angle, lens and ONE movement (close-up, low angle, 35mm, shallow depth of field, slow dolly-in,
+   smooth tracking shot, static tripod).
+6. Look: photorealistic, cinematic, colour palette, film grain, high detail.
+Avoid: on-screen text, logos, brand names, crowds, more than two people, fast or complicated actions, cuts or several
+shots in one clip, and abstract words (amazing, quality, success) that show nothing."""
+
+_EXTEND = """Rewrite this idea as a prompt for a 5-second {aspect} clip.
+
+{guide}
+
+Business context (for setting and props only): {brief}
+Idea: {idea}
+
+Reply with the prompt paragraph only."""
+
 _PROMPT = """You are a video director making a {length}-second {kind} video for this business.
 
 Business brief:
@@ -30,8 +53,9 @@ It is made of exactly {n} scenes of {clip} seconds each, rendered one at a time 
 ONLY that scene's prompt. So:
 - Start with one "style" line (camera, lighting, colour grade, setting, the main subject's look) and repeat the
   important parts of it inside every scene prompt, so the clips look like one video.
-- Each scene prompt is one concrete shot: subject, action, camera move, framing ({aspect}). No on-screen text, logos
-  or brand names (the model can't draw them).
+- Each scene prompt is one concrete shot framed for {aspect}.
+
+{guide}
 - Tell a story across the scenes: hook in the first scene, payoff or call to action in the last.
 {voice}
 Reply with JSON only:
@@ -71,7 +95,7 @@ def parse_plan(text: str, n: int, voiceover: bool) -> dict | None:
     while len(scenes) < n:  # a model that wrote too few: hold the last shot rather than fail
         scenes.append(dict(scenes[-1]))
     return {"title": str(meta.get("title") or "").strip()[:80], "style": str(meta.get("style") or "").strip()[:400],
-            "scenes": [{"prompt": str(s["prompt"]).strip()[:1200],
+            "scenes": [{"prompt": str(s["prompt"]).strip()[:1500],
                         "narration": str(s.get("narration") or "").strip()[:300] if voiceover else ""} for s in scenes]}
 
 
@@ -81,22 +105,37 @@ async def plan_video(brief: str, idea: str, seconds: int, fmt: str, voiceover: b
     words = int(CLIP_SECONDS * WORDS_PER_SECOND)
     prompt = _PROMPT.format(
         length=n * CLIP_SECONDS, kind=FORMATS[fmt]["label"], brief=(brief or "(no brief: keep it general)").strip()[:2000],
-        idea=idea.strip()[:1500], n=n, clip=CLIP_SECONDS, aspect=FORMATS[fmt]["aspect_ratio"],
+        idea=idea.strip()[:1500], n=n, clip=CLIP_SECONDS, aspect=FORMATS[fmt]["aspect_ratio"], guide=WAN_GUIDE,
         voice=(f"- Write a voiceover line for every scene, at most {words} words, spoken while that scene plays; "
                "together they read as one script. South African English if the business is in South Africa.\n")
         if voiceover else "",
         narration=f'"voiceover line, max {words} words"' if voiceover else '""')
     messages = [{"role": "user", "content": prompt}]
-    result = await llm_providers.complete(model, messages, max_tokens=3000)
+    result = await llm_providers.complete(model, messages, max_tokens=6000)
     plan = None if "error" in result else parse_plan(result.get("content") or "", n, voiceover)
     if not plan and model == "auto":
         for pid in llm_providers.FREE_ORDER:
             if pid == result.get("_provider") or not llm_providers.PROVIDERS[pid].configured:
                 continue
-            retry = await llm_providers.complete(pid, messages, max_tokens=3000)
+            retry = await llm_providers.complete(pid, messages, max_tokens=6000)
             plan = None if "error" in retry else parse_plan(retry.get("content") or "", n, voiceover)
             if plan:
                 break
     if not plan:
         return {"ok": False, "error": result.get("error") or "The model didn't return a usable storyboard — try again or pick another model"}
     return {"ok": True, "format": fmt, "aspect_ratio": FORMATS[fmt]["aspect_ratio"], **plan, "estimate": estimate(n * CLIP_SECONDS)}
+
+
+def needs_extending(prompt: str) -> bool:
+    return len(prompt.split()) < 45
+
+
+async def extend_prompt(prompt: str, aspect: str, brief: str = "", model: str = "auto") -> str:
+    """A short idea → the dense paragraph Wan renders well. Falls back to the idea itself if no model answers."""
+    if not needs_extending(prompt):
+        return prompt
+    messages = [{"role": "user", "content": _EXTEND.format(aspect=aspect, guide=WAN_GUIDE, brief=(brief or "none")[:800],
+                                                          idea=prompt.strip()[:800])}]
+    result = await llm_providers.complete(model, messages, max_tokens=600)
+    text = re.sub(r"<think>.*?(</think>|$)", "", result.get("content") or "", flags=re.S).strip().strip('"')
+    return text[:1500] if "error" not in result and len(text.split()) >= 30 else prompt
