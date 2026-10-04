@@ -1,4 +1,5 @@
 import re
+from collections import deque
 from dataclasses import dataclass
 
 import httpx
@@ -57,7 +58,8 @@ class NatureSCIEngine:
     """
 
     def __init__(self):
-        self._history: list[EMU] = []
+        # Recent readings only (this object lives as long as a warm Lambda instance, so a plain list grew forever).
+        self._history: deque[EMU] = deque(maxlen=20)
 
     def analyse_text(self, text: str) -> EMU:
         emu = self._lexicon_classify(text.lower())
@@ -71,14 +73,15 @@ class NatureSCIEngine:
             try:
                 async with httpx.AsyncClient(timeout=3) as client:
                     r = await client.post(url, json={"text": text})
-                scores = r.json().get("scores") or {}
-                if r.status_code == 200 and scores:
+                body = r.json() if r.status_code == 200 else {}
+                scores = {k: float(v) for k, v in (body.get("scores") or {}).items()} if isinstance(body, dict) else {}
+                if scores:
                     label, confidence = max(scores.items(), key=lambda kv: kv[1])
                     valence, arousal = _AFFECT.get(label, (0.0, 0.0))
                     emu = EMU(label, float(confidence), valence, arousal)
                     self._history.append(emu)
                     return emu
-            except (httpx.HTTPError, ValueError):
+            except Exception:  # any bad answer from the model falls back to the word list, never fails the turn
                 pass
         return self.analyse_text(text)
 
@@ -106,7 +109,7 @@ class NatureSCIEngine:
     def get_emu_weights(self) -> dict:
         if not self._history:
             return {}
-        recent = self._history[-5:]
+        recent = list(self._history)[-5:]
         weights = {}
         for emu in recent:
             weights[emu.label] = weights.get(emu.label, 0) + emu.confidence

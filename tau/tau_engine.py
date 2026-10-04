@@ -1,7 +1,13 @@
+from cache.tau_cache import TAUCache
+from config import settings
 from storage.neon_store import get_store
 from tau.emotion_engine import NatureSCIEngine
 from tau.pacific import PACIFICEngine
-from tau.tau_cache import TAUCache
+
+
+def _joined(value) -> str:
+    """A list as "a, b, c"; a plain string as itself (", ".join on a string spelled it out letter by letter)."""
+    return ", ".join(map(str, value)) if isinstance(value, (list, tuple)) else str(value)
 
 
 class TAUEngine:
@@ -24,9 +30,8 @@ class TAUEngine:
         # (name, projects, preferences) is seeded once under the fixed key "owner" and
         # should be known in every session, not just the one it happened to be saved in.
         # A session can still override individual fields (none do today).
-        owner_profile = await db.get_user_model("owner") or {}
-        session_model = await db.get_user_model(session_id) or {}
-        user_model = {**owner_profile, **session_model}
+        owner_profile = await db.get_user_model(settings.OWNER_ACCOUNT_ID) or {}
+        user_model = owner_profile
         # The daily PACIFIC refresh (tau/pacific.py, run from the tick) saves an
         # LLM-read profile across all conversations; the keyword estimate from
         # this one conversation is only the fallback until that has run.
@@ -41,7 +46,7 @@ class TAUEngine:
         so they know who they're working for."""
         try:
             db = await get_store()
-            profile = await db.get_user_model("owner") or {}
+            profile = await db.get_user_model(settings.OWNER_ACCOUNT_ID) or {}
         except Exception:  # no profile is better than a failed agent run
             return ""
         return self._build_context(profile, profile.get("ocean") or {}) if profile else ""
@@ -60,21 +65,19 @@ class TAUEngine:
         if about := user_model.get("about"):
             parts.append(f"About them: {about}")
         if goals := user_model.get("goals"):
-            joined = ", ".join(goals) if isinstance(goals, list) else goals
-            parts.append(f"Goals: {joined}")
+            parts.append(f"Goals: {_joined(goals)}")
         if comm := user_model.get("communication_style"):
             parts.append(f"Communication style to match: {comm}")
         if coding := user_model.get("coding_preferences"):
             parts.append(f"Coding preferences: {coding}")
         if envs := user_model.get("environments"):
-            joined = ", ".join(envs) if isinstance(envs, list) else envs
-            parts.append(f"Dev environments: {joined}")
+            parts.append(f"Dev environments: {_joined(envs)}")
         if skills := user_model.get("skills"):
-            parts.append(f"Skills/stack: {', '.join(skills)}")
+            parts.append(f"Skills/stack: {_joined(skills)}")
         if projects := user_model.get("projects"):
-            parts.append(f"Active projects: {', '.join(projects)}")
+            parts.append(f"Active projects: {_joined(projects)}")
         if interests := user_model.get("interests"):
-            parts.append(f"Interests: {', '.join(interests)}")
+            parts.append(f"Interests: {_joined(interests)}")
         if ocean:
             o = ocean
             parts.append(

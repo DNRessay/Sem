@@ -34,9 +34,9 @@ def preview(result) -> str:
 
 
 HANDOFF_TABS = {
-    "chat": "general questions, memory, reminders, quick lookups",
+    "chat": "general questions, memory, quick lookups",
     "code": "changes to a code repo: build, fix, commit, open a PR",
-    "cowork": "multi-step office work: research, email, calendar, Drive notes, images",
+    "cowork": "multi-step office work: research, email, calendar, reminders, Drive notes, images",
     "design": "the user's business marketing: website brief, ad copy, ad images and videos",
     "finance": "money: personal (C-Lab: net worth, portfolio, spending, markets) and business (Colunimbus: the companies' books, P&L, VAT, debtors)",
 }

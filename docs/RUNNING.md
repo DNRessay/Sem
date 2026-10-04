@@ -1,81 +1,66 @@
-# SEMBLANCE — Running It
+# SEMBLANCE — Local development
 
-Production deployment is on AWS now — see **[AWS_DEPLOYMENT.md](./AWS_DEPLOYMENT.md)**
-for the full setup (Lambda, Neon, DynamoDB cache, Modal embeddings, CI/CD, cost
-breakdown). This page covers local development only.
+This page is for running the app on your own machine. Deployment (AWS, Cloudflare, Modal, GitHub secrets)
+is in [AWS_DEPLOYMENT.md](./AWS_DEPLOYMENT.md).
 
-## What you need
+## Backend
 
-Copy `.env.example` → `.env` and fill in:
-
-```env
-GROQ_API_KEY=
-GROQ_MODEL=qwen/qwen3.8-27b
-GROQ_PLANNING_MODEL=openai/gpt-oss-120b
-NEON_DATABASE_URL=postgresql://user:pass@host/semblance?sslmode=require
-MODAL_EMBEDDINGS_URL=
-MODAL_REPO_URL=
-MODAL_REPO_SECRET=
-SECRET_KEY=change-me
-TRUST_MODE=AUTO
-```
-
-`MODAL_EMBEDDINGS_URL` can be left blank for local dev — `storage/embeddings.py`
-falls back to a deterministic (non-semantic) vector so the pipeline still runs
-without deploying the Modal function first.
-
-`MODAL_REPO_URL`/`MODAL_REPO_SECRET` can also be left blank — "Add repo" still
-works as a one-shot text dump without them, it just won't keep a persistent
-clone around for follow-up questions like "what's in the readme."
-
-`NEON_DATABASE_URL` needs a real Postgres with the `vector` extension
-available — Neon's free tier has it preinstalled; a local Postgres works too
-(`CREATE EXTENSION vector;` once, if your local build has pgvector).
-
-## Local (dev)
+Python 3.13 (what CI and Lambda use).
 
 ```bash
 python -m venv venv && source venv/bin/activate
-pip install -r requirements.txt -r requirements-dev.txt
+pip install -r requirements.txt -r requirements-dev.txt   # requirements-dev.txt alone has only the test/lint tools
+cp .env.example .env
+```
+
+Minimum `.env` to get chat working:
+
+```env
+GROQ_API_KEY=<your Groq key>
+NEON_DATABASE_URL=postgresql://user:pass@host/semblance?sslmode=require
+SECRET_KEY=<any long random string>
+```
+
+- `NEON_DATABASE_URL` must be a Postgres where the `vector` extension can be created. Neon has it; a local
+  Postgres with pgvector installed also works. The app creates the extension and its tables on startup.
+- Login needs an `owner` account in that database. Create one with the seed script:
+
+  ```bash
+  NEON_DATABASE_URL=... OWNER_ACCOUNTS_JSON='[{"id":"owner","passphrase":"<pick one>","role":"owner"}]' \
+    python scripts/seed_accounts.py
+  ```
+
+- Everything else is optional. Blank `MODAL_EMBEDDINGS_URL` uses a deterministic, non-semantic fallback
+  vector. Blank `MODAL_REPO_URL` makes "Add repo" a one-shot text dump instead of a live clone. Without
+  AWS credentials the DynamoDB cache falls back to in-memory. Other keys (Gemini, Cohere, Modal video, etc.)
+  are listed in `config.py`; each feature is off until its key is set.
+
+Run it:
+
+```bash
 uvicorn main:app --reload --port 8000
 ```
 
-Frontend:
+Locally (not on Lambda) KAIROS runs as a background loop inside the server instead of the 15-minute tick.
+
+## Frontend
+
 ```bash
 cd frontend
 npm install
-cp .env.example .env   # VITE_API_URL=http://localhost:8000 by default
+cp .env.example .env    # contains VITE_API_URL=http://localhost:8000
 npm run dev
 ```
 
-Deploys to Cloudflare Pages via `.github/workflows/cloudflare-pages.yml` on
-push — see `docs/AWS_DEPLOYMENT.md` for the one-time Cloudflare setup.
+`VITE_API_URL` is read at build time; point it at `http://localhost:8000` for local work or at the Lambda
+Function URL (no trailing slash) to use the deployed backend.
 
-## Tests
+## Tests and lint
 
 ```bash
-pytest tests/ -v
+python -m pytest -q
 ruff check .
 ```
 
-Tests use `moto` to mock DynamoDB and `respx` to mock the Groq API — no real
-AWS credentials or network access needed to run the suite.
-
-## Deploying the embeddings function (Modal)
-
-```bash
-pip install modal
-modal setup
-modal deploy modal_app/embeddings.py
-```
-
-## AWS deploy
-
-```bash
-pip install aws-sam-cli
-sam build --use-container
-sam deploy --guided
-```
-
-Full details, IAM/OIDC setup for CI, and the cost breakdown:
-**[AWS_DEPLOYMENT.md](./AWS_DEPLOYMENT.md)**.
+The tests mock DynamoDB with `moto` and HTTP calls with `respx`, so they need no AWS credentials or network.
+CI runs the same two commands (`python -m pytest tests/ -v --tb=short`) before every deploy.

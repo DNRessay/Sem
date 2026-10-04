@@ -29,12 +29,15 @@ async def main():
                    created_at BIGINT NOT NULL
                )"""
         )
+        # Re-seeding rotates passphrases: bumping token_version signs out old logins and MCP keys (as a reset does).
+        await conn.execute("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0")
         for account in accounts:
             passphrase_hash = hash_passphrase(account["passphrase"])
             await conn.execute(
                 """INSERT INTO accounts (id, passphrase_hash, role, created_at)
                    VALUES ($1, $2, $3, $4)
-                   ON CONFLICT (id) DO UPDATE SET passphrase_hash=$2, role=$3""",
+                   ON CONFLICT (id) DO UPDATE SET passphrase_hash=$2, role=$3,
+                       token_version = COALESCE(accounts.token_version, 0) + 1""",
                 account["id"], passphrase_hash, account.get("role", "owner"), int(time.time()),
             )
     finally:

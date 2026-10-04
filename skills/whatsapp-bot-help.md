@@ -1,7 +1,7 @@
 ---
 name: WhatsApp Business Bot Help
 description: Guidance for building/debugging WhatsApp Cloud API bots — webhook shape, message types, rate limits.
-triggers: whatsapp, cloud api, webhook, business api, meta developer
+triggers: whatsapp bot, whatsapp cloud api, whatsapp webhook, whatsapp business api, meta developer
 ---
 
 When helping with a WhatsApp Business Cloud API bot (Python + Meta's

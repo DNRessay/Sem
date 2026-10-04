@@ -8,7 +8,6 @@ import httpx
 from cache.cache_ctrl import CacheController
 from cache.sys_cache import ConvCache, SysCache
 from config import settings
-from memory.working_mem import WorkingMem
 
 CACHE_BREAK_VECTORS = [
     "tool_change", "model_switch", "image_added", "system_prompt_edit",
@@ -195,7 +194,6 @@ class QueryEngine:
         self.sys_cache = SysCache()
         self.conv_cache = ConvCache()
         self.cache_ctrl = CacheController()
-        self.working_mem = WorkingMem()
 
     async def call_llm(
         self,
@@ -394,12 +392,6 @@ class QueryEngine:
         content = "".join(parts)
         self.cache_ctrl.write(prefix_hash, content)
         self.conv_cache.append(session_id, {"role": "assistant", "content": content})
-
-    def connector_text_buffer(self, reasoning: str, session_id: str) -> str:
-        import hashlib
-        self.working_mem.append(session_id, reasoning)
-        sig = hashlib.sha256(reasoning.encode()).hexdigest()[:8]
-        return f"[CONNECTOR:{sig}] {reasoning[:200]}"
 
     def fire_break(self, reason: str):
         if reason in CACHE_BREAK_VECTORS:

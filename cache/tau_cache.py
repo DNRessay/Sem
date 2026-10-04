@@ -8,7 +8,9 @@ class TAUCache:
     # Bumped when the owner edits their profile in Settings, so every session's
     # cached profile context goes stale at once (DynamoDB has no prefix delete).
     def _key(self, session_id: str) -> str:
-        return f"{session_id}:{ddb_backend.get(self.NAMESPACE, '_version') or '0'}"
+        # fresh: a bump on another Lambda instance must be seen on the next message, not after this copy's
+        # year-long TTL runs out.
+        return f"{session_id}:{ddb_backend.get(self.NAMESPACE, '_version', fresh=True) or '0'}"
 
     def bump_version(self) -> None:
         import time

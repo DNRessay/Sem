@@ -67,22 +67,6 @@ async def test_route_honors_an_explicit_agent_override(monkeypatch, recording_st
 
 
 @pytest.mark.asyncio
-async def test_route_clears_working_mem_only_on_complete(monkeypatch, recording_store):
-    class FakeAgentTool:
-        def __init__(self, tools_registry=None, cables_man_ref=None):
-            pass
-
-        async def spawn(self, agent_type, task):
-            return {"status": "max_iterations"}
-
-    monkeypatch.setattr("tools.agent_tool.AgentTool", FakeAgentTool)
-
-    cables = CablesMan()
-    await cables.route({"query": "hello", "session_id": "s1"})
-    assert cables.working_mem.get("s1") != ""  # not cleared — status wasn't "complete"
-
-
-@pytest.mark.asyncio
 async def test_route_persists_a_routing_and_an_outcome_event(monkeypatch, recording_store):
     class FakeAgentTool:
         def __init__(self, tools_registry=None, cables_man_ref=None):

@@ -11,24 +11,34 @@ deterministic hash vector so the rest of the pipeline still runs — it just
 won't be semantically meaningful.
 """
 import hashlib
+import logging
 
 import httpx
 
 from config import settings
 
 _EMBED_DIM = 384
+log = logging.getLogger("semblance.embeddings")
+
+
+async def embed_text_or_none(text: str) -> list[float] | None:
+    """The real embedding, or None when the service isn't set up or failed (logged)."""
+    if not settings.MODAL_EMBEDDINGS_URL:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(settings.MODAL_EMBEDDINGS_URL, json={"text": text})
+            r.raise_for_status()
+            return r.json()["embedding"]
+    except Exception as e:
+        log.warning("embedding failed (%s): memory search is skipped for this message", type(e).__name__)
+        return None
 
 
 async def embed_text(text: str) -> list[float]:
-    if settings.MODAL_EMBEDDINGS_URL:
-        try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                r = await client.post(settings.MODAL_EMBEDDINGS_URL, json={"text": text})
-                r.raise_for_status()
-                return r.json()["embedding"]
-        except Exception:
-            pass  # fall through to local fallback rather than break the request
-    return _fallback_vector(text)
+    """For storing: a real embedding when possible, else a deterministic placeholder so the row still saves
+    (it just won't be found by meaning). Searching should use embed_text_or_none instead."""
+    return await embed_text_or_none(text) or _fallback_vector(text)
 
 
 def _fallback_vector(text: str) -> list[float]:
