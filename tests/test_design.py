@@ -363,3 +363,26 @@ async def test_the_tick_moves_unfinished_videos_on(monkeypatch):
 
     monkeypatch.setattr(design_router, "_advance", advance)
     assert await design_router.advance_all() == {"abc": "done"} and seen == [("owner", "abc")]
+
+
+async def test_a_join_from_before_uploads_is_redone_with_a_direct_upload(monkeypatch, moto_cache_table):
+    from gateway import design_router
+
+    calls = []
+
+    async def fake_video(action, timeout=60, **kw):
+        calls.append((action, kw))
+        if action == "peek":
+            return {"ok": True, "status": "rendering"}  # the old join's huge result never comes back
+        if action == "stitch":
+            return {"ok": True, "job_id": "join-2"}
+
+    monkeypatch.setattr(design_router, "video_call", fake_video)
+    monkeypatch.setattr(design_router.media_store, "enabled", lambda: True)
+    monkeypatch.setattr(design_router.media_store, "presign_put", lambda key, mime: f"https://s3.example/{key}?put")
+    old = {"id": "p1", "status": "joining", "aspect_ratio": "9:16", "audio_url": "", "stitch_job": "join-1",
+           "scenes": [{"job_id": "s1", "status": "done", "prompt": "a"}], "created": 1}
+    out = await design_router._advance("owner", old)
+    stitch = next(kw for a, kw in calls if a == "stitch")
+    assert out["stitch_job"] == "join-2" and out["rejoins"] == 1 and out["final_key"].startswith("video/")
+    assert stitch["upload_url"].startswith("https://s3.example/video/")

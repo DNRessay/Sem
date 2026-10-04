@@ -321,6 +321,14 @@ async def _advance(account_id: str, project: dict) -> dict:
         latest = _project(account_id, project["id"]) or project
         if latest.get("stitch_job") and not project.get("stitch_job"):
             project = latest  # a callback or another poll already started the join
+        # A join normally takes a minute or two. One still "running" after 10 minutes, or started before uploads
+        # existed (its result is too big to fetch), is joined again with a direct upload: CPU only, a few cents.
+        stale = media_store.enabled() and project.get("stitch_job") and (
+            not project.get("final_key") or time.time() - project.get("stitch_started", 0) > 600)
+        if stale and project.get("rejoins", 0) < 2:
+            peek = await video_call("peek", job_id=project["stitch_job"])
+            if peek.get("status") != "done" or not project.get("final_key"):
+                project.update(stitch_job="", rejoins=project.get("rejoins", 0) + 1)
         if not project.get("stitch_job"):
             # Modal uploads the joined video straight to S3 (a presigned PUT): a long video sent back through the
             # API timed out, so finished videos never arrived.
@@ -332,7 +340,7 @@ async def _advance(account_id: str, project: dict) -> dict:
                                       audio_url=project.get("audio_url") or "", upload_url=upload_url,
                                       callback=_callback_url())
             if joined.get("ok"):
-                project.update(stitch_job=joined["job_id"], status="joining", final_key=key)
+                project.update(stitch_job=joined["job_id"], status="joining", final_key=key, stitch_started=time.time())
             else:
                 project["status"], project["error"] = "failed", joined.get("error") or "couldn't join the scenes"
             changed = True
