@@ -69,3 +69,12 @@ def test_cache_controller_ignores_unknown_break_vector(moto_cache_table):
     ctrl.invalidate("not_a_real_vector")
     assert ctrl.check_break() is False
     assert ctrl.read("prefixhash") == "cached-response"
+
+
+def test_another_lambda_instance_reads_what_this_one_wrote(moto_cache_table):
+    # A second instance has an empty L1: the value must come from DynamoDB (whose numbers are Decimals).
+    ddb_backend.set("ns", "shared", "from-instance-a", ttl=600)
+    ddb_backend._l1.clear()
+    assert ddb_backend.get("ns", "shared") == "from-instance-a"
+    ddb_backend._l1["ns#shared"] = ("stale", __import__("time").time(), 600)
+    assert ddb_backend.get("ns", "shared", fresh=True) == "from-instance-a"

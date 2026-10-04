@@ -56,7 +56,9 @@ def get(namespace: str, key: str, fresh: bool = False) -> str | None:
         if not item:
             return None
         value = item["value"]
-        remaining_ttl = max(1, int(item.get("ttl", 0) - time.time()))
+        # DynamoDB returns numbers as Decimal, and Decimal - float raises: that made every read from the table
+        # fail silently, so each Lambda instance only ever saw what it had written itself.
+        remaining_ttl = max(1, int(float(item.get("ttl", 0)) - time.time()))
         _l1[pk] = (value, time.time(), remaining_ttl)
         return value
     except Exception:
@@ -90,8 +92,15 @@ def delete(namespace: str, key: str) -> None:
 
 
 def clear_namespace(namespace: str) -> None:
-    """L1-only clear (used by CacheController.invalidate — a full table scan
-    per break-vector fire would be wasteful; expired DynamoDB items age out via TTL)."""
+    """Drops this process's entries for the namespace from L1 and from DynamoDB (now that reads from the table
+    work, an item left there would come straight back). Entries only other instances wrote age out via TTL."""
     prefix = f"{namespace}#"
-    for pk in [k for k in _l1 if k.startswith(prefix)]:
+    keys = [k for k in _l1 if k.startswith(prefix)]
+    table = _get_table()
+    for pk in keys:
         del _l1[pk]
+        if table:
+            try:
+                table.delete_item(Key={"pk": pk})
+            except Exception:
+                pass
