@@ -56,11 +56,11 @@ async def improve(kind: str, text: str, brief: str = "", extra: str = "", model:
         brief=(brief or "(none given)").strip()[:1500], extra=extra.strip()[:300], text=text.strip()[:1500],
         guide=_GUIDES[kind], lyrics=', "lyrics": lyrics or ""' if kind == "music" else "")}]
     tried, result = set(), {}
-    for choice in (model, *llm_providers.FREE_ORDER):
+    for choice in (model, "groq", "gemini", "bonsai"):
         if choice in tried or (choice in llm_providers.PROVIDERS and not llm_providers.PROVIDERS[choice].configured):
             continue
         tried.add(choice)
-        result = await llm_providers.complete(choice, messages, max_tokens=1200)
+        result = await llm_providers.complete_within(choice, messages, seconds=45, max_tokens=1200)
         tried.add(result.get("_provider"))
         data = {} if "error" in result else _parse(result.get("content") or "")
         if data:
