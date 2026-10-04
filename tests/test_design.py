@@ -167,3 +167,76 @@ def test_finished_video_is_saved_to_s3_and_listed_in_history(client, monkeypatch
     assert client.get("/design/video/fc-1").json() == done and calls.count("status") == 1  # remembered
     listed = client.get("/design/videos").json()["videos"]
     assert [(v["job_id"], v["prompt"], v["chat_id"], v["url"]) for v in listed] == [("fc-1", "bread rising", "c1", done["url"])]
+
+
+def test_storyboard_has_one_scene_per_five_seconds(client, monkeypatch):
+    from pipeline import video_studio
+
+    seen = {}
+
+    async def fake_complete(model, messages, **kw):
+        seen["prompt"] = messages[0]["content"]
+        return {"content": '```json\n{"title": "Bread", "style": "warm light", "scenes": [{"prompt": "dough", "narration": "Fresh"},'
+                           ' {"prompt": "oven", "narration": "Hot"},]}\n```'}
+
+    monkeypatch.setattr(video_studio.llm_providers, "complete", fake_complete)
+    plan = client.post("/design/video/plan", json={"idea": "bread reel", "seconds": 15, "format": "short",
+                                                   "voiceover": True, "brief": "Vicinic Bakes"}).json()
+    assert plan["aspect_ratio"] == "9:16" and plan["estimate"] == {"scenes": 3, "minutes": 30, "usd": 0.39}
+    assert [s["prompt"] for s in plan["scenes"]] == ["dough", "oven", "oven"]  # too few: the last shot is held
+    assert "exactly 3 scenes" in seen["prompt"] and "voiceover line" in seen["prompt"]
+    assert video_studio.estimate(60) == {"scenes": 12, "minutes": 120, "usd": 1.56}
+    assert client.post("/design/video/plan", json={"idea": ""}).status_code == 400
+
+
+def test_long_video_renders_every_scene_then_joins_them_with_the_voiceover(client, monkeypatch, moto_cache_table):
+    calls = []
+    peeks = {"n": 0}
+
+    async def fake_video(action, **kw):
+        calls.append((action, kw))
+        if action == "budget":
+            return {"ok": True, "used_usd": 1.0, "cap_usd": 10}
+        if action == "submit":
+            return {"ok": True, "job_id": f"scene-{sum(1 for a, _ in calls if a == 'submit')}"}
+        if action == "peek":
+            peeks["n"] += 1
+            return {"ok": True, "status": "done" if peeks["n"] > 2 else "rendering"}
+        if action == "stitch":
+            return {"ok": True, "job_id": "joined-1"}
+        if action == "status":
+            return {"ok": True, "status": "done", "mime": "video/mp4", "base64": "QUJD", "voice": True}
+
+    async def fake_speak(text, voice):
+        assert text == "Fresh bread. Every morning." and voice == "Puck"
+        return {"ok": True, "mime": "audio/wav", "base64": "UklG"}
+
+    async def fake_save(data, mime, kind):
+        return f"https://api/media/file/{kind}/x.{'wav' if kind == 'speech' else 'mp4'}"
+
+    monkeypatch.setattr("gateway.design_router.video_call", fake_video)
+    monkeypatch.setattr("gateway.design_router.gemini_media.speak", fake_speak)
+    monkeypatch.setattr("gateway.design_router.media_store.save", fake_save)
+    p = client.post("/design/video/project", json={"title": "Bakery", "aspect_ratio": "16:9", "voiceover": True, "voice": "Puck",
+                                                   "scenes": [{"prompt": "dough", "narration": "Fresh bread."},
+                                                              {"prompt": "oven", "narration": "Every morning."}]}).json()
+    assert p["status"] == "rendering" and [s["job_id"] for s in p["scenes"]] == ["scene-1", "scene-2"]
+    assert p["audio_url"].endswith("x.wav")
+    assert client.get(f"/design/video/project/{p['id']}").json()["status"] == "rendering"  # scene 1 not done yet
+    joining = client.get(f"/design/video/project/{p['id']}").json()
+    assert joining["status"] == "joining" and joining["stitch_job"] == "joined-1"
+    stitch = next(kw for a, kw in calls if a == "stitch")
+    assert stitch == {"job_ids": ["scene-1", "scene-2"], "audio_url": p["audio_url"]}
+    done = client.get(f"/design/video/project/{p['id']}").json()
+    assert done["status"] == "done" and done["url"].endswith("x.mp4") and done["voice"]
+    listed = client.get("/design/videos").json()["videos"]
+    assert listed[0]["job_id"] == p["id"] and listed[0]["url"] == done["url"]
+
+
+def test_long_video_is_refused_when_the_budget_cant_cover_it(client, monkeypatch, moto_cache_table):
+    async def fake_video(action, **kw):
+        return {"ok": True, "used_usd": 9.5, "cap_usd": 10}
+
+    monkeypatch.setattr("gateway.design_router.video_call", fake_video)
+    r = client.post("/design/video/project", json={"scenes": [{"prompt": f"shot {i}"} for i in range(12)]})
+    assert r.status_code == 400 and "$1.56" in r.json()["detail"]
