@@ -39,7 +39,16 @@ GPU = os.environ.get("SEMBLANCE_VIDEO_GPU", "L4")
 GPU_USD_PER_HOUR = float(os.environ.get("SEMBLANCE_VIDEO_GPU_RATE", "0.80"))
 SIZES = {"9:16": (480, 832), "16:9": (832, 480), "1:1": (624, 624)}
 FPS = 16
-_NEGATIVE = "blurry, low quality, distorted, deformed, watermark, text artifacts, static, worst quality"
+# Wan 2.1's own settings for the 1.3B model (its README: shift 8, guidance 6) and its official negative prompt, which
+# the demos use; our old one-line negative and the default shift were a big part of the gap.
+FLOW_SHIFT = float(os.environ.get("SEMBLANCE_VIDEO_SHIFT", "8.0"))
+GUIDANCE = float(os.environ.get("SEMBLANCE_VIDEO_GUIDANCE", "6.0"))
+STEPS = int(os.environ.get("SEMBLANCE_VIDEO_STEPS", "50"))
+ENHANCE = os.environ.get("SEMBLANCE_VIDEO_ENHANCE", "1") == "1"
+_NEGATIVE = ("色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，"
+             "残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，"
+             "三条腿，背景人很多，倒着走, text, subtitles, letters, words, watermark, logo, blurry, low quality, deformed, "
+             "overexposed, static frame, jpeg artifacts")
 
 
 IMAGE_MODEL_ID = os.environ.get("SEMBLANCE_IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell")
@@ -81,10 +90,11 @@ class Generator:
     @modal.enter()
     def load(self):
         import torch
-        from diffusers import AutoencoderKLWan, WanPipeline
+        from diffusers import AutoencoderKLWan, UniPCMultistepScheduler, WanPipeline
 
         vae = AutoencoderKLWan.from_pretrained(MODEL_ID, subfolder="vae", torch_dtype=torch.float32)
         self.pipe = WanPipeline.from_pretrained(MODEL_ID, vae=vae, torch_dtype=torch.bfloat16)
+        self.pipe.scheduler = UniPCMultistepScheduler.from_config(self.pipe.scheduler.config, flow_shift=FLOW_SHIFT)
         # The 11 GB umt5 text encoder, the transformer and the fp32 VAE together fill the L4's 22 GB, and the
         # VAE decode (the last step, after ~10 min of denoising) ran out of memory. Offloading keeps only the
         # part that is running on the GPU, and tiling decodes the video in pieces.
@@ -98,19 +108,35 @@ class Generator:
 
         started = time.monotonic()
         width, height = SIZES.get(aspect_ratio, SIZES["9:16"])
-        frames = max(1, min(int(seconds), 5)) * FPS
-        frames = frames - (frames - 1) % 4  # Wan wants 4k+1 frames
+        frames = max(1, min(int(seconds), 5)) * FPS + 1  # Wan wants 4k+1 frames: 81 is the full 5 seconds
         try:
-            video = self.pipe(prompt=prompt, negative_prompt=_NEGATIVE, height=height, width=width,
-                              num_frames=frames, guidance_scale=5.0).frames[0]
+            video = self.pipe(prompt=prompt, negative_prompt=_NEGATIVE, height=height, width=width, num_frames=frames,
+                              guidance_scale=GUIDANCE, num_inference_steps=STEPS).frames[0]
             path = f"/tmp/{int(time.time() * 1000)}.mp4"
             export_to_video(video, path, fps=FPS)
+            path = _enhance(path) if ENHANCE else path
             with open(path, "rb") as f:
                 data = base64.b64encode(f.read()).decode()
         finally:
             gpu_seconds = time.monotonic() - started
             _charge(gpu_seconds, GPU_USD_PER_HOUR)
         return {"mime": "video/mp4", "base64": data, "gpu_seconds": round(gpu_seconds)}
+
+
+def _enhance(path: str) -> str:
+    """Wan renders 480p at 16 fps. ffmpeg smooths it to 24 fps (motion-compensated in-between frames), scales it
+    1.5x to 720p with lanczos and sharpens a little: a few seconds of CPU, much less soft and choppy."""
+    import subprocess
+
+    out = path.replace(".mp4", "-hd.mp4")
+    try:
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", path, "-vf",
+                        "minterpolate=fps=24:mi_mode=mci:mc_mode=aobmc:vsbmc=1,scale=iw*1.5:ih*1.5:flags=lanczos,"
+                        "unsharp=5:5:0.5", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "medium", "-crf", "18",
+                        out], check=True, timeout=240)
+        return out
+    except Exception:
+        return path  # the raw render is still a video
 
 
 def _charge(seconds: float, rate: float):
