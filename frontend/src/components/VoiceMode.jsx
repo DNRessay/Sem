@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import AvatarStage from "./AvatarStage";
 import { GoldS } from "./Working";
+import { canRecord, recordUtterance, transcribe } from "../utils/recordWav";
 
 const API = import.meta.env.VITE_API_URL || "";
 const MAX_SPOKEN = 1200;
 const LOOK_KEY = "semblance_voice_look"; // "avatar" | "orb"
-const VOICE_KEY = "semblance_voice_engine"; // "natural" (Gemini) | "fast" (the phone's own voice)
+const VOICE_KEY = "semblance_voice_engine"; // "natural" (Kokoro on the server, Gemini fallback) | "fast" (the phone's own voice)
 const SILENCE_MS = 700; // end your turn after this much quiet, instead of the browser's slower default
 const FIRST_MIN = 20;   // start talking at the first sentence this long…
 const NEXT_MIN = 220;   // …then speak in bigger pieces (fewer TTS calls, fewer seams)
@@ -71,9 +72,39 @@ export default function VoiceMode({ token, send, busy, lastReply, liveReply = ""
         avatar.current?.stop();
     };
 
+    // What you said goes to Sem; nothing heard means listen again.
+    const handleHeard = (text) => {
+        if (!open.current) return;
+        if (text) {
+            setPhase("thinking"); setSaid("");
+            const t = { before: lastReplyRef.current, sawBusy: false, consumed: 0, spoken: 0, final: false,
+                        queue: [], playing: false, gen: gen.current,
+                        server: engineRef.current === "natural", heard: 0 };
+            turn.current = t;
+            send(text, t.server ? { voice: true, onSpeech: ev => onSpeech(t, ev) } : {});
+        } else setTimeout(() => open.current && phaseRef.current === "listening" && listen(), 250);
+    };
+
+    // No speech recognition in this browser: record what you say and Whistle (on the server) writes it down.
+    const listenWithWhistle = () => {
+        setPhase("listening"); setHeard(""); setNote("");
+        const rec = recordUtterance({ silenceMs: SILENCE_MS });
+        recog.current = rec;
+        rec.done.then(async (wav) => {
+            if (recog.current !== rec) return;
+            recog.current = null;
+            if (!open.current) return;
+            if (!wav) { handleHeard(""); return; }
+            setHeard("…");
+            try { const text = await transcribe(token, wav); setHeard(text); handleHeard(text); }
+            catch (e) { setNote(e.message); setPhase("paused"); }
+        });
+    };
+
     const listen = () => {
         if (!open.current) return;
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SR && canRecord()) { listenWithWhistle(); return; }
         if (!SR) { setNote("Voice isn't supported in this browser — try Chrome."); setPhase("paused"); return; }
         setPhase("listening"); setHeard(""); setNote("");
         const r = new SR();
@@ -94,16 +125,7 @@ export default function VoiceMode({ token, send, busy, lastReply, liveReply = ""
         r.onend = () => {
             clearTimeout(quiet);
             recog.current = null;
-            if (!open.current) return;
-            const text = (finalText || latest).trim();
-            if (text) {
-                setPhase("thinking"); setSaid("");
-                const t = { before: lastReplyRef.current, sawBusy: false, consumed: 0, spoken: 0, final: false,
-                            queue: [], playing: false, gen: gen.current,
-                            server: engineRef.current === "natural", heard: 0 };
-                turn.current = t;
-                send(text, t.server ? { voice: true, onSpeech: ev => onSpeech(t, ev) } : {});
-            } else setTimeout(() => open.current && phaseRef.current === "listening" && listen(), 250);
+            handleHeard((finalText || latest).trim());
         };
         recog.current = r;
         try { r.start(); } catch { /* already started */ }
@@ -218,6 +240,8 @@ export default function VoiceMode({ token, send, busy, lastReply, liveReply = ""
 
     useEffect(() => {
         audioCtx();
+        // Start Sem's voice server now (Kokoro takes a few seconds to load) so the first reply isn't slow.
+        fetch(`${API}/media/voice/warm`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
         listen();
         return () => { open.current = false; recog.current?.abort(); stopSpeaking(); ctx.current?.close(); };
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -245,7 +269,7 @@ export default function VoiceMode({ token, send, busy, lastReply, liveReply = ""
                 <span style={{ flex: 1 }} />
                 {["natural", "fast"].map(v => (
                     <button key={v} onClick={() => choose(VOICE_KEY, setEngine)(v)} className={engine === v ? "is-selected" : ""} style={pill(engine === v)}
-                        title={v === "fast" ? "The phone's own voice: starts instantly" : "Gemini voice: sounds better, a moment slower"}>
+                        title={v === "fast" ? "The phone's own voice: starts instantly" : "Sem's voice (Kokoro): natural and quick; Gemini if it's down"}>
                         {v === "natural" ? "Natural" : "Fast"}
                     </button>
                 ))}

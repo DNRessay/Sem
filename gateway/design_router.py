@@ -14,7 +14,7 @@ from pipeline.site_brief import learn_site
 from pipeline.video_studio import CLIP_USD, FAST_CLIP_USD, FORMATS, estimate, extend_prompt, needs_extending, plan_video
 from pipeline.web_studio import LOGO_STYLES, figma_frames, figma_me, logo_prompt, make_page
 from storage.neon_store import get_store
-from tools import gemini_media, image_gen, media_store
+from tools import gemini_media, image_gen, media_store, tts
 from tools.mcp_client import MCPClient
 from tools.video_tool import video_call
 
@@ -227,7 +227,7 @@ async def _voiceover(lines: list[str], voice: str) -> tuple[str, str]:
     if not script:
         return "", ""
     try:
-        spoken = await asyncio.wait_for(gemini_media.speak(script, voice), timeout=22)
+        spoken = await asyncio.wait_for(tts.speak(script, voice), timeout=25)
     except asyncio.TimeoutError:
         return "", "The voiceover took too long, so the video will be silent"
     if not spoken["ok"]:
