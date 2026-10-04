@@ -293,7 +293,7 @@ export default function VideoStudio({ headers, chat, updateChat, brief, model, o
                         <button onClick={() => setFast(!fast)} aria-pressed={fast} className={`ds-chip${fast ? " is-selected" : ""}`}
                             title="Fast: ~2 min a scene instead of ~10. Turn off if the motion looks worse.">⚡ Fast</button>
                         <button onClick={() => setMusic(!music)} aria-pressed={music} className={`ds-chip${music ? " is-selected" : ""}`}
-                            title="Background music made for this video (Stable Audio Open), mixed under the voice.">🎵 Music</button>
+                            title="Background music made for this video (ACE-Step), mixed under the voice.">🎵 Music</button>
                         <button onClick={() => setVoiceover(v => !v)} aria-pressed={voiceover} className={`ds-chip${voiceover ? " is-selected" : ""}`}>🎙 Voiceover</button>
                         {voiceover && (
                             <select className="ds-chip" value={voice} onChange={e => setVoice(e.target.value)} aria-label="Voice">

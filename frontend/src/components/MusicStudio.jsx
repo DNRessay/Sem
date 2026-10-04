@@ -3,7 +3,7 @@ import { SendIcon } from "./Icons";
 
 const API = import.meta.env.VITE_API_URL || "";
 const MAX_TRACKS = 20;
-const LENGTHS = [10, 20, 30, 47];
+const LENGTHS = [15, 30, 60, 120];
 const IDEAS = ["Upbeat Amapiano instrumental, 112 BPM, log drums, shakers, warm piano chords",
     "Dark cinematic ambient for a premium teaser, 70 BPM, deep synth pads, soft piano, rising shimmer",
     "Bright acoustic background for a bakery ad, 100 BPM, ukulele, claps, light percussion"];
@@ -23,12 +23,12 @@ function Track({ track }) {
         <>
             <div className="ds-user">
                 {track.prompt}
-                <div className="ds-tags"><span className="ds-tag">🎵 {track.seconds}s</span></div>
+                <div className="ds-tags"><span className="ds-tag">🎵 {track.seconds}s</span>{track.lyrics && <span className="ds-tag">🎤 Vocals</span>}</div>
             </div>
             <div className="ds-sem">
                 <div className="ds-avatar">S</div>
                 <div className="ds-sem-body">
-                    {track.status === "rendering" && <div className="ds-status"><span className="ds-spin" />Composing… usually under a minute (longer if the GPU is waking up)</div>}
+                    {track.status === "rendering" && <div className="ds-status"><span className="ds-spin" />Composing… usually a minute or two (longer the first time while the GPU wakes up)</div>}
                     {track.status === "failed" && <div className="msg-error" style={{ margin: 0 }}>{track.error || "The track failed"}</div>}
                     {track.status === "done" && track.url && (gone ? <div className="ds-muted">This track expired (kept 7 days).</div> : (
                         <div style={{ maxWidth: "460px" }}>
@@ -45,10 +45,12 @@ function Track({ track }) {
     );
 }
 
-// Music tab: instrumental tracks for videos, reels and ads (Stable Audio Open on Modal, a few cents each).
+// Music tab: instrumentals or songs with lyrics for videos, reels and ads (ACE-Step on Modal, a few cents each).
 export default function MusicStudio({ headers, chat, updateChat, onUnauthorized, top }) {
     const [prompt, setPrompt] = useState("");
     const [seconds, setSeconds] = useState(30);
+    const [lyrics, setLyrics] = useState("");
+    const [sing, setSing] = useState(false);
     const [error, setError] = useState("");
     const tracks = chat.music || [];
     const chatsRef = useRef(chat);
@@ -81,9 +83,9 @@ export default function MusicStudio({ headers, chat, updateChat, onUnauthorized,
         setPrompt(""); setError("");
         const id = Math.random().toString(36).slice(2, 10);
         updateChat(chat.id, c => ({ title: c.title || text.slice(0, 60),
-            music: [...(c.music || []), { id, prompt: text, seconds, status: "rendering", created: Date.now() }].slice(-MAX_TRACKS) }));
+            music: [...(c.music || []), { id, prompt: text, seconds, lyrics: sing ? lyrics.trim() : "", status: "rendering", created: Date.now() }].slice(-MAX_TRACKS) }));
         try {
-            const d = await call("/design/music", headers, { prompt: text, seconds });
+            const d = await call("/design/music", headers, { prompt: text, seconds, lyrics: sing ? lyrics.trim() : "" });
             setTrack(chat.id, id, { job_id: d.job_id, seconds: d.seconds });
         } catch (e) {
             if (e.unauthorized) { onUnauthorized(); return; }
@@ -99,7 +101,7 @@ export default function MusicStudio({ headers, chat, updateChat, onUnauthorized,
                     <div className="ds-empty">
                         <h2>What should it sound like?</h2>
                         <div className="ds-muted" style={{ marginBottom: "14px" }}>
-                            Describe the genre, mood, tempo and instruments. Instrumental only (no singing) — for videos, reels and ads.
+                            Describe the genre, mood, tempo and instruments. Instrumental by default; tap 🎤 Vocals and write lyrics for a song.
                         </div>
                         <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", justifyContent: "center" }}>
                             {IDEAS.map(s => <button key={s} className="ds-chip" style={{ whiteSpace: "normal", textAlign: "left" }} onClick={() => setPrompt(s)}>{s}</button>)}
@@ -112,17 +114,23 @@ export default function MusicStudio({ headers, chat, updateChat, onUnauthorized,
         </div>
         <div className="ds-composer">
             <div className="ds-composer-box">
+                {sing && (
+                    <textarea rows={4} value={lyrics} onChange={e => setLyrics(e.target.value)} aria-label="Lyrics"
+                        placeholder={"[verse]\nYour business deserves to shine\n[chorus]\nVicinic, coming soon"} />
+                )}
                 <textarea rows={1} value={prompt} onChange={e => setPrompt(e.target.value)}
                     onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && window.matchMedia("(pointer: fine)").matches) { e.preventDefault(); send(); } }}
                     placeholder="e.g. Chill lo-fi hip hop, 85 BPM, soft piano, vinyl crackle, mellow drums" />
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                     <div className="ds-chips" style={{ flex: 1, minWidth: 0 }}>
+                        <button onClick={() => setSing(v => !v)} aria-pressed={sing} className={`ds-chip${sing ? " is-selected" : ""}`}
+                            title="Write lyrics and it sings them">🎤 Vocals</button>
                         {LENGTHS.map(s => (
                             <button key={s} onClick={() => setSeconds(s)} aria-pressed={seconds === s}
-                                className={`ds-chip${seconds === s ? " is-selected" : ""}`}>{s}s</button>
+                                className={`ds-chip${seconds === s ? " is-selected" : ""}`}>{s < 60 ? `${s}s` : `${s / 60} min`}</button>
                         ))}
                     </div>
-                    <button className="ds-send btn-primary" onClick={send} disabled={!prompt.trim()} aria-label="Make the track" style={{ border: "none" }}><SendIcon size={18} /></button>
+                    <button className="ds-send btn-primary" onClick={send} disabled={!prompt.trim() || (sing && !lyrics.trim())} aria-label="Make the track" style={{ border: "none" }}><SendIcon size={18} /></button>
                 </div>
             </div>
         </div>
