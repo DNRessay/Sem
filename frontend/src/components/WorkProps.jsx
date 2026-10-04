@@ -1,4 +1,4 @@
-// What Sem is doing, acted out while it works: a laptop when it searches the web, a newspaper for the news, a book
+// What Sem is doing, acted out while it works: a laptop (and a head-scratching 🤔) when it searches the web, a newspaper for the news, a book
 // when it reads files, email, notes or its memory, a palette when it draws, and a thought bubble (hand to head)
 // while it's just thinking. Driven by the chat's live status line ("Searching the web…").
 
@@ -44,6 +44,7 @@ function Laptop() {
                 <rect key={i} x={36 + i * 15} y="88" width="11" height="4" rx="1" fill="#9aa3b5"
                     style={{ animation: `wp-type ${0.5 + (i % 3) * 0.2}s ${i * 0.11}s infinite` }} />
             ))}
+            <text x="128" y="20" fontSize="24" style={{ transformOrigin: "140px 12px", animation: "wp-scratch .9s ease-in-out infinite" }}>🤔</text>
         </svg>
     );
 }

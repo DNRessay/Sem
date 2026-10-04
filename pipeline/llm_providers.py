@@ -6,6 +6,7 @@ Paid options (Claude, GPT, Qwen, DeepSeek, Kimi, and any Hugging Face model
 via "hf:owner/model") are only used when picked explicitly. A provider appears in the picker once its key/URL is set.
 """
 import asyncio
+import logging
 import time
 from dataclasses import dataclass
 
@@ -60,6 +61,7 @@ PROVIDERS = {p.id: p for p in [
     Provider("huggingface", "Hugging Face", False, "https://router.huggingface.co/v1", "HF_TOKEN", "HF_MODEL", 8192),
 ]}
 HF_PREFIX = "hf:"
+_log = logging.getLogger("semblance.llm")
 FREE_ORDER = ("bonsai", "gemini", "groq")
 # Voice mode ("fast"): the quickest to start answering first. Groq streams its first words in well under a second;
 # the self-hosted Bonsai can take many seconds (more from cold), which the user hears as silence.
@@ -189,8 +191,10 @@ async def complete(choice: str, messages: list[dict], tools: list[dict] | None =
     owns_client = client is None
     client = client or httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=180.0), follow_redirects=True)
     last, errors = {"error": "no provider answered"}, []
+    started = time.monotonic()
     try:
         for p in chain:
+            tried = time.monotonic()
             for attempt in range(2):
                 try:
                     if p.id == "anthropic":
@@ -200,6 +204,8 @@ async def complete(choice: str, messages: list[dict], tools: list[dict] | None =
                 except httpx.HTTPError as e:
                     result = {"error": f"{p.label} unreachable: {e}", "unavailable": True}
                 if "error" not in result:
+                    _log.warning("llm %s answered in %.1fs (%s total, chain %s)", p.id, time.monotonic() - tried,
+                                 f"{time.monotonic() - started:.1f}s", choice)
                     result["_provider"] = p.id
                     if not result.get("_tokens"):  # provider didn't report usage: ~4 characters a token
                         result["_tokens"] = estimate_tokens(messages, result)
@@ -211,6 +217,7 @@ async def complete(choice: str, messages: list[dict], tools: list[dict] | None =
                 await asyncio.sleep(4)
             last = result
             errors.append(result["error"][:200])
+            _log.warning("llm %s failed after %.1fs: %s", p.id, time.monotonic() - tried, result["error"][:160])
             if not (result.get("rate_limited") or result.get("unavailable")):
                 break  # the request itself is bad; another model would reject it too
     finally:

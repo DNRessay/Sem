@@ -1,4 +1,5 @@
 import json
+import logging
 import time
 from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator
@@ -77,6 +78,7 @@ class Bootstrap:
         call chat_tools itself; each call is yielded as a {"tool": ...} dict
         between the text chunks."""
         save_query = display_query if display_query is not None else query
+        began = time.monotonic()
         # Step 2 - CTX assembly
         ctx = self.sys_cache.read("system_prompt") or self.ctx_assembly.load_hierarchy()
         ctx = self.ctx_assembly.inject_tau_context(ctx, self.tau_context)
@@ -125,6 +127,8 @@ class Bootstrap:
             messages.append({"role": "user", "content": query})
             model = settings.GROQ_MODEL
 
+        logging.getLogger("semblance.chat").warning(
+            "chat context ready in %.1fs (routing, memory, skills)%s", time.monotonic() - began, " · voice" if spoken else "")
         reply_parts, tool_marker = [], None
         try:
             if use_tools and not images:

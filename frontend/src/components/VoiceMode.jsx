@@ -259,8 +259,15 @@ export default function VoiceMode({ token, send, busy, lastReply, liveReply = ""
 
     // While Sem works (before it speaks), act out what it's doing: laptop, book, newspaper, palette or thinking.
     const activity = phase === "thinking" ? activityFrom(status, true) : null;
+    const [waited, setWaited] = useState(0); // seconds Sem has been working on this turn
+    useEffect(() => {
+        if (phase !== "thinking") { setWaited(0); return; }
+        const started = Date.now();
+        const t = setInterval(() => setWaited(Math.round((Date.now() - started) / 1000)), 1000);
+        return () => clearInterval(t);
+    }, [phase]);
     useEffect(() => { avatar.current?.ready() && avatar.current.act(activity); }, [activity]); // eslint-disable-line react-hooks/exhaustive-deps
-    const label = { listening: heard ? "" : "Listening…", thinking: status || ACTIVITY_LABEL[activity] || "Sem is working…", speaking: "Tap to interrupt", paused: "Paused — tap to talk" }[phase];
+    const label = { listening: heard ? "" : "Listening…", thinking: `${status || ACTIVITY_LABEL[activity] || "Sem is working…"}${waited >= 8 ? ` · ${waited}s` : ""}`, speaking: "Tap to interrupt", paused: "Paused — tap to talk" }[phase];
     const pill = (active) => ({ border: "1px solid var(--border)", borderRadius: "999px", padding: "4px 12px", cursor: "pointer", fontSize: "12px",
                                 background: "transparent", color: active ? "var(--text)" : "var(--text-muted)" });
     return (
