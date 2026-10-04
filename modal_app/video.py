@@ -256,13 +256,27 @@ class Music:
         import torch
         from diffusers import StableAudioPipeline
 
-        self.pipe = StableAudioPipeline.from_pretrained(MUSIC_MODEL_ID, torch_dtype=torch.float16).to("cuda")
+        # Only from the copy baked into the image at deploy: if Hugging Face refused that download (the model is
+        # gated), fetching it here fails the same way, and a crash in load() makes Modal restart the GPU container
+        # over and over. So the music fails fast with a clear reason instead.
+        self.pipe, self.error = None, ""
+        try:
+            self.pipe = StableAudioPipeline.from_pretrained(MUSIC_MODEL_ID, torch_dtype=torch.float16,
+                                                            local_files_only=True).to("cuda")
+        except Exception as e:
+            self.error = (f"The music model isn't installed: Hugging Face hasn't given your HF_TOKEN access to "
+                          f"{MUSIC_MODEL_ID}. Accept its licence there, then redeploy Modal. ({type(e).__name__})")
+            print(self.error)
 
     @modal.method()
     def generate(self, prompt: str, seconds: int = 15, callback: str = "", upload_url: str = "") -> dict:
         import soundfile as sf
         import torch
 
+        if self.pipe is None:
+            _stage("failed", self.error)
+            _finished(False, callback)
+            raise RuntimeError(self.error)
         started = time.monotonic()
         ok = False
         try:

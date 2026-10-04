@@ -263,8 +263,10 @@ async def music_status(job_id: str, account: dict = Depends(require_account)):
         return {"status": "done", "url": media_store.link(job["key"]), "mime": "audio/wav"}
     peek = await video_call("peek", job_id=job_id)
     if peek.get("status") == "failed":
-        return {"status": "failed", "error": "The music model failed. If it never worked, accept its licence on Hugging Face "
-                                             "(stabilityai/stable-audio-open-1.0) and redeploy Modal."}
+        error = peek.get("error") or ""
+        return {"status": "failed", "error": error if error and "render failed" not in error else
+                "The music model failed. If it never worked, accept its licence on Hugging Face "
+                "(stabilityai/stable-audio-open-1.0) and redeploy Modal."}
     return {"status": "rendering"}
 
 
