@@ -31,7 +31,10 @@ WAN_GUIDE = """Write each scene prompt the way Wan 2.1 was trained: ONE paragrap
 5. Camera: shot size, angle, lens and ONE movement (close-up, low angle, 35mm, shallow depth of field, slow dolly-in,
    smooth tracking shot, static tripod).
 6. Look: photorealistic, cinematic, colour palette, film grain, high detail.
-Avoid: on-screen text, logos, brand names, crowds, more than two people, fast or complicated actions, cuts or several
+Words on screen only when the user asks for them (a business name on a sign or a screen): then write the exact word
+in double quotes with its look, e.g. the screen shows the word "VICINIC" in large glowing gold letters, keep it short,
+and repeat it in every scene it should appear in.
+Avoid: other on-screen text, logos, brand names, crowds, more than two people, fast or complicated actions, cuts or several
 shots in one clip, and abstract words (amazing, quality, success) that show nothing."""
 
 _EXTEND = """Rewrite this idea as a prompt for a 5-second {aspect} clip.
