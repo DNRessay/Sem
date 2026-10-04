@@ -11,6 +11,10 @@ const FORMATS = [
 const ASPECT = { short: "9:16", long: "16:9", square: "1:1" };
 const CLIP_MINUTES = 10; // one 5-second Wan clip on the L4
 const CLIP_USD = 0.13;
+const FAST_MINUTES = 2; // fast mode (CausVid LoRA): ~6 steps instead of 50
+const FAST_USD = 0.03;
+const FAST_KEY = "semblance_video_fast";
+const cost = (n, fast) => ({ minutes: n * (fast ? FAST_MINUTES : CLIP_MINUTES), usd: n * (fast ? FAST_USD : CLIP_USD) });
 const VOICES = ["Kore", "Puck", "Charon", "Aoede", "Fenrir", "Leda"];
 const IDEAS = ["A 15-second Reel for our weekend bread special", "A 60-second YouTube intro to what we do and why",
     "Behind the scenes: a day at the shop"];
@@ -64,6 +68,7 @@ function VideoTurn({ turn, update, onRender, onReplan, onRetryScene, busy }) {
                 <div className="ds-tags">
                     <span className="ds-tag">{label} · {turn.seconds}s · {sub.split(" · ")[0]}</span>
                     {turn.voiceover && <span className="ds-tag">Voiceover · {turn.voice}</span>}
+                    <span className="ds-tag">{turn.fast ? "⚡ Fast" : "Full quality"}</span>
                 </div>
             </div>
             <div className="ds-sem">
@@ -89,7 +94,7 @@ function VideoTurn({ turn, update, onRender, onReplan, onRetryScene, busy }) {
                             ))}
                             <div className="ds-actions">
                                 <button className="ds-btn btn-primary" onClick={onRender} disabled={busy}>
-                                    ▶ Render · ~{plan.scenes.length * CLIP_MINUTES} min · ~${(plan.scenes.length * CLIP_USD).toFixed(2)}
+                                    ▶ Render{turn.fast ? " ⚡" : ""} · ~{cost(plan.scenes.length, turn.fast).minutes} min · ~${cost(plan.scenes.length, turn.fast).usd.toFixed(2)}
                                 </button>
                                 <button className="ds-btn sm" onClick={onReplan} disabled={busy}>↻ New storyboard</button>
                             </div>
@@ -104,7 +109,7 @@ function VideoTurn({ turn, update, onRender, onReplan, onRetryScene, busy }) {
                                     : `Rendering scene ${Math.min(done + 1, total)} of ${total} · ${minutes} min`}
                             </div>
                             <div className="ds-progress"><div style={{ width: `${Math.max(3, ((done + (project.status === "joining" ? 0.5 : 0)) / total) * 100)}%` }} /></div>
-                            <div className="ds-muted">About {Math.max(1, (total - done) * CLIP_MINUTES)} min left. You can leave — it finishes and saves here.</div>
+                            <div className="ds-muted">About {Math.max(1, (total - done) * (project.fast ? FAST_MINUTES : CLIP_MINUTES))} min left. You can leave — it finishes and saves here.</div>
                             {project.note && <div className="ds-muted">{project.note}</div>}
                         </div>
                     )}
@@ -141,6 +146,8 @@ export default function VideoStudio({ headers, chat, updateChat, brief, model, o
     const [seconds, setSeconds] = useState(15);
     const [voiceover, setVoiceover] = useState(true);
     const [voice, setVoice] = useState("Kore");
+    const [fast, setFastState] = useState(() => { try { return localStorage.getItem(FAST_KEY) !== "0"; } catch { return true; } });
+    const setFast = v => { setFastState(v); try { localStorage.setItem(FAST_KEY, v ? "1" : "0"); } catch { /* private mode */ } };
     const [budget, setBudget] = useState(null);
     const [busy, setBusy] = useState(false);
     const scroller = useRef(null);
@@ -195,7 +202,7 @@ export default function VideoStudio({ headers, chat, updateChat, brief, model, o
         const text = idea.trim();
         if (!text || busy) return;
         setIdea("");
-        const turn = { id: Math.random().toString(36).slice(2, 10), idea: text, format, seconds, voiceover, voice, created: Date.now() };
+        const turn = { id: Math.random().toString(36).slice(2, 10), idea: text, format, seconds, voiceover, voice, fast, created: Date.now() };
         updateChat(chat.id, c => ({ title: c.title || text.slice(0, 60), videoFormat: format, videos: [...(c.videos || []), turn].slice(-MAX_VIDEOS) }));
         planFor(chat.id, turn);
     };
@@ -206,7 +213,7 @@ export default function VideoStudio({ headers, chat, updateChat, brief, model, o
         try {
             const project = await call("/design/video/project", headers, {
                 title: turn.plan.title, style: turn.plan.style, scenes: turn.plan.scenes, aspect_ratio: turn.plan.aspect_ratio || ASPECT[turn.format],
-                format: turn.format, voiceover: turn.voiceover, voice: turn.voice, chat_id: chat.id,
+                format: turn.format, voiceover: turn.voiceover, voice: turn.voice, fast: !!turn.fast, chat_id: chat.id,
             });
             setTurn(chat.id, turn.id, { status: "rendering", project });
             loadBudget();
@@ -260,6 +267,8 @@ export default function VideoStudio({ headers, chat, updateChat, brief, model, o
                             <button key={s} onClick={() => setSeconds(s)} aria-pressed={seconds === s}
                                 className={`ds-chip${seconds === s ? " is-selected" : ""}`}>{s}s</button>
                         ))}
+                        <button onClick={() => setFast(!fast)} aria-pressed={fast} className={`ds-chip${fast ? " is-selected" : ""}`}
+                            title="Fast: ~2 min a scene instead of ~10. Turn off if the motion looks worse.">⚡ Fast</button>
                         <button onClick={() => setVoiceover(v => !v)} aria-pressed={voiceover} className={`ds-chip${voiceover ? " is-selected" : ""}`}>🎙 Voiceover</button>
                         {voiceover && (
                             <select className="ds-chip" value={voice} onChange={e => setVoice(e.target.value)} aria-label="Voice">
@@ -270,7 +279,7 @@ export default function VideoStudio({ headers, chat, updateChat, brief, model, o
                     <button className="ds-send btn-primary" onClick={send} disabled={!idea.trim() || busy} aria-label="Write the storyboard" style={{ border: "none" }}><SendIcon size={18} /></button>
                 </div>
                 <div className="ds-muted" style={{ padding: "0 4px 4px" }}>
-                    {fmt(format)[2]} · {n} scene{n > 1 ? "s" : ""} · ~{n * CLIP_MINUTES} min to render · ~${(n * CLIP_USD).toFixed(2)}
+                    {fmt(format)[2]} · {n} scene{n > 1 ? "s" : ""} · ~{cost(n, fast).minutes} min to render · ~${cost(n, fast).usd.toFixed(2)}{fast ? " (fast)" : ""}
                     {budget && ` · $${Number(budget.used_usd).toFixed(2)} of $${Number(budget.cap_usd).toFixed(2)} used this month`}
                 </div>
             </div>

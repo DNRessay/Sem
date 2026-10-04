@@ -45,6 +45,12 @@ FLOW_SHIFT = float(os.environ.get("SEMBLANCE_VIDEO_SHIFT", "8.0"))
 GUIDANCE = float(os.environ.get("SEMBLANCE_VIDEO_GUIDANCE", "6.0"))
 STEPS = int(os.environ.get("SEMBLANCE_VIDEO_STEPS", "50"))
 ENHANCE = os.environ.get("SEMBLANCE_VIDEO_ENHANCE", "1") == "1"
+# Fast mode: CausVid, a step-distillation LoRA for Wan 2.1 1.3B (the same idea as PDMD/DMAD: a few denoising steps
+# instead of 50, no classifier-free guidance). ~6 steps ≈ 1-2 min instead of ~10 per clip; motion can be a little
+# weaker, so the app lets you switch it off per video. If the LoRA can't load, renders fall back to normal mode.
+FAST_LORA_REPO = os.environ.get("SEMBLANCE_VIDEO_FAST_REPO", "Kijai/WanVideo_comfy")
+FAST_LORA_FILE = os.environ.get("SEMBLANCE_VIDEO_FAST_FILE", "Wan21_CausVid_bidirect2_T2V_1_3B_lora_rank32.safetensors")
+FAST_STEPS = int(os.environ.get("SEMBLANCE_VIDEO_FAST_STEPS", "6"))
 _NEGATIVE = ("色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，"
              "残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，"
              "三条腿，背景人很多，倒着走, text, subtitles, letters, words, watermark, logo, blurry, low quality, deformed, "
@@ -75,6 +81,8 @@ gpu_image = (
     # FLUX.1-schnell is gated on Hugging Face (accept its terms once): the HF_TOKEN in the deploying
     # shell (e.g. Colab secrets) is passed to the build so the download can log in.
     .run_function(_download, secrets=[modal.Secret.from_dict({"HF_TOKEN": os.environ.get("HF_TOKEN", "")})])
+    # Added last so the model downloads above stay cached: LoRA loading (fast mode) needs peft and a newer diffusers.
+    .pip_install("peft>=0.15", "diffusers>=0.35")
 )
 api_image = modal.Image.debian_slim(python_version="3.12").pip_install("fastapi>=0.115.0")
 stitch_image = modal.Image.debian_slim(python_version="3.12").apt_install("ffmpeg").pip_install("httpx")
@@ -98,20 +106,34 @@ class Generator:
         # The 11 GB umt5 text encoder, the transformer and the fp32 VAE together fill the L4's 22 GB, and the
         # VAE decode (the last step, after ~10 min of denoising) ran out of memory. Offloading keeps only the
         # part that is running on the GPU, and tiling decodes the video in pieces.
+        self.fast_error = ""
+        try:
+            from huggingface_hub import hf_hub_download
+
+            lora = hf_hub_download(FAST_LORA_REPO, FAST_LORA_FILE)
+            self.pipe.load_lora_weights(lora, adapter_name="fast")
+            self.pipe.set_adapters(["fast"], [0.0])  # loaded but off until a fast render asks for it
+        except Exception as e:
+            self.fast_error = f"{type(e).__name__}: {e}"[:300]
+            print("Fast mode unavailable:", self.fast_error)
         self.pipe.enable_model_cpu_offload()
         if hasattr(self.pipe.vae, "enable_tiling"):
             self.pipe.vae.enable_tiling()
 
     @modal.method()
-    def generate(self, prompt: str, aspect_ratio: str = "9:16", seconds: int = 5) -> dict:
+    def generate(self, prompt: str, aspect_ratio: str = "9:16", seconds: int = 5, fast: bool = False) -> dict:
         from diffusers.utils import export_to_video
 
         started = time.monotonic()
         width, height = SIZES.get(aspect_ratio, SIZES["9:16"])
         frames = max(1, min(int(seconds), 5)) * FPS + 1  # Wan wants 4k+1 frames: 81 is the full 5 seconds
+        fast = bool(fast) and not self.fast_error
         try:
+            if not self.fast_error:
+                self.pipe.set_adapters(["fast"], [1.0 if fast else 0.0])
             video = self.pipe(prompt=prompt, negative_prompt=_NEGATIVE, height=height, width=width, num_frames=frames,
-                              guidance_scale=GUIDANCE, num_inference_steps=STEPS).frames[0]
+                              guidance_scale=1.0 if fast else GUIDANCE,
+                              num_inference_steps=FAST_STEPS if fast else STEPS).frames[0]
             path = f"/tmp/{int(time.time() * 1000)}.mp4"
             export_to_video(video, path, fps=FPS)
             path = _enhance(path) if ENHANCE else path
@@ -120,7 +142,8 @@ class Generator:
         finally:
             gpu_seconds = time.monotonic() - started
             _charge(gpu_seconds, GPU_USD_PER_HOUR)
-        return {"mime": "video/mp4", "base64": data, "gpu_seconds": round(gpu_seconds)}
+        return {"mime": "video/mp4", "base64": data, "gpu_seconds": round(gpu_seconds), "fast": fast,
+                **({"fast_error": self.fast_error} if self.fast_error else {})}
 
 
 def _enhance(path: str) -> str:
@@ -231,7 +254,8 @@ def api(body: dict, request: Request):
         if used >= cap:
             return {"ok": False, "error": f"Monthly video budget reached (${used:.2f} of ${cap:.2f}) — raise "
                                           "VIDEO_MONTHLY_CAP_USD in the Modal secret or wait for next month"}
-        call = Generator().generate.spawn(prompt[:1500], body.get("aspect_ratio") or "9:16", body.get("seconds") or 5)
+        call = Generator().generate.spawn(prompt[:1500], body.get("aspect_ratio") or "9:16", body.get("seconds") or 5,
+                                          bool(body.get("fast")))
         return {"ok": True, "job_id": call.object_id, "used_usd": used, "cap_usd": cap}
     if action == "image":
         prompt = (body.get("prompt") or "").strip()
