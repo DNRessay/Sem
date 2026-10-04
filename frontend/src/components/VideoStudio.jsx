@@ -105,7 +105,7 @@ function VideoTurn({ turn, update, onRender, onReplan, onRetryScene, onRejoin, b
                     {project && rendering && (
                         <div style={{ maxWidth: "420px", display: "flex", flexDirection: "column", gap: "6px" }}>
                             <div className="ds-status"><span className="ds-spin" />
-                                {project.status === "joining" ? "Joining the scenes" + (project.audio_url ? " and adding the voiceover…" : "…")
+                                {project.status === "joining" ? "Joining the scenes" + (project.audio_url ? " and adding the voiceover…" : "…") + (project.join_stage ? ` (${project.join_stage})` : "")
                                     : `Rendering scene ${Math.min(done + 1, total)} of ${total} · ${minutes} min`}
                             </div>
                             <div className="ds-progress"><div style={{ width: `${Math.max(3, ((done + (project.status === "joining" ? 0.5 : 0)) / total) * 100)}%` }} /></div>

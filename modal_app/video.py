@@ -91,6 +91,10 @@ spend = modal.Dict.from_name("semblance-video-spend", create_if_missing=True)
 # for the result with timeout=0, which never succeeded once finished videos got big (720p): fetching a large
 # result takes longer than zero seconds, so every check said "rendering" forever.
 jobs = modal.Dict.from_name("semblance-video-jobs", create_if_missing=True)
+# Every finished scene is also written here as <job_id>.mp4, so the join reads files instead of fetching each
+# scene's (big) result back from Modal, which is where joins hung.
+clips = modal.Volume.from_name("semblance-video-clips", create_if_missing=True)
+CLIPS = "/clips"
 
 
 def _finished(ok: bool, callback: str = ""):
@@ -99,7 +103,7 @@ def _finished(ok: bool, callback: str = ""):
     job_id = ""
     try:
         job_id = modal.current_function_call_id()
-        jobs[job_id] = {"done": time.time(), "ok": ok}
+        jobs[job_id] = {**(jobs.get(job_id) or {}), "done": time.time(), "ok": ok}
     except Exception:
         pass
     if callback and job_id:
@@ -115,6 +119,15 @@ def _finished(ok: bool, callback: str = ""):
             print("callback failed:", e)
 
 
+def _stage(stage: str, error: str = ""):
+    """Where a join is ("fetching scene 2 of 3", "uploading"), readable with "peek" while it runs."""
+    try:
+        job_id = modal.current_function_call_id()
+        jobs[job_id] = {**(jobs.get(job_id) or {}), "stage": stage, **({"error": error} if error else {})}
+    except Exception:
+        pass
+
+
 def _upload(path: str, url: str) -> bool:
     """PUTs the finished video to the app's storage (a presigned S3 URL), so it never travels back through the
     API as one huge response — those timed out, and finished long videos never reached the app."""
@@ -126,7 +139,8 @@ def _upload(path: str, url: str) -> bool:
         urllib.request.urlopen(req, timeout=120).read()
         return True
     except Exception as e:
-        print("upload failed:", e)
+        detail = getattr(e, "read", lambda: b"")()[:200]
+        print("upload failed:", e, detail)
         return False
 
 
@@ -135,7 +149,7 @@ def _month() -> str:
 
 
 @app.cls(gpu=GPU, image=gpu_image, timeout=1500, scaledown_window=120, max_containers=1,
-         secrets=[modal.Secret.from_name("semblance-video-secret")])
+         secrets=[modal.Secret.from_name("semblance-video-secret")], volumes={CLIPS: clips})
 class Generator:
     @modal.enter()
     def load(self):
@@ -182,7 +196,14 @@ class Generator:
             export_to_video(video, path, fps=FPS)
             path = _enhance(path) if ENHANCE else path
             with open(path, "rb") as f:
-                data = base64.b64encode(f.read()).decode()
+                raw = f.read()
+            data = base64.b64encode(raw).decode()
+            try:
+                with open(f"{CLIPS}/{modal.current_function_call_id()}.mp4", "wb") as f:
+                    f.write(raw)
+                clips.commit()
+            except Exception as e:
+                print("couldn't keep the clip for joining:", e)
             ok = True
         finally:
             gpu_seconds = time.monotonic() - started
@@ -244,14 +265,15 @@ class ImageGenerator:
         return {"mime": "image/png", "base64": base64.b64encode(buf.getvalue()).decode()}
 
 
-@app.function(image=stitch_image, cpu=2.0, memory=2048, timeout=600,
+@app.function(image=stitch_image, cpu=2.0, memory=4096, timeout=600, volumes={CLIPS: clips},
               secrets=[modal.Secret.from_name("semblance-video-secret")])
 def stitch(job_ids: list[str], audio_url: str = "", upload_url: str = "", callback: str = "") -> dict:
     """Long videos: the finished 5-second scenes joined in order, with the voiceover (if any) laid over them.
     CPU only, so it doesn't count toward the GPU cap."""
     try:
         result = _stitch(job_ids, audio_url, upload_url)
-    except Exception:
+    except Exception as e:
+        _stage("failed", f"{type(e).__name__}: {e}"[:300])
         _finished(False, callback)
         raise
     _finished(True, callback)
@@ -266,12 +288,19 @@ def _stitch(job_ids: list[str], audio_url: str, upload_url: str = "") -> dict:
 
     with tempfile.TemporaryDirectory() as tmp:
         parts = []
+        clips.reload()
         for i, job_id in enumerate(job_ids):
-            result = modal.FunctionCall.from_id(job_id).get(timeout=180)
+            kept = f"{CLIPS}/{job_id}.mp4"
+            if os.path.exists(kept):
+                parts.append(kept)
+                continue
+            _stage(f"fetching scene {i + 1} of {len(job_ids)}")  # rendered before clips were kept
+            result = modal.FunctionCall.from_id(job_id).get(timeout=120)
             path = f"{tmp}/scene{i:02d}.mp4"
             with open(path, "wb") as f:
                 f.write(base64.b64decode(result["base64"]))
             parts.append(path)
+        _stage("joining")
         with open(f"{tmp}/list.txt", "w") as f:
             f.writelines(f"file '{p}'\n" for p in parts)
         joined = f"{tmp}/joined.mp4"
@@ -292,8 +321,12 @@ def _stitch(job_ids: list[str], audio_url: str, upload_url: str = "") -> dict:
                                 "-c:a", "aac", "-b:a", "128k", "-shortest", out], check=True)
             except Exception:
                 out = joined  # a silent video beats no video
-        if upload_url and _upload(out, upload_url):
-            return {"mime": "video/mp4", "uploaded": True, "voice": out != joined}
+        if upload_url:
+            _stage("uploading")
+            for _ in range(3):
+                if _upload(out, upload_url):
+                    return {"mime": "video/mp4", "uploaded": True, "voice": out != joined}
+            _stage("upload failed", "couldn't upload the joined video to storage")
         with open(out, "rb") as f:
             return {"mime": "video/mp4", "base64": base64.b64encode(f.read()).decode(), "voice": out != joined}
 
@@ -303,9 +336,12 @@ def _state(job_id: str) -> dict:
     older ones fall back to asking Modal, with time to fetch a large finished result."""
     entry = jobs.get(job_id)
     if entry is not None:
+        extra = {k: entry[k] for k in ("stage",) if k in entry}
         if "done" not in entry:
-            return {"status": "rendering"}
-        return {"status": "done"} if entry.get("ok") else {"status": "failed", "error": "the render failed on Modal"}
+            return {"status": "rendering", **extra}
+        if entry.get("ok"):
+            return {"status": "done", **extra}
+        return {"status": "failed", "error": entry.get("error") or "the render failed on Modal", **extra}
     try:
         modal.FunctionCall.from_id(job_id).get(timeout=20)
     except (TimeoutError, modal.exception.TimeoutError):
