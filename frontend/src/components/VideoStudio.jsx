@@ -14,6 +14,7 @@ const CLIP_USD = 0.13;
 const FAST_MINUTES = 2; // fast mode (CausVid LoRA): ~6 steps instead of 50
 const FAST_USD = 0.03;
 const FAST_KEY = "semblance_video_fast";
+const MUSIC_KEY = "semblance_video_music";
 const cost = (n, fast) => ({ minutes: n * (fast ? FAST_MINUTES : CLIP_MINUTES), usd: n * (fast ? FAST_USD : CLIP_USD) });
 const VOICES = ["Kore", "Puck", "Charon", "Aoede", "Fenrir", "Leda"];
 const IDEAS = ["A 15-second Reel for our weekend bread special", "A 60-second YouTube intro to what we do and why",
@@ -68,6 +69,7 @@ function VideoTurn({ turn, update, onRender, onReplan, onRetryScene, onRejoin, b
                 <div className="ds-tags">
                     <span className="ds-tag">{label} · {turn.seconds}s · {sub.split(" · ")[0]}</span>
                     {turn.voiceover && <span className="ds-tag">Voiceover · {turn.voice}</span>}
+                    {turn.music && <span className="ds-tag">🎵 Music</span>}
                     <span className="ds-tag">{turn.fast ? "⚡ Fast" : "Full quality"}</span>
                 </div>
             </div>
@@ -81,6 +83,10 @@ function VideoTurn({ turn, update, onRender, onReplan, onRetryScene, onRejoin, b
                         <div className="ds-card"><div className="ds-card-body" style={{ paddingTop: "14px" }}>
                             <div className="ds-kicker">Storyboard{plan.title ? ` · ${plan.title}` : ""}</div>
                             {plan.style && <div className="ds-muted">Look: {plan.style}</div>}
+                            {turn.music && (
+                                <input className="ds-field" value={plan.music || ""} disabled={busy} placeholder="Background music: genre, mood, tempo, instruments"
+                                    onChange={e => update({ plan: { ...plan, music: e.target.value } })} aria-label="Background music" />
+                            )}
                             {plan.scenes.map((s, i) => (
                                 <div key={i} style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                                     <div className="ds-muted">Scene {i + 1} · {i * 5}–{i * 5 + 5}s</div>
@@ -133,7 +139,7 @@ function VideoTurn({ turn, update, onRender, onReplan, onRetryScene, onRejoin, b
                     {project?.status === "done" && project.url && (
                         <>
                             <Player url={project.url} aspect={project.aspect_ratio} title={project.title} />
-                            {turn.voiceover && !project.voice && <div className="ds-muted">{project.note || "No voiceover this time."}</div>}
+                            {((turn.voiceover && !project.voice) || (turn.music && !project.music)) && project.note && <div className="ds-muted">{project.note}</div>}
                             <div className="ds-actions"><button className="ds-btn sm" onClick={onReplan} disabled={busy}>↻ Make another version</button></div>
                         </>
                     )}
@@ -152,6 +158,8 @@ export default function VideoStudio({ headers, chat, updateChat, brief, model, o
     const [seconds, setSeconds] = useState(15);
     const [voiceover, setVoiceover] = useState(true);
     const [voice, setVoice] = useState("Kore");
+    const [music, setMusicState] = useState(() => { try { return localStorage.getItem(MUSIC_KEY) !== "0"; } catch { return true; } });
+    const setMusic = v => { setMusicState(v); try { localStorage.setItem(MUSIC_KEY, v ? "1" : "0"); } catch { /* private mode */ } };
     const [fast, setFastState] = useState(() => { try { return localStorage.getItem(FAST_KEY) !== "0"; } catch { return true; } });
     const setFast = v => { setFastState(v); try { localStorage.setItem(FAST_KEY, v ? "1" : "0"); } catch { /* private mode */ } };
     const [budget, setBudget] = useState(null);
@@ -208,7 +216,7 @@ export default function VideoStudio({ headers, chat, updateChat, brief, model, o
         const text = idea.trim();
         if (!text || busy) return;
         setIdea("");
-        const turn = { id: Math.random().toString(36).slice(2, 10), idea: text, format, seconds, voiceover, voice, fast, created: Date.now() };
+        const turn = { id: Math.random().toString(36).slice(2, 10), idea: text, format, seconds, voiceover, voice, fast, music, created: Date.now() };
         updateChat(chat.id, c => ({ title: c.title || text.slice(0, 60), videoFormat: format, videos: [...(c.videos || []), turn].slice(-MAX_VIDEOS) }));
         planFor(chat.id, turn);
     };
@@ -220,6 +228,7 @@ export default function VideoStudio({ headers, chat, updateChat, brief, model, o
             const project = await call("/design/video/project", headers, {
                 title: turn.plan.title, style: turn.plan.style, scenes: turn.plan.scenes, aspect_ratio: turn.plan.aspect_ratio || ASPECT[turn.format],
                 format: turn.format, voiceover: turn.voiceover, voice: turn.voice, fast: !!turn.fast, chat_id: chat.id,
+                music: !!turn.music, music_prompt: turn.plan.music || "",
             });
             setTurn(chat.id, turn.id, { status: "rendering", project });
             loadBudget();
@@ -252,7 +261,7 @@ export default function VideoStudio({ headers, chat, updateChat, brief, model, o
                     <div className="ds-empty">
                         <h2>What's the video about?</h2>
                         <div className="ds-muted" style={{ marginBottom: "14px" }}>
-                            Pick short or long below. Sem writes a storyboard of 5-second scenes, you tweak it, then it renders and joins them into one video, with a voiceover if you want.
+                            Pick short or long below. Sem writes a storyboard of 5-second scenes, you tweak it, then it renders and joins them into one video, with a voiceover and background music if you want.
                         </div>
                         <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", justifyContent: "center" }}>
                             {IDEAS.map(s => <button key={s} className="ds-chip" onClick={() => setIdea(s)}>{s}</button>)}
@@ -283,6 +292,8 @@ export default function VideoStudio({ headers, chat, updateChat, brief, model, o
                         ))}
                         <button onClick={() => setFast(!fast)} aria-pressed={fast} className={`ds-chip${fast ? " is-selected" : ""}`}
                             title="Fast: ~2 min a scene instead of ~10. Turn off if the motion looks worse.">⚡ Fast</button>
+                        <button onClick={() => setMusic(!music)} aria-pressed={music} className={`ds-chip${music ? " is-selected" : ""}`}
+                            title="Background music made for this video (Stable Audio Open), mixed under the voice.">🎵 Music</button>
                         <button onClick={() => setVoiceover(v => !v)} aria-pressed={voiceover} className={`ds-chip${voiceover ? " is-selected" : ""}`}>🎙 Voiceover</button>
                         {voiceover && (
                             <select className="ds-chip" value={voice} onChange={e => setVoice(e.target.value)} aria-label="Voice">

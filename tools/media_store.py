@@ -77,8 +77,14 @@ def exists(key: str) -> bool:
         return False
 
 
-def presigned(key: str) -> str:
-    return _client().generate_presigned_url("get_object", Params={"Bucket": settings.MEDIA_BUCKET, "Key": key}, ExpiresIn=600)
+def presigned(key: str, expires: int = 600) -> str:
+    return _client().generate_presigned_url("get_object", Params={"Bucket": settings.MEDIA_BUCKET, "Key": key}, ExpiresIn=expires)
+
+
+def direct(link: str, expires: int = 6 * 3600) -> str:
+    """One of our /media/file links → a plain S3 link, for a fetcher outside the app (one hop, no redirect)."""
+    m = KEY_RE.search(link or "")
+    return presigned(m.group(0), expires) if m and "/media/file/" in link else link
 
 
 async def save_speech(data_b64: str) -> str | None:

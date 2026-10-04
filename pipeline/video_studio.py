@@ -60,8 +60,10 @@ ONLY that scene's prompt. So:
 {guide}
 - Tell a story across the scenes: hook in the first scene, payoff or call to action in the last.
 {voice}
+- One "music" line for an instrumental background track: genre, mood, tempo (BPM) and 2-3 instruments, e.g.
+  "warm lo-fi hip hop, relaxed, 85 BPM, soft piano, vinyl crackle, mellow drums". No vocals, no artist names.
 Reply with JSON only:
-{{"title": short title, "style": the style line, "scenes": [{{"prompt": scene prompt, "narration": {narration}}}]}}"""
+{{"title": short title, "style": the style line, "music": the music line, "scenes": [{{"prompt": scene prompt, "narration": {narration}}}]}}"""
 
 
 def scene_count(seconds: int) -> int:
@@ -109,13 +111,16 @@ def parse_plan(text: str, n: int, voiceover: bool) -> dict | None:
     if not meta:
         title = re.search(r'"title"\s*:\s*"([^"]*)"', text or "")
         style = re.search(r'"style"\s*:\s*"([^"]*)"', text or "")
-        meta = {"title": title.group(1) if title else "", "style": style.group(1) if style else ""}
+        music = re.search(r'"music"\s*:\s*"([^"]*)"', text or "")
+        meta = {"title": title.group(1) if title else "", "style": style.group(1) if style else "",
+                "music": music.group(1) if music else ""}
     scenes = [s for s in scenes if isinstance(s, dict) and str(s.get("prompt") or "").strip()][:n]
     if not scenes:
         return None
     while len(scenes) < n:  # a model that wrote too few: hold the last shot rather than fail
         scenes.append(dict(scenes[-1]))
     return {"title": str(meta.get("title") or "").strip()[:80], "style": str(meta.get("style") or "").strip()[:400],
+            "music": str(meta.get("music") or "").strip()[:300],
             "scenes": [{"prompt": str(s["prompt"]).strip()[:1500],
                         "narration": str(s.get("narration") or "").strip()[:300] if voiceover else ""} for s in scenes]}
 

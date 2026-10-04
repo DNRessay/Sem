@@ -133,3 +133,12 @@ def test_presigned_links_are_sigv4_on_the_regional_endpoint(monkeypatch):
     monkeypatch.setattr(media_store.settings, "MEDIA_REGION", "eu-west-1")
     url = media_store.presign_put("video/2026-10-04/a.mp4", "video/mp4")
     assert url.startswith("https://bucket-1.s3.eu-west-1.amazonaws.com/video/") and "X-Amz-Algorithm=AWS4-HMAC-SHA256" in url
+
+
+def test_media_links_become_direct_s3_links_for_modal(monkeypatch):
+    from tools import media_store
+
+    monkeypatch.setattr(media_store, "presigned", lambda key, expires=600: f"https://s3.example/{key}?e={expires}")
+    link = "https://api.example/media/file/speech/2026-10-04/" + "a" * 32 + ".wav?exp=1&sig=x"
+    assert media_store.direct(link) == "https://s3.example/speech/2026-10-04/" + "a" * 32 + ".wav?e=21600"
+    assert media_store.direct("https://elsewhere.example/voice.wav") == "https://elsewhere.example/voice.wav"
