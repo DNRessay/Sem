@@ -56,6 +56,8 @@ async def run(request: Request, account: dict = Depends(require_account)):
         if valid_target(provider, repo) and repo != ws.repo:
             others.append(CodeWorkspace(provider, repo))
     tokens = {p: await connector_token(account["account_id"], p) for p in {ws.provider, *(o.provider for o in others)}}
+    for w in (ws, *others):
+        w.token = tokens.get(w.provider)
     agent = CodeAgent(ws, mode=body.get("mode") or "act", provider=body.get("model") or "auto", mcp=mcp,
                       branch=_branch(body), others=others, tokens=tokens)
     agent.user_context = await TAUEngine().owner_context()
