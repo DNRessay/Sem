@@ -97,6 +97,8 @@ class Settings(BaseSettings):
     # Laya decision model (modal_app/laya.py). Empty = derived from MODAL_VIDEO_URL (same Modal workspace,
     # same secret); set LAYA_URL=off to disable.
     LAYA_URL: str = ""
+    # Kokoro TTS + Whistle speech-to-text (modal_app/voice.py). Empty = derived from MODAL_VIDEO_URL; off = disabled.
+    VOICE_URL: str = ""
     MODAL_FREE_CREDIT_USD: float = 30.0  # Modal Starter plan's free compute each month
 
     # Cache — DynamoDB-backed, in-memory L1 on top for warm Lambda invocations.

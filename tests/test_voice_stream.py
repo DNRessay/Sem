@@ -23,7 +23,7 @@ async def test_sentences_are_spoken_in_order_inside_the_stream(monkeypatch):
     async def fake_save(data):
         return f"https://s3/{len(said)}.wav"
 
-    monkeypatch.setattr(voice_stream.gemini_media, "speak", fake_speak)
+    monkeypatch.setattr(voice_stream.tts, "speak", fake_speak)
     monkeypatch.setattr(voice_stream.media_store, "save_speech", fake_save)
     chunks = ["Hello there, how are you today? ", "Here's **the** plan. " * 15, "```py\nx=1\n```", "Done"]
     out = [line async for line in voice_stream.with_speech(_lines(chunks))]
@@ -41,7 +41,7 @@ async def test_rate_limit_leaves_the_rest_to_the_phone_voice(monkeypatch):
     async def limited(text, voice="Kore"):
         return {"ok": False, "rate_limited": True, "error": "limit"}
 
-    monkeypatch.setattr(voice_stream.gemini_media, "speak", limited)
+    monkeypatch.setattr(voice_stream.tts, "speak", limited)
     out = [line async for line in voice_stream.with_speech(_lines(["One sentence here. ", "Another one. " * 30]))]
     speech = [json.loads(line[6:])["speech"] for line in out if '"speech"' in line]
     assert len(speech) >= 2 and all("url" not in s and "base64" not in s for s in speech)

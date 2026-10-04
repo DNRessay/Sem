@@ -1,4 +1,4 @@
-"""Voice mode, server side: Gemini TTS starts on each sentence of the reply while the rest is still being
+"""Voice mode, server side: TTS (Kokoro on Modal, Gemini as fallback) starts on each sentence of the reply while the rest is still being
 written, and the audio comes back in the same stream as {"speech": {seq, text, url|base64}} events — no
 extra request from the phone per sentence. Pieces are spoken one at a time (Gemini's TTS limit is tight);
 after a rate limit the rest arrive as text only and the phone reads them with its own voice."""
@@ -6,7 +6,7 @@ import asyncio
 import json
 import re
 
-from tools import gemini_media, media_store
+from tools import media_store, tts
 
 MAX_SPOKEN = 1200
 FIRST_MIN = 20   # start talking at the first sentence this long…
@@ -38,7 +38,7 @@ def _sse(obj: dict) -> str:
 
 
 async def _audio(piece: str, voice: str) -> dict:
-    result = await gemini_media.speak(piece, voice)
+    result = await tts.speak(piece, voice)
     if not result["ok"]:
         return {"rate_limited": bool(result.get("rate_limited"))}
     url = await media_store.save_speech(result["base64"])

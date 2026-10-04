@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { canRecord, recordUtterance, transcribe } from "../utils/recordWav";
 
 function MicIcon() {
     return (
@@ -12,18 +13,36 @@ function MicIcon() {
 }
 
 // Dictation into the message box: words appear while you speak (interim
-// results), and it keeps listening until you tap the mic again.
-export default function VoiceInput({ value = "", onChange }) {
+// results), and it keeps listening until you tap the mic again. Browsers without speech recognition record
+// instead, and Whistle on the server writes it down when you tap the mic again.
+export default function VoiceInput({ value = "", onChange, token }) {
     const [listening, setListening] = useState(false);
     const recogRef = useRef(null);
     const baseRef = useRef("");
 
     const stop = () => { recogRef.current?.stop(); setListening(false); };
 
+    const record = () => {
+        const base = value.trim();
+        const rec = recordUtterance({ autoStop: false });
+        recogRef.current = rec;
+        setListening(true);
+        rec.done.then(async (wav) => {
+            setListening(false);
+            recogRef.current = null;
+            if (!wav) return;
+            try {
+                const text = await transcribe(token || localStorage.getItem("semblance_token") || "", wav);
+                if (text) onChange?.(base ? `${base} ${text}` : text);
+            } catch (e) { alert(e.message); }
+        });
+    };
+
     const toggle = () => {
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SR) { alert("Voice input isn't supported in this browser."); return; }
         if (listening) { stop(); return; }
+        if (!SR && canRecord()) { record(); return; }
+        if (!SR) { alert("Voice input isn't supported in this browser."); return; }
         baseRef.current = value.trim();
         const r = new SR();
         r.continuous = true;
