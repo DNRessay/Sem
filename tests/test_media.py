@@ -122,3 +122,14 @@ async def test_auto_tries_the_next_free_model_when_one_returns_junk(monkeypatch)
     monkeypatch.setattr(ad_studio.llm_providers, "complete", fake_complete)
     result = await ad_studio.write_variants("bakery", "launch", ["fb_ig_feed"], 1, "auto")
     assert result["ok"] and asked == ["auto", "gemini"]
+
+
+def test_presigned_links_are_sigv4_on_the_regional_endpoint(monkeypatch):
+    from tools import media_store
+
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIATEST")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "x")
+    monkeypatch.setattr(media_store.settings, "MEDIA_BUCKET", "bucket-1")
+    monkeypatch.setattr(media_store.settings, "MEDIA_REGION", "eu-west-1")
+    url = media_store.presign_put("video/2026-10-04/a.mp4", "video/mp4")
+    assert url.startswith("https://bucket-1.s3.eu-west-1.amazonaws.com/video/") and "X-Amz-Algorithm=AWS4-HMAC-SHA256" in url

@@ -23,8 +23,13 @@ def enabled() -> bool:
 
 def _client():
     import boto3
+    from botocore.config import Config
 
-    return boto3.client("s3", region_name=settings.MEDIA_REGION)
+    # SigV4 on the regional endpoint: boto3's default presigned links are SigV2, which S3 refuses on buckets made
+    # after mid-2020, so every link we handed out (Modal's video upload, voice clips, media redirects) was a 403.
+    return boto3.client("s3", region_name=settings.MEDIA_REGION,
+                        endpoint_url=f"https://s3.{settings.MEDIA_REGION}.amazonaws.com",
+                        config=Config(signature_version="s3v4", s3={"addressing_style": "virtual"}))
 
 
 def sign(key: str, exp: int) -> str:
@@ -62,6 +67,14 @@ def presign_put(key: str, mime: str, expires: int = 6 * 3600) -> str:
     """A URL someone else (a Modal function) can PUT the file to directly, so it never passes through the API."""
     return _client().generate_presigned_url("put_object", Params={"Bucket": settings.MEDIA_BUCKET, "Key": key,
                                                                   "ContentType": mime}, ExpiresIn=expires)
+
+
+def exists(key: str) -> bool:
+    try:
+        _client().head_object(Bucket=settings.MEDIA_BUCKET, Key=key)
+        return True
+    except Exception:
+        return False
 
 
 def presigned(key: str) -> str:

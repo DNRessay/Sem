@@ -323,12 +323,20 @@ async def _advance(account_id: str, project: dict) -> dict:
             project = latest  # a callback or another poll already started the join
         # A join normally takes a minute or two. One still "running" after 10 minutes, or started before uploads
         # existed (its result is too big to fetch), is joined again with a direct upload: CPU only, a few cents.
+        # The joined video in S3 is the truth: once it's there the video is done, whatever Modal says.
+        if project.get("stitch_job") and project.get("final_key") and \
+                await asyncio.to_thread(media_store.exists, project["final_key"]):
+            project.update(status="done", url=media_store.link(project["final_key"]), error="")
+            _save_project(account_id, project)
+            return project
         stale = media_store.enabled() and project.get("stitch_job") and (
             not project.get("final_key") or time.time() - project.get("stitch_started", 0) > 600)
-        if stale and project.get("rejoins", 0) < 2:
-            peek = await video_call("peek", job_id=project["stitch_job"])
-            if peek.get("status") != "done" or not project.get("final_key"):
-                project.update(stitch_job="", rejoins=project.get("rejoins", 0) + 1)
+        if stale:
+            if project.get("rejoins", 0) >= 2:
+                project.update(status="failed", error="Joining the scenes kept failing — tap Retry join")
+                _save_project(account_id, project)
+                return project
+            project.update(stitch_job="", rejoins=project.get("rejoins", 0) + 1)
         if not project.get("stitch_job"):
             # Modal uploads the joined video straight to S3 (a presigned PUT): a long video sent back through the
             # API timed out, so finished videos never arrived.
@@ -407,6 +415,19 @@ async def video_project_status(pid: str, account: dict = Depends(require_account
     project = _project(account["account_id"], pid)
     if not project:
         raise HTTPException(404, "This video is gone (kept 7 days)")
+    return await _advance(account["account_id"], project)
+
+
+@router.post("/video/project/{pid}/join")
+async def video_project_rejoin(pid: str, account: dict = Depends(require_account)):
+    """Joins the finished scenes again (CPU only, a few cents) after a failed join."""
+    project = _project(account["account_id"], pid)
+    if not project:
+        raise HTTPException(404, "This video is gone (kept 7 days)")
+    if not all(s.get("status") == "done" for s in project["scenes"]):
+        raise HTTPException(400, "Some scenes aren't rendered yet")
+    project.update(status="joining", error="", stitch_job="", rejoins=0)
+    _save_project(account["account_id"], project)
     return await _advance(account["account_id"], project)
 
 

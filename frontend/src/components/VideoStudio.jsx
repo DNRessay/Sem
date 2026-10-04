@@ -46,7 +46,7 @@ function Player({ url, aspect, title }) {
 }
 
 // One video in the chat: the idea, then its storyboard (editable), then the render and the finished video.
-function VideoTurn({ turn, update, onRender, onReplan, onRetryScene, busy }) {
+function VideoTurn({ turn, update, onRender, onReplan, onRetryScene, onRejoin, busy }) {
     const plan = turn.plan;
     const project = turn.project;
     const [, tick] = useState(0);
@@ -123,7 +123,13 @@ function VideoTurn({ turn, update, onRender, onReplan, onRetryScene, busy }) {
                             ))}
                         </div>
                     )}
-                    {project?.status === "failed" && <div className="msg-error" style={{ margin: 0 }}>{project.error || "The video failed"}</div>}
+                    {project?.status === "failed" && (
+                        <div className="ds-actions">
+                            <span className="msg-error" style={{ margin: 0 }}>{project.error || "The video failed"}</span>
+                            {project.scenes?.every(s => s.status === "done") &&
+                                <button className="ds-btn sm" onClick={onRejoin} disabled={busy}>↻ Retry join</button>}
+                        </div>
+                    )}
                     {project?.status === "done" && project.url && (
                         <>
                             <Player url={project.url} aspect={project.aspect_ratio} title={project.title} />
@@ -228,6 +234,14 @@ export default function VideoStudio({ headers, chat, updateChat, brief, model, o
         } catch (e) { setTurn(chat.id, turn.id, { error: fail(e) }); } finally { setBusy(false); }
     };
 
+    const rejoin = async turn => {
+        setBusy(true);
+        try {
+            const project = await call(`/design/video/project/${turn.project.id}/join`, headers, {});
+            setTurn(chat.id, turn.id, { status: "rendering", project, error: "" });
+        } catch (e) { setTurn(chat.id, turn.id, { error: fail(e) }); } finally { setBusy(false); }
+    };
+
     const [, , , lengths] = fmt(format);
     const n = scenesFor(seconds);
     return (<>
@@ -247,7 +261,7 @@ export default function VideoStudio({ headers, chat, updateChat, brief, model, o
                 )}
                 {turns.map(t => (
                     <VideoTurn key={t.id} turn={t} busy={busy} update={patch => setTurn(chat.id, t.id, patch)}
-                        onRender={() => render(t)} onReplan={() => planFor(chat.id, t)} onRetryScene={i => retryScene(t, i)} />
+                        onRender={() => render(t)} onReplan={() => planFor(chat.id, t)} onRetryScene={i => retryScene(t, i)} onRejoin={() => rejoin(t)} />
                 ))}
             </div>
         </div>
