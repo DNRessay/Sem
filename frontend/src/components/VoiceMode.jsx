@@ -7,7 +7,9 @@ import WorkProp, { ACTIVITY_LABEL, activityFrom } from "./WorkProps";
 const API = import.meta.env.VITE_API_URL || "";
 const MAX_SPOKEN = 1200;
 const LOOK_KEY = "semblance_voice_look"; // "avatar" | "orb"
-const VOICE_KEY = "semblance_voice_engine"; // "natural" (Kokoro on the server, Gemini fallback) | "fast" (the phone's own voice)
+// "natural" (Kokoro on the server, Gemini fallback) | "fast" (the phone's own voice). A new key so everyone starts on
+// Natural again: phones that once tapped Fast kept hearing the robotic Android voice without knowing why.
+const VOICE_KEY = "semblance_voice_engine_v2";
 const SILENCE_MS = 700; // end your turn after this much quiet, instead of the browser's slower default
 const FIRST_MIN = 20;   // start talking at the first sentence this long…
 const NEXT_MIN = 220;   // …then speak in bigger pieces (fewer TTS calls, fewer seams)
@@ -159,6 +161,16 @@ export default function VoiceMode({ token, send, busy, lastReply, liveReply = ""
         } catch { return null; }
     };
 
+    const speechFor = async (text) => {
+        try {
+            const r = await fetch(`${API}/media/speech`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ text }) });
+            if (!r.ok) return null;
+            const d = await r.json();
+            return d.base64 ? { base64: d.base64 } : null;
+        } catch { return null; }
+    };
+
     const onSpeech = (t, ev) => {
         if (t.gen !== gen.current || !open.current) return;
         if (ev.speech) {
@@ -226,7 +238,8 @@ export default function VoiceMode({ token, send, busy, lastReply, liveReply = ""
         if (!piece || t.spoken >= MAX_SPOKEN) return;
         if (t.spoken + piece.length > MAX_SPOKEN) piece = `${piece.slice(0, MAX_SPOKEN - t.spoken).replace(/[^.!?]*$/, "")} The rest is in the chat.`;
         t.spoken += piece.length;
-        t.queue.push({ text: piece, audio: Promise.resolve(null) });
+        // Tabs whose replies don't come with server speech (Code, Co-work, Finance): ask for Kokoro per piece.
+        t.queue.push({ text: piece, audio: engineRef.current === "natural" ? speechFor(piece) : Promise.resolve(null) });
         playQueue(t);
     };
 
