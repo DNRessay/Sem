@@ -87,9 +87,9 @@ def test_ads_stream_sends_copy_then_images(client, monkeypatch):
     monkeypatch.setattr("gateway.design_router.write_variants", fake_write)
     monkeypatch.setattr("gateway.design_router.image_gen.generate_image", fake_image)
     r = client.post("/design/ads", json={"brief": "bakery", "campaign": "weekend special"})
-    events = [json.loads(line[6:]) for line in r.text.split("\n") if line.startswith("data: {")]
-    assert [e["type"] for e in events] == ["variants", "image", "image_error"]
-    assert events[1]["index"] == 0 and events[2]["index"] == 1
+    events = [e for e in (json.loads(line[6:]) for line in r.text.split("\n") if line.startswith("data: {")) if e["type"] != "status"]
+    assert events[0]["type"] == "variants"
+    assert {(e["type"], e["index"]) for e in events[1:]} == {("image", 0), ("image_error", 1)}
 
 
 def test_ads_require_brief_and_campaign(client):
@@ -124,7 +124,7 @@ def test_inspiration_images_shape_the_copy_and_the_images(client, monkeypatch):
     refs = [{"mime": "image/jpeg", "base64": "QUJD"}] * 6 + [{"mime": "text/html", "base64": "x"}]
     r = client.post("/design/ads", json={"brief": "bakery", "campaign": "weekend", "references": refs})
     types = [json.loads(line[6:])["type"] for line in r.text.split("\n") if line.startswith("data: {")]
-    assert types == ["status", "style", "variants", "image"]
+    assert [t for t in types if t != "status"] == ["style", "variants", "image"] and types[0] == "status"
     assert seen == {"described": 4, "style": "warm terracotta palette, hand-drawn type", "refs": 4}
 
 
@@ -568,3 +568,28 @@ def test_improve_rewrites_a_rough_idea_per_tool(client, monkeypatch):
     assert music["text"].startswith("amapiano") and music["lyrics"] == ""
     assert client.post("/design/improve", json={"kind": "nope", "text": "x"}).status_code == 400
     assert client.post("/design/improve", json={"kind": "web", "text": " "}).status_code == 400
+
+
+
+def test_slow_images_dont_hang_the_round(client, monkeypatch):
+    import asyncio
+
+    from gateway import design_router
+
+    async def fake_write(*a, **k):
+        return {"ok": True, "variants": [{"placement": "instagram", "headline": str(i), "image_prompt": str(i),
+                                          "aspect_ratio": "4:5"} for i in range(3)]}
+
+    async def fake_image(prompt, aspect_ratio="1:1", references=None):
+        if prompt == "1":
+            await asyncio.sleep(30)  # the image service hangs on this one
+        return {"ok": True, "mime": "image/png", "base64": "QUJD"}
+
+    monkeypatch.setattr(design_router, "IMAGES_BUDGET_SECONDS", 0.5)
+    monkeypatch.setattr("gateway.design_router.write_variants", fake_write)
+    monkeypatch.setattr("gateway.design_router.image_gen.generate_image", fake_image)
+    r = client.post("/design/ads", json={"brief": "bakery", "campaign": "launch"})
+    events = [json.loads(ln[6:]) for ln in r.text.split("\n") if ln.startswith("data: {")]
+    final = {e["index"]: e["type"] for e in events if e["type"] in ("image", "image_error")}
+    assert final == {0: "image", 1: "image_error", 2: "image"}
+    assert "busy" in next(e["error"] for e in events if e.get("index") == 1 and e["type"] == "image_error")

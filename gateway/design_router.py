@@ -38,6 +38,58 @@ async def brief_from_site(request: Request, _account: dict = Depends(require_acc
     return result
 
 
+IMAGES_AT_ONCE = 2
+IMAGES_BUDGET_SECONDS = 600  # Lambda stops a request at 15 minutes: finish (with "try again" cards) well before
+
+
+async def _images(variants: list[dict], refs: list, session):
+    """Every post's image, two at a time, each sent as soon as it's ready. One slow or failed image doesn't hold up
+    the rest, and the round always ends inside the time budget (made one by one, a busy Gemini plus the open-source
+    fallback could take ~6 minutes an image, so four images outran Lambda's limit and the round hung)."""
+    sem = asyncio.Semaphore(IMAGES_AT_ONCE)
+    queue: asyncio.Queue = asyncio.Queue()
+    stop = asyncio.Event()
+
+    async def one(i: int, v: dict):
+        async with sem:  # every image ends with exactly one event on the queue
+            if stop.is_set():
+                await queue.put({"type": "skip", "index": i})
+                return
+            img = await image_gen.generate_image(v["image_prompt"], v["aspect_ratio"], references=refs)
+            await log(session, "gemini", f"{'ok' if img['ok'] else 'blocked'}:image {i + 1} — "
+                                         f"{('made with ' + img.get('engine', 'gemini')) if img['ok'] else img['error']}")
+            if img["ok"]:
+                url = await media_store.save(img["base64"], img["mime"], "ads")
+                shown = {"url": url} if url else {"base64": img["base64"]}
+                await queue.put({"type": "image", "index": i, "mime": img["mime"], **shown})
+            else:
+                if img.get("rate_limited") and "fallback" not in img["error"]:
+                    stop.set()
+                await queue.put({"type": "image_error", "index": i, "error": img["error"]})
+
+    tasks = [asyncio.create_task(one(i, v)) for i, v in enumerate(variants)]
+    total, made, answered = len(variants), 0, set()
+    deadline = time.monotonic() + IMAGES_BUDGET_SECONDS
+    yield f"data: {json.dumps({'type': 'status', 'text': f'Making images (0 of {total})…'})}\n\n"
+    while len(answered) < total:
+        try:
+            ev = await asyncio.wait_for(queue.get(), timeout=max(0.1, deadline - time.monotonic()))
+        except asyncio.TimeoutError:
+            break
+        answered.add(ev["index"])
+        if ev["type"] == "skip":
+            yield f"data: {json.dumps({'type': 'image_error', 'index': ev['index'], 'error': 'Skipped (image limit reached) — tap New image later'})}\n\n"
+            continue
+        made += 1
+        yield f"data: {json.dumps(ev)}\n\n"
+        yield f"data: {json.dumps({'type': 'status', 'text': f'Making images ({made} of {total})…'})}\n\n"
+    for t in tasks:
+        t.cancel()
+    for i in range(total):
+        if i not in answered:
+            yield f"data: {json.dumps({'type': 'image_error', 'index': i, 'error': 'Took too long (the image service is busy) — tap New image'})}\n\n"
+
+
 @router.post("/ads")
 async def ads(request: Request, _account: dict = Depends(require_account)):
     """Ad studio: copy for every variant first, then each image as Nano Banana
@@ -72,18 +124,8 @@ async def ads(request: Request, _account: dict = Depends(require_account)):
         variants = written["variants"]
         yield f"data: {json.dumps({'type': 'variants', 'variants': variants})}\n\n"
         if body.get("images", True):
-            for i, v in enumerate(variants):
-                img = await image_gen.generate_image(v["image_prompt"], v["aspect_ratio"], references=refs)
-                await log(session, "gemini", f"{'ok' if img['ok'] else 'blocked'}:image {i + 1} — "
-                                             f"{('made with ' + img.get('engine', 'gemini')) if img['ok'] else img['error']}")
-                if img["ok"]:
-                    url = await media_store.save(img["base64"], img["mime"], "ads")
-                    shown = {"url": url} if url else {"base64": img["base64"]}
-                    yield f"data: {json.dumps({'type': 'image', 'index': i, 'mime': img['mime'], **shown})}\n\n"
-                else:
-                    yield f"data: {json.dumps({'type': 'image_error', 'index': i, 'error': img['error']})}\n\n"
-                    if img.get("rate_limited"):
-                        break
+            async for line in _images(variants, refs, session):
+                yield line
         yield "data: [DONE]\n\n"
 
     return durable(stream(), _account["account_id"], body, "design")

@@ -78,7 +78,7 @@ def test_ad_images_go_to_s3(s3, client, monkeypatch):
     monkeypatch.setattr("gateway.design_router.write_variants", fake_write)
     monkeypatch.setattr("gateway.design_router.image_gen.generate_image", fake_image)
     r = client.post("/design/ads", json={"brief": "bakery", "campaign": "launch"})
-    image = [json.loads(ln[6:]) for ln in r.text.split("\n") if ln.startswith("data: {")][1]
+    image = [e for e in (json.loads(ln[6:]) for ln in r.text.split("\n") if ln.startswith("data: {")) if e["type"] != "status"][1]
     assert image["type"] == "image" and "base64" not in image and image["url"].startswith("https://api.example/media/file/ads/")
     again = client.post("/design/image", json={"prompt": "a", "aspect_ratio": "1:1"}).json()
     assert again["url"].startswith("https://api.example/media/file/ads/") and "base64" not in again

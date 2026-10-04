@@ -31,7 +31,9 @@ async def generate_image(prompt: str, aspect_ratio: str = "1:1", references: lis
     if result["ok"]:
         return {**result, "engine": "gemini"}
     blocked = "no image" in result["error"]  # Gemini refused the prompt itself — FLUX can still try
-    if not settings.MODAL_VIDEO_URL or not (result.get("rate_limited") or blocked
+    # Overloaded (503 "high demand"), any 5xx, or a timeout: Google is having a moment, FLUX isn't.
+    busy = any(f"error {code}" in result["error"] for code in (500, 502, 503, 504)) or "timed out" in result["error"].lower()
+    if not settings.MODAL_VIDEO_URL or not (result.get("rate_limited") or blocked or busy
                                             or "not set" in result["error"] or "unreachable" in result["error"]):
         return result
     flux = await _flux(prompt, aspect_ratio)
