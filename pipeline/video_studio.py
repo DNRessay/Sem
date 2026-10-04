@@ -89,9 +89,27 @@ def _json_object(text: str) -> dict:
     return {}
 
 
+_SCENE_RE = re.compile(r'\{\s*"prompt"\s*:\s*"((?:[^"\\]|\\.)*)"(?:\s*,\s*"narration"\s*:\s*"((?:[^"\\]|\\.)*)")?\s*\}')
+
+
+def _salvage(text: str) -> list[dict]:
+    """Complete scenes out of a reply that was cut off mid-way (a model's output limit)."""
+    out = []
+    for m in _SCENE_RE.finditer(text or ""):
+        try:
+            out.append({"prompt": json.loads(f'"{m.group(1)}"'), "narration": json.loads(f'"{m.group(2) or ""}"')})
+        except ValueError:
+            continue
+    return out
+
+
 def parse_plan(text: str, n: int, voiceover: bool) -> dict | None:
     meta = _json_object(text)
-    scenes = meta.get("scenes") if isinstance(meta.get("scenes"), list) else _json_items(text)
+    scenes = meta.get("scenes") if isinstance(meta.get("scenes"), list) else (_json_items(text) or _salvage(text))
+    if not meta:
+        title = re.search(r'"title"\s*:\s*"([^"]*)"', text or "")
+        style = re.search(r'"style"\s*:\s*"([^"]*)"', text or "")
+        meta = {"title": title.group(1) if title else "", "style": style.group(1) if style else ""}
     scenes = [s for s in scenes if isinstance(s, dict) and str(s.get("prompt") or "").strip()][:n]
     if not scenes:
         return None
@@ -114,7 +132,10 @@ async def plan_video(brief: str, idea: str, seconds: int, fmt: str, voiceover: b
         if voiceover else "",
         narration=f'"voiceover line, max {words} words"' if voiceover else '""')
     messages = [{"role": "user", "content": prompt}]
-    result = await llm_providers.complete(model, messages, max_tokens=6000)
+    # A storyboard is long (80-120 words a scene). Gemini allows long replies; Groq stops at ~800 tokens, which cut
+    # 30-second storyboards off mid-scene. So with "auto", Gemini writes it first and the others are the fallback.
+    first = "gemini" if model == "auto" and llm_providers.PROVIDERS["gemini"].configured else model
+    result = await llm_providers.complete(first, messages, max_tokens=6000)
     plan = None if "error" in result else parse_plan(result.get("content") or "", n, voiceover)
     if not plan and model == "auto":
         for pid in llm_providers.FREE_ORDER:

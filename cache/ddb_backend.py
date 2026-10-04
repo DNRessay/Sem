@@ -36,16 +36,18 @@ def _get_table():
     return _table or None
 
 
-def get(namespace: str, key: str) -> str | None:
+def get(namespace: str, key: str, fresh: bool = False) -> str | None:
+    """fresh=True skips this process's L1 copy: for state another Lambda instance may have changed (a video
+    project's progress), where a copy cached here for days would never see the update."""
     pk = f"{namespace}#{key}"
-    entry = _l1.get(pk)
+    table = _get_table()
+    entry = _l1.get(pk) if not fresh or not table else None  # no DynamoDB (local, tests): memory is all there is
     if entry:
         value, written_at, ttl = entry
         if time.time() - written_at < ttl:
             return value
         del _l1[pk]
 
-    table = _get_table()
     if not table:
         return None
     try:
@@ -58,7 +60,8 @@ def get(namespace: str, key: str) -> str | None:
         _l1[pk] = (value, time.time(), remaining_ttl)
         return value
     except Exception:
-        return None
+        cached = _l1.get(pk) if fresh else None  # DynamoDB unreachable: this process's copy beats nothing
+        return cached[0] if cached and time.time() - cached[1] < cached[2] else None
 
 
 def set(namespace: str, key: str, value: str, ttl: int = 300) -> None:

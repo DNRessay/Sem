@@ -291,3 +291,14 @@ def test_fast_mode_is_passed_to_modal_and_costs_less(client, monkeypatch, moto_c
     assert p["fast"] and len(submits) == 12 and all(kw["fast"] for kw in submits)
     client.post(f"/design/video/project/{p['id']}/scene/0")
     assert submits[-1]["fast"] is True  # a re-render keeps the project's mode
+
+
+def test_a_storyboard_cut_off_mid_scene_keeps_the_complete_scenes():
+    from pipeline import video_studio
+
+    cut = ('{"title": "Teaser", "style": "dark gold", "scenes": [{"prompt": "black surface, gold line widens", '
+           '"narration": "Vicinic."}, {"prompt": "logo glows \\"softly\\"", "narration": "Coming soon."}, {"prompt": "count')
+    plan = video_studio.parse_plan(cut, 3, True)
+    assert plan["title"] == "Teaser" and plan["style"] == "dark gold"
+    assert [s["prompt"] for s in plan["scenes"]] == ["black surface, gold line widens", 'logo glows "softly"', 'logo glows "softly"']
+    assert plan["scenes"][1]["narration"] == "Coming soon."
