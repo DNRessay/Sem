@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { SendIcon } from "./Icons";
+import ImproveButton from "./ImproveButton";
 
 const API = import.meta.env.VITE_API_URL || "";
 const MAX_TRACKS = 20;
@@ -46,7 +47,7 @@ function Track({ track }) {
 }
 
 // Music tab: instrumentals or songs with lyrics for videos, reels and ads (ACE-Step on Modal, a few cents each).
-export default function MusicStudio({ headers, chat, updateChat, onUnauthorized, top }) {
+export default function MusicStudio({ headers, chat, updateChat, onUnauthorized, top, brief, model }) {
     const [prompt, setPrompt] = useState("");
     const [seconds, setSeconds] = useState(30);
     const [lyrics, setLyrics] = useState("");
@@ -130,6 +131,9 @@ export default function MusicStudio({ headers, chat, updateChat, onUnauthorized,
                                 className={`ds-chip${seconds === s ? " is-selected" : ""}`}>{s < 60 ? `${s}s` : `${s / 60} min`}</button>
                         ))}
                     </div>
+                    <ImproveButton headers={headers} kind="music" text={prompt} setText={setPrompt} brief={brief} model={model}
+                        extra={sing ? "The user wants vocals (a song with lyrics)." : "Instrumental."}
+                        onLyrics={l => { setLyrics(l); setSing(true); }} onError={setError} />
                     <button className="ds-send btn-primary" onClick={send} disabled={!prompt.trim() || (sing && !lyrics.trim())} aria-label="Make the track" style={{ border: "none" }}><SendIcon size={18} /></button>
                 </div>
             </div>

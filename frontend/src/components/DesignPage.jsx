@@ -10,6 +10,7 @@ import useTabChats, { newId } from "../hooks/useTabChats";
 import WebStudio from "./WebStudio";
 import VideoStudio from "./VideoStudio";
 import MusicStudio from "./MusicStudio";
+import ImproveButton from "./ImproveButton";
 import { CloseIcon, PaperclipIcon, SendIcon } from "./Icons";
 
 const API = import.meta.env.VITE_API_URL || "";
@@ -357,7 +358,7 @@ function VideoLibrary({ videos, onClose }) {
 }
 
 function Composer({ kind, draft, setDraft, onSend, disabled, placements, togglePlacement, count, setCount,
-                    aspect, setAspect, refs, setRefs, budget }) {
+                    aspect, setAspect, refs, setRefs, budget, improve }) {
     const [error, setError] = useState("");
     const box = useRef(null);
     useEffect(() => {
@@ -408,6 +409,9 @@ function Composer({ kind, draft, setDraft, onSend, disabled, placements, toggleP
                             {budget && <span className="ds-muted" style={{ alignSelf: "center", whiteSpace: "nowrap" }}>${Number(budget.used_usd).toFixed(2)} / ${Number(budget.cap_usd).toFixed(2)} this month</span>}
                         </>)}
                     </div>
+                    {kind === "ads" && improve && (
+                        <ImproveButton {...improve} kind="images" text={draft} setText={setDraft} disabled={disabled} onError={setError} />
+                    )}
                     {kind === "ads" && refs.length < MAX_REFS && (
                         <label className="ds-send" title="Inspiration: ads, photos or a video whose look Sem should copy" style={{ color: "var(--text-muted)" }}>
                             <PaperclipIcon size={18} />
@@ -652,7 +656,7 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
             {library && <VideoLibrary videos={videos.filter(v => !v.url || linkAlive(v.url))} onClose={() => setLibrary(null)} />}
 
             {mode === "music" ? (
-                <MusicStudio headers={headers} chat={chat} updateChat={updateChat} onUnauthorized={onUnauthorized} top={business} />
+                <MusicStudio headers={headers} chat={chat} updateChat={updateChat} onUnauthorized={onUnauthorized} top={business} brief={brief} model={model} />
             ) : mode === "video" ? (
                 <VideoStudio headers={headers} chat={chat} updateChat={updateChat} brief={brief} model={model}
                     onUnauthorized={onUnauthorized} top={business} idea={videoIdea} setIdea={setVideoIdea} onRendered={loadVideos} />
@@ -692,7 +696,8 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
                     disabled={working || !brief.trim()}
                     placements={placements} togglePlacement={id => set("placements", p => { const now = (p || []).map(platform); return now.includes(id) ? now.filter(x => x !== id) : [...now, id]; })}
                     count={count} setCount={v => set("count", v)} aspect={aspect} setAspect={setAspect}
-                    refs={refs} setRefs={setRefs} budget={budget} />
+                    refs={refs} setRefs={setRefs} budget={budget}
+                    improve={{ headers, brief, model, extra: [area && `Area: ${area}`, placements.length && `Platforms: ${placements.map(placementLabel).join(", ")}`].filter(Boolean).join(". ") }} />
             </>)}
         </div>
     );
