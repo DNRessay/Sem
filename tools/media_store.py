@@ -54,6 +54,16 @@ async def save(data_b64: str, mime: str, kind: str) -> str | None:
     return link(key)
 
 
+def new_key(kind: str, mime: str) -> str:
+    return f"{kind}/{time.strftime('%Y-%m-%d')}/{uuid.uuid4().hex}.{_EXT[mime]}"
+
+
+def presign_put(key: str, mime: str, expires: int = 6 * 3600) -> str:
+    """A URL someone else (a Modal function) can PUT the file to directly, so it never passes through the API."""
+    return _client().generate_presigned_url("put_object", Params={"Bucket": settings.MEDIA_BUCKET, "Key": key,
+                                                                  "ContentType": mime}, ExpiresIn=expires)
+
+
 def presigned(key: str) -> str:
     return _client().generate_presigned_url("get_object", Params={"Bucket": settings.MEDIA_BUCKET, "Key": key}, ExpiresIn=600)
 

@@ -394,6 +394,13 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref CacheTable
+        # Finishing videos (design_router.advance_all): presigned uploads and copying a joined video to S3.
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObject
+              Resource: !Sub "arn:aws:s3:::${MediaBucket}/*"
       Events:
         ScheduledTick:
           Type: Schedule

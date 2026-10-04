@@ -6,6 +6,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from cache import ddb_backend
+from config import settings
 from gateway.auth import require_account
 from pipeline.activity import log, session_for
 from pipeline.ad_studio import PLACEMENTS, write_variants
@@ -120,7 +121,7 @@ async def _video_result(job_id: str) -> dict:
     saved = ddb_backend.get("video_url", job_id)
     if saved:
         return json.loads(saved)
-    result = await video_call("status", job_id=job_id)
+    result = await video_call("status", job_id=job_id, timeout=240)
     if result.get("status") == "done" and result.get("base64"):
         url = await media_store.save(result["base64"], result.get("mime") or "video/mp4", "video")
         if url:
@@ -199,6 +200,28 @@ def _save_project(account_id: str, project: dict):
     ddb_backend.set("video_project", f"{account_id}:{project['id']}", json.dumps(project), ttl=media_store.KEEP_SECONDS)
     ids = [project["id"], *[i for i in _project_ids(account_id) if i != project["id"]]][:MAX_PROJECTS]
     ddb_backend.set(VIDEO_PROJECTS, account_id, json.dumps(ids), ttl=media_store.KEEP_SECONDS)
+    ref = f"{account_id}:{project['id']}"
+    for job in [s.get("job_id") for s in project["scenes"]] + [project.get("stitch_job")]:
+        if job:  # lets Modal's "done" callback find the project from a job id
+            ddb_backend.set("video_job_owner", job, ref, ttl=media_store.KEEP_SECONDS)
+    active = _active()
+    if project["status"] in ("done", "failed", "scene_failed"):
+        active = [a for a in active if a != ref]
+    elif ref not in active:
+        active = [*active, ref]
+    ddb_backend.set("video_active", "all", json.dumps(active[-50:]), ttl=media_store.KEEP_SECONDS)
+
+
+def _active() -> list[str]:
+    try:
+        return json.loads(ddb_backend.get("video_active", "all", fresh=True) or "[]")
+    except ValueError:
+        return []
+
+
+def _callback_url() -> str:
+    base = (settings.PUBLIC_API_URL or "").rstrip("/")
+    return f"{base}/design/video/callback" if base else ""
 
 
 @router.get("/video/formats")
@@ -258,7 +281,8 @@ async def video_project(request: Request, account: dict = Depends(require_accoun
                                      for s in scenes])
     jobs = []
     for s, prompt in zip(scenes, prompts):
-        result = await video_call("submit", prompt=prompt, aspect_ratio=aspect, seconds=5, fast=bool(body.get("fast")))
+        result = await video_call("submit", prompt=prompt, aspect_ratio=aspect, seconds=5, fast=bool(body.get("fast")),
+                                  callback=_callback_url())
         if not result.get("ok"):
             if not jobs:
                 raise HTTPException(400, result.get("error") or "video submit failed")
@@ -294,25 +318,80 @@ async def _advance(account_id: str, project: dict) -> dict:
             project["status"] = "scene_failed"
             changed = True
     elif all(s.get("status") == "done" for s in project["scenes"]):
+        latest = _project(account_id, project["id"]) or project
+        if latest.get("stitch_job") and not project.get("stitch_job"):
+            project = latest  # a callback or another poll already started the join
         if not project.get("stitch_job"):
+            # Modal uploads the joined video straight to S3 (a presigned PUT): a long video sent back through the
+            # API timed out, so finished videos never arrived.
+            key, upload_url = "", ""
+            if media_store.enabled():
+                key = media_store.new_key("video", "video/mp4")
+                upload_url = await asyncio.to_thread(media_store.presign_put, key, "video/mp4")
             joined = await video_call("stitch", job_ids=[s["job_id"] for s in project["scenes"]],
-                                      audio_url=project.get("audio_url") or "")
+                                      audio_url=project.get("audio_url") or "", upload_url=upload_url,
+                                      callback=_callback_url())
             if joined.get("ok"):
-                project["stitch_job"], project["status"] = joined["job_id"], "joining"
+                project.update(stitch_job=joined["job_id"], status="joining", final_key=key)
             else:
                 project["status"], project["error"] = "failed", joined.get("error") or "couldn't join the scenes"
             changed = True
         else:
-            result = await _video_result(project["stitch_job"])
-            if result.get("status") == "done" and result.get("url"):
-                project.update(status="done", url=result["url"], voice=bool(result.get("voice")))
+            peek = await video_call("peek", job_id=project["stitch_job"])
+            if peek.get("status") == "failed":
+                project.update(status="failed", error=peek.get("error") or "couldn't join the scenes")
                 changed = True
-            elif result.get("status") == "failed":
-                project.update(status="failed", error=result.get("error") or "couldn't join the scenes")
-                changed = True
+            elif peek.get("status") == "done":
+                result = await video_call("status", job_id=project["stitch_job"], timeout=240)
+                if result.get("uploaded") and project.get("final_key"):
+                    project.update(status="done", url=media_store.link(project["final_key"]), voice=bool(result.get("voice")))
+                    changed = True
+                elif result.get("base64"):  # joined before uploads existed: copy it to S3 once
+                    url = await media_store.save(result["base64"], "video/mp4", "video")
+                    if url:
+                        project.update(status="done", url=url, voice=bool(result.get("voice")))
+                        changed = True
+                elif result.get("status") == "failed":
+                    project.update(status="failed", error=result.get("error") or "couldn't join the scenes")
+                    changed = True
     if changed:
         _save_project(account_id, project)
     return project
+
+
+@router.post("/video/callback")
+async def video_callback(request: Request):
+    """Modal calls this when a scene or a join finishes, so the next step runs with nobody's app open."""
+    from gateway.auth import secret_matches
+
+    given = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    if not secret_matches(given, settings.MODAL_VIDEO_SECRET):
+        raise HTTPException(401, "Bad token")
+    body = await request.json()
+    ref = ddb_backend.get("video_job_owner", str(body.get("job_id") or ""), fresh=True)
+    if not ref:
+        return {"ok": True, "ignored": "not part of a video project"}
+    account_id, pid = ref.split(":", 1)
+    project = _project(account_id, pid)
+    if not project:
+        return {"ok": True, "ignored": "project gone"}
+    project = await _advance(account_id, project)
+    return {"ok": True, "status": project["status"]}
+
+
+async def advance_all() -> dict:
+    """The tick's safety net (every 15 min): moves every unfinished video on, in case a callback was missed."""
+    moved = {}
+    for ref in _active():
+        account_id, pid = ref.split(":", 1)
+        project = _project(account_id, pid)
+        if not project:
+            continue
+        try:
+            moved[pid] = (await _advance(account_id, project))["status"]
+        except Exception as e:
+            moved[pid] = f"error: {str(e)[:120]}"
+    return moved
 
 
 @router.get("/video/project/{pid}")
@@ -331,7 +410,7 @@ async def video_project_retry(pid: str, index: int, account: dict = Depends(requ
         raise HTTPException(404, "No such scene")
     scene = project["scenes"][index]
     result = await video_call("submit", prompt=scene["prompt"], aspect_ratio=project["aspect_ratio"], seconds=5,
-                              fast=bool(project.get("fast")))
+                              fast=bool(project.get("fast")), callback=_callback_url())
     if not result.get("ok"):
         raise HTTPException(400, result.get("error") or "video submit failed")
     scene.update(job_id=result["job_id"], status="rendering", error="")
