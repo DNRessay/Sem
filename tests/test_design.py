@@ -545,3 +545,26 @@ async def test_a_picked_model_that_fails_falls_back_to_the_free_ones(monkeypatch
     monkeypatch.setattr(ad_studio.llm_providers, "complete", fake_complete)
     out = await ad_studio.write_variants("bakery", "intro", ["instagram"], 1, "bonsai")
     assert out["ok"] and asked == ["bonsai", "gemini", "groq"]
+
+
+def test_improve_rewrites_a_rough_idea_per_tool(client, monkeypatch):
+    from pipeline import prompt_helper
+
+    seen = []
+
+    async def fake_complete(choice, messages, max_tokens=4096, **k):
+        seen.append(messages[0]["content"])
+        if "ACE-Step" in messages[0]["content"]:
+            return {"content": '{"text": "amapiano, 112 bpm, log drums, instrumental", "lyrics": ""}', "_provider": "groq"}
+        return {"content": '```json\n{"text": "Free website check for Soweto businesses, this month only. Book on WhatsApp."}\n```',
+                "_provider": "groq"}
+
+    monkeypatch.setattr(prompt_helper.llm_providers, "complete", fake_complete)
+    r = client.post("/design/improve", json={"kind": "images", "text": "free website check", "brief": "Vicinic",
+                                             "extra": "Area: Soweto"})
+    assert r.status_code == 200 and r.json()["text"].startswith("Free website check for Soweto")
+    assert "Area: Soweto" in seen[0] and "campaign brief" in seen[0]
+    music = client.post("/design/improve", json={"kind": "music", "text": "amapiano vibe"}).json()
+    assert music["text"].startswith("amapiano") and music["lyrics"] == ""
+    assert client.post("/design/improve", json={"kind": "nope", "text": "x"}).status_code == 400
+    assert client.post("/design/improve", json={"kind": "web", "text": " "}).status_code == 400

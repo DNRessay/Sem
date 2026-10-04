@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { runStream } from "../utils/runs";
 import { copyToClipboard } from "../utils/clipboard";
 import { SendIcon } from "./Icons";
+import ImproveButton from "./ImproveButton";
 
 const API = import.meta.env.VITE_API_URL || "";
 const btn = {
@@ -246,6 +247,9 @@ export default function WebStudio({ headers, chat, updateChat, brief, site, mode
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                     <span className="ds-muted" style={{ flex: 1 }}>{!brief.trim() ? "Add the business brief first" : page ? `Changes version ${shown + 1}` : "New page"}</span>
                     {page && <button className="ds-btn sm" disabled={!draft.trim() || !!busy || !brief.trim()} onClick={() => makePage(draft.trim(), true)}>Start over</button>}
+                    <ImproveButton headers={headers} kind="web" text={draft} setText={setDraft} brief={brief} model={model}
+                        extra={[site && `Website: ${site}`, page && "This changes an existing page: keep it a short change request."].filter(Boolean).join(". ")}
+                        disabled={!!busy} onError={setNotice} />
                     <button className="ds-send btn-primary" onClick={send} disabled={!draft.trim() || !!busy || !brief.trim()} aria-label="Send" style={{ border: "none" }}><SendIcon size={18} /></button>
                 </div>
             </div>

@@ -10,6 +10,7 @@ from config import settings
 from gateway.auth import require_account
 from pipeline.activity import log, session_for
 from pipeline.ad_studio import PLACEMENTS, write_variants
+from pipeline.prompt_helper import improve
 from pipeline.runs import durable
 from pipeline.site_brief import learn_site
 from pipeline.video_studio import CLIP_USD, FAST_CLIP_USD, FORMATS, estimate, extend_prompt, needs_extending, plan_video
@@ -228,6 +229,17 @@ def _callback_url() -> str:
 async def video_formats(_account: dict = Depends(require_account)):
     return {"formats": FORMATS, "clip_seconds": 5, "clip_usd": CLIP_USD, "fast_clip_usd": FAST_CLIP_USD,
             "voices": list(gemini_media.VOICES)}
+
+
+@router.post("/improve")
+async def improve_prompt(request: Request, _account: dict = Depends(require_account)):
+    """✨ Improve: a rough idea → the detailed prompt the Images, Music or Web tool works best with."""
+    body = await request.json()
+    result = await improve(body.get("kind") or "", body.get("text") or "", body.get("brief") or "",
+                           body.get("extra") or "", body.get("model") or "auto")
+    if not result["ok"]:
+        raise HTTPException(400, result["error"])
+    return result
 
 
 MUSIC_SECONDS = (15, 30, 60, 120)
