@@ -53,16 +53,12 @@ FAST_LORA_FILE = os.environ.get("SEMBLANCE_VIDEO_FAST_FILE", "Wan21_CausVid_bidi
 FAST_STEPS = int(os.environ.get("SEMBLANCE_VIDEO_FAST_STEPS", "6"))
 _NEGATIVE = ("色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，"
              "残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，"
-             "三条腿，背景人很多，倒着走, text, subtitles, letters, words, watermark, logo, blurry, low quality, deformed, "
-             "overexposed, static frame, jpeg artifacts")
-# A scene that asks for words in quotes ("VICINIC" on the screen) mustn't be told to avoid text at the same time.
-_NEGATIVE_WITH_TEXT = _NEGATIVE.replace("字幕，", "").replace(" text, subtitles, letters, words, watermark, logo,", " watermark, misspelled text,")
-
-
-def negative_for(prompt: str) -> str:
-    import re
-
-    return _NEGATIVE_WITH_TEXT if re.search(r'["“][^"”]{2,40}["”]', prompt or "") else _NEGATIVE
+             "三条腿，背景人很多，倒着走，多余的手臂，多余的手，三只手, text, subtitles, letters, words, watermark, logo, "
+             "extra arms, extra hands, third hand, extra limbs, missing limbs, extra fingers, too many fingers, fused fingers, "
+             "mutated hands, malformed hands, deformed hands, floating hands, duplicate objects, distorted face, warped face, "
+             "morphing, melting, flickering, motion blur, blurry motion, smeared frames, ghosting, blurry, low quality, "
+             "deformed, overexposed, static frame, jpeg artifacts")
+# Wan can't spell, so text stays in the negative for every scene (on-screen names came out as "VICIIC").
 
 
 IMAGE_MODEL_ID = os.environ.get("SEMBLANCE_IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell")
@@ -226,7 +222,7 @@ class Generator:
         try:
             if not self.fast_error:
                 self.pipe.set_adapters(["fast"], [1.0 if fast else 0.0])
-            video = self.pipe(prompt=prompt, negative_prompt=negative_for(prompt), height=height, width=width, num_frames=frames,
+            video = self.pipe(prompt=prompt, negative_prompt=_NEGATIVE, height=height, width=width, num_frames=frames,
                               guidance_scale=1.0 if fast else GUIDANCE,
                               num_inference_steps=FAST_STEPS if fast else STEPS).frames[0]
             path = f"/tmp/{int(time.time() * 1000)}.mp4"
