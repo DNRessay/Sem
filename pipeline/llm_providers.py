@@ -61,6 +61,9 @@ PROVIDERS = {p.id: p for p in [
 ]}
 HF_PREFIX = "hf:"
 FREE_ORDER = ("bonsai", "gemini", "groq")
+# Voice mode ("fast"): the quickest to start answering first. Groq streams its first words in well under a second;
+# the self-hosted Bonsai can take many seconds (more from cold), which the user hears as silence.
+FAST_ORDER = ("groq", "gemini", "bonsai")
 # Cheapest first — offered (never switched to silently) when every free model is out.
 PAID_ORDER = ("qwen", "deepseek", "kimi", "openai", "anthropic")
 
@@ -102,7 +105,8 @@ def _chain(choice: str) -> list[Provider]:
     choice, _ = _split(choice)
     if choice in PROVIDERS and PROVIDERS[choice].configured:
         return [PROVIDERS[choice]]
-    return [PROVIDERS[i] for i in FREE_ORDER if PROVIDERS[i].configured]
+    order = FAST_ORDER if choice == "fast" else FREE_ORDER
+    return [PROVIDERS[i] for i in order if PROVIDERS[i].configured]
 
 
 def estimate_tokens(messages: list[dict], reply: dict) -> int:
@@ -212,7 +216,7 @@ async def complete(choice: str, messages: list[dict], tools: list[dict] | None =
     finally:
         if owns_client:
             await client.aclose()
-    if choice == "auto" and (last.get("rate_limited") or last.get("unavailable")):
+    if choice in ("auto", "fast") and (last.get("rate_limited") or last.get("unavailable")):
         # The free chain is exhausted for now; the UI asks before using a paid model.
         last = {**last, "suggest": cheapest_paid()}
     if len(errors) > 1:

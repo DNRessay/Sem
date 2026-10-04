@@ -62,7 +62,7 @@ class Bootstrap:
     async def run(
         self, query: str, session_id: str, history: list, images: list | None = None,
         display_query: str | None = None, assistant_prefix: str = "", provider: str = "auto",
-        use_tools: bool = False,
+        use_tools: bool = False, spoken: bool = False,
     ) -> AsyncIterator[str | dict]:
         """`query` is what actually reaches the model — it may have
         attachments or fetched/searched web content folded into it.
@@ -96,6 +96,11 @@ class Bootstrap:
 
         # Step 6 - ctx pressure before we hit the LLM
         full_ctx = self.ctx_pressure.apply(f"{ctx}\n\n{memory_block}\n\n{skills_block}")
+        if spoken:
+            # Voice mode: the reply is read aloud, and a short one is ready (and spoken) sooner.
+            full_ctx += ("\n\nVoice mode: the user is talking to you and hears your reply read aloud. Answer like a "
+                         "person speaking: one to three short sentences unless they ask for more detail. No lists, "
+                         "tables, headings, links or code; say numbers and dates the way you'd say them.")
 
         # Step 4 - query engine: direct Groq call, cached, cost-tracked,
         # streamed token-by-token as Groq generates it

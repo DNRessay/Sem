@@ -297,7 +297,7 @@ export default function ChatWindow({ sessionId = "default", initialHistory = [],
             </div>
             {voiceOn && <VoiceMode token={token} send={(m, opts) => submit(m, undefined, opts)} busy={streaming || !!pendingReply} onClose={() => setVoiceOn(false)}
                 lastReply={[...history].reverse().find(m => m.role === "assistant")?.content || ""}
-                liveReply={streaming ? chunks.join("") : ""} />}
+                liveReply={streaming ? chunks.join("") : ""} status={streaming ? status || "" : ""} />}
         </div>
     );
 }

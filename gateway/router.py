@@ -174,6 +174,8 @@ async def _fold_attachments(user_msg: str, attachments: list, session_id: str) -
 @router.post("/chat")
 async def chat(request: Request, trust: str = Depends(_get_trust), _account: dict = Depends(require_account)):
     body = await request.json()
+    if body.get("voice_mode") and (body.get("model") or "auto") == "auto":
+        body["model"] = "fast"  # voice: the model that starts answering soonest (llm_providers.FAST_ORDER)
     raw_msg = body.get("message", "")
     session_id = body.get("session_id", "default")
     history = body.get("history", [])
@@ -543,7 +545,7 @@ async def chat(request: Request, trust: str = Depends(_get_trust), _account: dic
         async for chunk in bootstrap.run(
             msg, session_id, history, images=images,
             display_query=raw_msg, assistant_prefix=tool_marker, provider=body.get("model") or "auto",
-            use_tools=True,
+            use_tools=True, spoken=bool(body.get("voice_mode")),
         ):
             if isinstance(chunk, dict):
                 yield f"data: {json.dumps(chunk)}\n\n"

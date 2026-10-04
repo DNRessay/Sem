@@ -24,6 +24,7 @@ function timings(text, ms) {
 const AvatarStage = forwardRef(function AvatarStage({ onFail, height = 300 }, ref) {
     const box = useRef(null);
     const head = useRef(null);
+    const acting = useRef(null);
     const [progress, setProgress] = useState(0);
     const [ready, setReady] = useState(false);
 
@@ -47,7 +48,7 @@ const AvatarStage = forwardRef(function AvatarStage({ onFail, height = 300 }, re
                 if (!dead) onFail?.(String(e));
             }
         })();
-        return () => { dead = true; head.current?.stop?.(); };
+        return () => { dead = true; clearInterval(acting.current); head.current?.stop?.(); };
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     const playBuffer = async (buffer, text) => {
@@ -63,6 +64,31 @@ const AvatarStage = forwardRef(function AvatarStage({ onFail, height = 300 }, re
         mood: (m) => head.current?.setMood(m),
         gesture: (g) => head.current?.playGesture(g, 2.5),
         stop: () => head.current?.stopSpeaking(),
+        // Acts out what Sem is doing while it works (WorkProps shows the prop): eyes down on the laptop, book or
+        // paper with the odd hand move; looking up with a shrug while thinking. act(null) looks back at you.
+        act(kind) {
+            const h = head.current;
+            clearInterval(acting.current);
+            acting.current = null;
+            if (!h) return;
+            const safe = fn => { try { fn(); } catch { /* older TalkingHead: skip that move */ } };
+            const w = box.current?.clientWidth || 300, ht = box.current?.clientHeight || 300;
+            if (!kind) { safe(() => h.setMood("neutral")); safe(() => h.makeEyeContact?.(800)); return; }
+            const moves = {
+                laptop: () => { safe(() => h.lookAt?.(w * 0.5, ht * 1.1, 1400)); if (Math.random() < 0.35) safe(() => h.playGesture("index", 1.6)); },
+                book: () => { safe(() => h.lookAt?.(w * (0.35 + Math.random() * 0.3), ht * 1.05, 1500)); },
+                newspaper: () => { safe(() => h.lookAt?.(w * (0.3 + Math.random() * 0.4), ht * 0.9, 1500)); if (Math.random() < 0.2) safe(() => h.playGesture("side", 1.5)); },
+                paint: () => { safe(() => h.lookAt?.(w * 0.7, ht * 1.0, 1200)); if (Math.random() < 0.3) safe(() => h.playGesture("ok", 1.4)); },
+                thinking: () => {
+                    safe(() => h.lookAt?.(w * (Math.random() < 0.5 ? 0.15 : 0.85), -ht * 0.2, 1600));
+                    if (Math.random() < 0.45) safe(() => h.playGesture(Math.random() < 0.5 ? "shrug" : "handup", 2));
+                },
+            };
+            safe(() => h.setMood(kind === "thinking" ? "neutral" : "happy"));
+            const move = moves[kind] || moves.thinking;
+            move();
+            acting.current = setInterval(move, 2600);
+        },
         async speakAudio(base64, text) {
             const h = head.current;
             const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));

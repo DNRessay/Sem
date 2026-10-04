@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import AvatarStage from "./AvatarStage";
 import { GoldS } from "./Working";
 import { canRecord, recordUtterance, transcribe } from "../utils/recordWav";
+import WorkProp, { ACTIVITY_LABEL, activityFrom } from "./WorkProps";
 
 const API = import.meta.env.VITE_API_URL || "";
 const MAX_SPOKEN = 1200;
@@ -38,7 +39,7 @@ export function speakableCut(text, min) {
 // Natural voice: the server makes each sentence's audio while the reply streams and sends it in the same
 // stream (pipeline/voice_stream.py). Fast voice: the phone reads the text itself.
 // Tap the orb to cut Sem off and talk; End to stop. The chat keeps every turn.
-export default function VoiceMode({ token, send, busy, lastReply, liveReply = "", onClose }) {
+export default function VoiceMode({ token, send, busy, lastReply, liveReply = "", status = "", onClose }) {
     const [phase, setPhase] = useState("listening"); // listening | thinking | speaking | paused
     const [heard, setHeard] = useState("");
     const [note, setNote] = useState("");
@@ -81,7 +82,7 @@ export default function VoiceMode({ token, send, busy, lastReply, liveReply = ""
                         queue: [], playing: false, gen: gen.current,
                         server: engineRef.current === "natural", heard: 0 };
             turn.current = t;
-            send(text, t.server ? { voice: true, onSpeech: ev => onSpeech(t, ev) } : {});
+            send(text, t.server ? { voice: true, voiceMode: true, onSpeech: ev => onSpeech(t, ev) } : { voiceMode: true });
         } else setTimeout(() => open.current && phaseRef.current === "listening" && listen(), 250);
     };
 
@@ -256,7 +257,10 @@ export default function VoiceMode({ token, send, busy, lastReply, liveReply = ""
     const pause = () => { recog.current?.abort(); stopSpeaking(); turn.current = null; setPhase("paused"); };
     const end = () => { open.current = false; recog.current?.abort(); stopSpeaking(); onClose(); };
 
-    const label = { listening: heard ? "" : "Listening…", thinking: "Sem is working…", speaking: "Tap to interrupt", paused: "Paused — tap to talk" }[phase];
+    // While Sem works (before it speaks), act out what it's doing: laptop, book, newspaper, palette or thinking.
+    const activity = phase === "thinking" ? activityFrom(status, true) : null;
+    useEffect(() => { avatar.current?.ready() && avatar.current.act(activity); }, [activity]); // eslint-disable-line react-hooks/exhaustive-deps
+    const label = { listening: heard ? "" : "Listening…", thinking: status || ACTIVITY_LABEL[activity] || "Sem is working…", speaking: "Tap to interrupt", paused: "Paused — tap to talk" }[phase];
     const pill = (active) => ({ border: "1px solid var(--border)", borderRadius: "999px", padding: "4px 12px", cursor: "pointer", fontSize: "12px",
                                 background: "transparent", color: active ? "var(--text)" : "var(--text-muted)" });
     return (
@@ -297,7 +301,9 @@ export default function VoiceMode({ token, send, busy, lastReply, liveReply = ""
                         {phase === "thinking" ? <GoldS size={70} /> : <span style={{ fontSize: "64px", fontWeight: 800, color: "#5a3d00", fontFamily: "Georgia, serif" }}>S</span>}
                     </div>
                 )}
-                {useAvatar && phase === "thinking" && <div style={{ position: "absolute", top: "8px" }}><GoldS size={30} /></div>}
+                {activity && (useAvatar
+                    ? <WorkProp kind={activity} size={Math.min(190, window.innerWidth * 0.42)} style={{ position: "absolute", bottom: "4%", left: "50%", transform: "translateX(-50%)", pointerEvents: "none" }} />
+                    : <WorkProp kind={activity} size={130} style={{ position: "absolute", bottom: "6%", pointerEvents: "none" }} />)}
             </div>
 
             <div style={{ minHeight: "64px", maxHeight: "22vh", overflowY: "auto", textAlign: "center", padding: "0 6px", fontSize: "16px", lineHeight: 1.5,

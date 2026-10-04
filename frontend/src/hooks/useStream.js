@@ -59,7 +59,7 @@ export function useStream(baseUrl = "", token = "", onUnauthorized) {
             // finishes it and the missed part is fetched when the page is back (utils/runs.js).
             const r = await runStream("/chat", {
                 headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-                body: { message, session_id: sessionId, history, attachments, web_search_enabled: webSearchEnabled, model, research, ...(opts.voice ? { voice: true } : {}) },
+                body: { message, session_id: sessionId, history, attachments, web_search_enabled: webSearchEnabled, model, research, ...(opts.voice ? { voice: true } : {}), ...(opts.voiceMode ? { voice_mode: true } : {}) },
                 signal: abortRef.current.signal,
                 onEvent,
             });

@@ -14,7 +14,7 @@ class FakeBootstrap:
         pass
 
     async def run(self, query, session_id, history, images=None, display_query=None, assistant_prefix="",
-                  provider="auto", use_tools=False):
+                  provider="auto", use_tools=False, spoken=False):
         FakeBootstrap.seen = {"query": query, "session": session_id, "history": history, "display": display_query}
         yield {"usage": 10}
         yield "Hello "
