@@ -63,6 +63,7 @@ PROVIDERS = {p.id: p for p in [
 HF_PREFIX = "hf:"
 _log = logging.getLogger("semblance.llm")
 FREE_ORDER = ("bonsai", "gemini", "groq")
+LONG_REPLY_TOKENS = 3500
 # Voice mode ("fast"): the quickest to start answering first. Groq streams its first words in well under a second;
 # the self-hosted Bonsai can take many seconds (more from cold), which the user hears as silence.
 FAST_ORDER = ("groq", "gemini", "bonsai")
@@ -149,12 +150,15 @@ def _for_provider(p: Provider, messages: list[dict]) -> list[dict]:
 
 
 async def _complete_openai(p: Provider, client: httpx.AsyncClient, messages: list[dict],
-                           tools: list[dict] | None, max_tokens: int, deadline: float, model: str = "") -> dict:
+                           tools: list[dict] | None, max_tokens: int, deadline: float, model: str = "",
+                           long_reply: bool = False) -> dict:
     if p.id == "bonsai":
         from pipeline.query_engine import wait_for_local_llm
         if not await wait_for_local_llm(client, min(deadline, time.monotonic() + 110)):
             return {"error": "the self-hosted model didn't come up in time", "unavailable": True}
-    body = {"model": model or p.model, "messages": _for_provider(p, messages), "max_tokens": min(max_tokens, p.max_tokens)}
+    # A provider's cap keeps chat inside free-tier token budgets; a one-off long piece (a storyboard) may go past it.
+    cap = max(p.max_tokens, LONG_REPLY_TOKENS) if long_reply else p.max_tokens
+    body = {"model": model or p.model, "messages": _for_provider(p, messages), "max_tokens": min(max_tokens, cap)}
     if tools:
         body["tools"] = tools
     r = await client.post(p.url(), json=body,
@@ -179,7 +183,7 @@ async def _complete_openai(p: Provider, client: httpx.AsyncClient, messages: lis
 
 async def complete(choice: str, messages: list[dict], tools: list[dict] | None = None,
                    max_tokens: int = 4096, deadline: float | None = None,
-                   client: httpx.AsyncClient | None = None) -> dict:
+                   client: httpx.AsyncClient | None = None, long_reply: bool = False) -> dict:
     """One assistant turn from the chosen provider (or the free chain for
     "auto"). Returns an OpenAI-style message dict, or {"error": ...}. The
     message carries "_provider" so callers can show who answered."""
@@ -200,7 +204,8 @@ async def complete(choice: str, messages: list[dict], tools: list[dict] | None =
                     if p.id == "anthropic":
                         result = await anthropic_provider.complete(messages, tools, max_tokens)
                     else:
-                        result = await _complete_openai(p, client, messages, tools, max_tokens, deadline, model_override)
+                        result = await _complete_openai(p, client, messages, tools, max_tokens, deadline, model_override,
+                                                        long_reply)
                 except httpx.HTTPError as e:
                     result = {"error": f"{p.label} unreachable: {e}", "unavailable": True}
                 if "error" not in result:

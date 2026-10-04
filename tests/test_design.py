@@ -593,3 +593,30 @@ def test_slow_images_dont_hang_the_round(client, monkeypatch):
     final = {e["index"]: e["type"] for e in events if e["type"] in ("image", "image_error")}
     assert final == {0: "image", 1: "image_error", 2: "image"}
     assert "busy" in next(e["error"] for e in events if e.get("index") == 1 and e["type"] == "image_error")
+
+
+async def test_storyboard_falls_back_to_the_fast_model_first_with_room_for_a_long_reply(monkeypatch):
+    from pipeline import video_studio
+
+    asked = []
+
+    async def fake_complete(choice, messages, max_tokens=4096, long_reply=False, **k):
+        asked.append((choice, long_reply))
+        if choice == "gemini":
+            return {"error": "Gemini Flash error 503: high demand"}
+        return {"content": '{"title": "t", "style": "s", "scenes": [{"prompt": "p1"}, {"prompt": "p2"}, {"prompt": "p3"}]}',
+                "_provider": choice}
+
+    for pid in ("bonsai", "gemini", "groq"):
+        monkeypatch.setattr(video_studio.llm_providers.PROVIDERS[pid].__class__, "configured", property(lambda self: True))
+    monkeypatch.setattr(video_studio.llm_providers, "complete", fake_complete)
+    plan = await video_studio.plan_video("brief", "phone walk", 15, "short", True, "auto")
+    assert plan["ok"] and len(plan["scenes"]) == 3
+    assert asked == [("gemini", True), ("groq", True)]  # Bonsai (minutes) never needed
+
+
+def test_long_replies_may_go_past_a_providers_chat_cap():
+    from pipeline import llm_providers
+
+    groq = llm_providers.PROVIDERS["groq"]
+    assert groq.max_tokens < llm_providers.LONG_REPLY_TOKENS
