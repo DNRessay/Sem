@@ -51,6 +51,7 @@ export default function VoiceMode({ token, send, busy, lastReply, liveReply = ""
     const choose = (key, set) => (v) => { set(v); try { localStorage.setItem(key, v); } catch { /* private mode */ } };
     const open = useRef(true);
     const recog = useRef(null);
+    const browserSttBroken = useRef(false); // Chrome speech recognition failed this session: use Whistle instead
     const audio = useRef(null);
     const ctx = useRef(null);
     const engineRef = useRef(engine); engineRef.current = engine;
@@ -105,7 +106,7 @@ export default function VoiceMode({ token, send, busy, lastReply, liveReply = ""
     const listen = () => {
         if (!open.current) return;
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SR && canRecord()) { listenWithWhistle(); return; }
+        if ((!SR || browserSttBroken.current) && canRecord()) { listenWithWhistle(); return; }
         if (!SR) { setNote("Voice isn't supported in this browser — try Chrome."); setPhase("paused"); return; }
         setPhase("listening"); setHeard(""); setNote("");
         const r = new SR();
@@ -122,7 +123,18 @@ export default function VoiceMode({ token, send, busy, lastReply, liveReply = ""
             clearTimeout(quiet);
             quiet = setTimeout(() => recog.current === r && r.stop(), SILENCE_MS);
         };
-        r.onerror = (e) => { if (e.error === "not-allowed") { setNote("Microphone blocked — allow it in the browser."); setPhase("paused"); } };
+        r.onerror = (e) => {
+            if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+                setNote("Microphone blocked — allow it in the browser."); setPhase("paused");
+            } else if (["network", "audio-capture", "language-not-supported"].includes(e.error) && canRecord()) {
+                // Chrome's recogniser is down or can't get the mic (another app, e.g. a video pop-up, may hold it):
+                // record ourselves and let Whistle on the server write it down, for the rest of this session.
+                browserSttBroken.current = true;
+                setNote(e.error === "audio-capture" ? "Another app may be using the microphone — trying again…" : "");
+            } else if (e.error !== "no-speech" && e.error !== "aborted") {
+                setNote(`Voice error: ${e.error}`);
+            }
+        };
         r.onend = () => {
             clearTimeout(quiet);
             recog.current = null;
