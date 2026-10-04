@@ -13,12 +13,13 @@ class CodeWorkspace:
     Every bash command passes BashTool's 23 security checks here first, then
     runs inside the Modal container — never in this Lambda."""
 
-    def __init__(self, provider: str, repo: str):
+    def __init__(self, provider: str, repo: str, token: str | None = None):
         self.provider = provider
         self.repo = repo
+        self.token = token  # lets a call re-clone by itself if the clone is missing
         self._gate = BashTool()
 
-    async def _call(self, action: str, http_timeout: float = 90, **kwargs) -> dict:
+    async def _call(self, action: str, http_timeout: float = 90, _reopened: bool = False, **kwargs) -> dict:
         if not settings.MODAL_REPO_URL:
             return {"ok": False, "error": "MODAL_REPO_URL not set — deploy modal_app/repo_tool.py first"}
         body = {"action": action, "provider": self.provider, "repo": self.repo, "namespace": NAMESPACE, **kwargs}
@@ -29,6 +30,12 @@ class CodeWorkspace:
                 result = r.json()
         except (httpx.HTTPError, ValueError) as e:
             return {"ok": False, "error": f"workspace unreachable: {e}"}
+        if not _reopened and action != "clone_or_pull" and str(result.get("error") or "").startswith("repo not cloned yet"):
+            # The app thought the repo was open (it remembers that across reloads) but the clone is gone: make it
+            # again and carry on, instead of failing the user's request.
+            opened = await self.open(self.token)
+            if opened.get("ok"):
+                return await self._call(action, http_timeout=http_timeout, _reopened=True, **kwargs)
         if result.get("error") == "unauthorized":
             result["error"] = ("The Modal code workspace rejected Sem's key: the GitHub secret MODAL_REPO_SECRET must "
                                "equal REPO_TOOL_SECRET in the Modal secret semblance-repo-secret.")

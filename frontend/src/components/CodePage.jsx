@@ -150,6 +150,10 @@ function Automations({ token, provider, repo, onUnauthorized }) {
     );
 }
 
+const REOPEN_MS = 12 * 3600 * 1000;
+const savedOpen = c => (c?.opened && c.opened.repo === c.repo && c.opened.provider === c.provider
+    && Date.now() - (c.opened.at || 0) < REOPEN_MS ? c.opened : null);
+
 // Full-screen Code tab: a coding agent working in a clone of one repo on
 // Modal. Nothing reaches the repo until "Open PR" (or an automation) does.
 // Pick another repo (GitHub or GitLab) to add to this chat.
@@ -215,7 +219,14 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
     const [feedOpen, setFeedOpen] = useState(false);
     const [repos, setRepos] = useState([]);
     const [reposError, setReposError] = useState("");
-    const [opened, setOpened] = useState(null);
+    // "The repo is open" is kept with the chat, so a phone reloading the page doesn't clone/pull again before
+    // every first message; it's refreshed after REOPEN_MS or with "Pull latest".
+    const [opened, setOpenedState] = useState(() => savedOpen(chat));
+    useEffect(() => { setOpenedState(savedOpen(chat)); }, [chat.id, chat.repo, chat.provider]); // eslint-disable-line react-hooks/exhaustive-deps
+    const setOpened = v => {
+        setOpenedState(v);
+        if (v) updateChat(chat.id, () => ({ opened: { ...v, at: Date.now() } }));
+    };
     const [input, setInput] = useState("");
     const [files, setFiles] = useState([]);
     const [connectorsOpen, setConnectorsOpen] = useState(false);
@@ -296,7 +307,7 @@ export default function CodePage({ token, onNavigate, onUnauthorized, handoff, o
         try {
             const data = await post("/code/open", {});
             setOpened({ repo, provider, canOpenPr: data.can_open_pr });
-            setNotice(`${data.action === "pulled" ? "Updated" : "Cloned"} ${repo} — ${data.entries.length} entries at the root.`);
+            setNotice(data.action === "pulled" ? `Up to date with ${repo}.` : `Cloned ${repo} — ${data.entries.length} entries at the root.`);
             return true;
         } catch (e) { setNotice(e.message); return false; } finally { setBusy(""); }
     };
