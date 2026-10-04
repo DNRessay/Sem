@@ -8,12 +8,12 @@ import useAgentFeed from "../hooks/useAgentFeed";
 import TabDrawer, { MenuButton } from "./TabDrawer";
 import useTabChats, { newId } from "../hooks/useTabChats";
 import WebStudio from "./WebStudio";
+import VideoStudio from "./VideoStudio";
 import { CloseIcon, PaperclipIcon, SendIcon } from "./Icons";
 
 const API = import.meta.env.VITE_API_URL || "";
 const STORE_KEY = "semblance_design_campaigns";
-const MODE_KEY = "semblance_design_mode"; // "ads" | "web"
-const KIND_KEY = "semblance_design_kind"; // composer: "ads" | "video"
+const MODE_KEY = "semblance_design_mode"; // "ads" | "video" | "web"
 const OLD_KEY = "semblance_design";
 const MAX_TURNS = 30;
 const MAX_REFS = 4;
@@ -336,7 +336,7 @@ function VideoLibrary({ videos, onClose }) {
     );
 }
 
-function Composer({ kind, setKind, draft, setDraft, onSend, disabled, placements, togglePlacement, count, setCount,
+function Composer({ kind, draft, setDraft, onSend, disabled, placements, togglePlacement, count, setCount,
                     aspect, setAspect, refs, setRefs, budget }) {
     const [error, setError] = useState("");
     const box = useRef(null);
@@ -371,11 +371,6 @@ function Composer({ kind, setKind, draft, setDraft, onSend, disabled, placements
                     onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && window.matchMedia("(pointer: fine)").matches) { e.preventDefault(); if (ready) onSend(); } }}
                     placeholder={kind === "ads" ? "What are we promoting? e.g. Weekend special: 2 loaves for R80" : "Describe a 5-second clip, e.g. Slow close-up of steaming sourdough, warm morning light"} />
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <div className="ds-seg" role="tablist" aria-label="Make">
-                        {[["ads", "Ads"], ["video", "Video"]].map(([id, name]) => (
-                            <button key={id} role="tab" aria-selected={kind === id} onClick={() => setKind(id)}>{name}</button>
-                        ))}
-                    </div>
                     <div className="ds-chips" style={{ flex: 1, minWidth: 0 }}>
                         {kind === "ads" ? (<>
                             {PLACEMENTS.map(([id, name]) => (
@@ -433,8 +428,6 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
     // Inspiration images stay in memory only (too big for phone storage); the style text they produced is saved.
     const [refs, setRefs] = useState([]);
     const [draft, setDraft] = useState("");
-    const [kind, setKindState] = useState(() => { try { return localStorage.getItem(KIND_KEY) === "video" ? "video" : "ads"; } catch { return "ads"; } });
-    const setKind = k => { setKindState(k); try { localStorage.setItem(KIND_KEY, k); } catch { /* private mode */ } };
     const [aspect, setAspect] = useState("9:16");
     const [budget, setBudget] = useState(null);
     const [library, setLibrary] = useState(null); // null = closed
@@ -442,7 +435,8 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
     const [model, setModel] = useState(() => loadModel("semblance_design_model"));
     const [busy, setBusy] = useState(""); // Web mode's running step
     const [notice, setNotice] = useState("");
-    const [mode, setModeState] = useState(() => { try { return localStorage.getItem(MODE_KEY) === "web" ? "web" : "ads"; } catch { return "ads"; } });
+    const [mode, setModeState] = useState(() => { try { const m = localStorage.getItem(MODE_KEY); return ["web", "video"].includes(m) ? m : "ads"; } catch { return "ads"; } });
+    const [videoIdea, setVideoIdea] = useState("");
     const setMode = m => { setModeState(m); setNotice(""); try { localStorage.setItem(MODE_KEY, m); } catch { /* private mode */ } };
     const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
     const scroller = useRef(null);
@@ -474,7 +468,7 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
         if (handoff?.view !== "design" || takenHandoff.current === handoff.at) return;
         takenHandoff.current = handoff.at;
         newChat({ site, brief, placements, count, title: handoff.task.slice(0, 60) });
-        setMode("ads"); setKind("ads");
+        setMode("ads");
         setTimeout(() => setDraft(handoff.task), 0);
     }, [handoff]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -594,8 +588,7 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
         const text = draft.trim();
         if (!text) return;
         setDraft("");
-        if (kind === "video") renderVideo(text, aspect);
-        else createAds(text);
+        createAds(text);
     };
 
     const buildWithCode = turn => onHandoff && (() => onHandoff("code", [
@@ -617,7 +610,7 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
                 <MenuButton onClick={() => setMenuOpen(true)} />
                 <span style={{ fontWeight: 700, color: "var(--text)", whiteSpace: "nowrap" }}>Sem Design</span>
                 <div className="ds-seg" role="tablist" aria-label="Design mode">
-                    {[["ads", "Ads"], ["web", "Web"]].map(([id, name]) => (
+                    {[["ads", "Ads"], ["video", "Video"], ["web", "Web"]].map(([id, name]) => (
                         <button key={id} role="tab" aria-selected={mode === id} disabled={!!busy && mode !== id} onClick={() => setMode(id)}>{name}</button>
                     ))}
                 </div>
@@ -637,7 +630,10 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
                 subtitle={c => c.site || ""} />
             {library && <VideoLibrary videos={videos.filter(v => !v.url || linkAlive(v.url))} onClose={() => setLibrary(null)} />}
 
-            {mode === "web" ? (
+            {mode === "video" ? (
+                <VideoStudio headers={headers} chat={chat} updateChat={updateChat} brief={brief} model={model}
+                    onUnauthorized={onUnauthorized} top={business} idea={videoIdea} setIdea={setVideoIdea} onRendered={loadVideos} />
+            ) : mode === "web" ? (
                 <WebStudio headers={headers} chat={chat} updateChat={updateChat} brief={brief} site={site} model={model}
                     busy={busy} setBusy={setBusy} notice={notice} setNotice={setNotice} onUnauthorized={onUnauthorized} onHandoff={onHandoff} top={business} />
             ) : (<>
@@ -648,7 +644,7 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
                             <div className="ds-empty">
                                 <h2>What are we promoting?</h2>
                                 <div className="ds-muted" style={{ marginBottom: "14px" }}>
-                                    Describe the campaign below. Sem writes the copy and makes an image for every placement — or switch to Video for a 5-second clip.
+                                    Describe the campaign below. Sem writes the copy and makes an image for every placement. Videos have their own tab.
                                 </div>
                                 <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", justifyContent: "center" }}>
                                     {SUGGESTIONS.map(s => <button key={s} className="ds-chip" onClick={() => setDraft(s)}>{s}</button>)}
@@ -663,14 +659,14 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
                                 onRetry={i => retryImage(t.id, i)}
                                 onExpired={i => t.ads[i]?.image?.url && setTurn(chat.id, t.id, x => ({ ads: x.ads.map((y, j) => (j === i ? { ...y, image: null, imageError: EXPIRED } : y)) }))}
                                 onAgain={() => createAds(t.campaign, { placements: t.placements, count: t.count })}
-                                onVideo={() => { setKind("video"); setDraft(t.ads[0]?.image_prompt || t.campaign); }}
+                                onVideo={() => { setVideoIdea(`A short video for this campaign: ${t.campaign}`); setMode("video"); }}
                                 onBuild={buildWithCode(t)} />
                         )))}
                         {!brief.trim() && turns.length > 0 && <div className="ds-muted" style={{ textAlign: "center" }}>Add the business brief above to make more.</div>}
                     </div>
                 </div>
-                <Composer kind={kind} setKind={setKind} draft={draft} setDraft={setDraft} onSend={send}
-                    disabled={kind === "ads" ? working || !brief.trim() : false}
+                <Composer kind="ads" draft={draft} setDraft={setDraft} onSend={send}
+                    disabled={working || !brief.trim()}
                     placements={placements} togglePlacement={id => set("placements", p => (p.includes(id) ? p.filter(x => x !== id) : [...p, id]))}
                     count={count} setCount={v => set("count", v)} aspect={aspect} setAspect={setAspect}
                     refs={refs} setRefs={setRefs} budget={budget} />

@@ -43,7 +43,7 @@ def verify(key: str, exp: int, sig: str) -> bool:
 async def save(data_b64: str, mime: str, kind: str) -> str | None:
     """Stores the file and returns its 7-day link, or None (no bucket, or S3 failed: the caller keeps base64)."""
     ext = _EXT.get(mime)
-    if not enabled() or not ext or kind not in ("ads", "video", "web"):
+    if not enabled() or not ext or kind not in ("ads", "video", "web", "speech"):
         return None
     key = f"{kind}/{time.strftime('%Y-%m-%d')}/{uuid.uuid4().hex}.{ext}"
     try:

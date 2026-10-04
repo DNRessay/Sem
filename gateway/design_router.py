@@ -1,5 +1,7 @@
+import asyncio
 import json
 import time
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -9,6 +11,7 @@ from pipeline.activity import log, session_for
 from pipeline.ad_studio import PLACEMENTS, write_variants
 from pipeline.runs import durable
 from pipeline.site_brief import learn_site
+from pipeline.video_studio import CLIP_USD, FORMATS, estimate, plan_video
 from pipeline.web_studio import LOGO_STYLES, figma_frames, figma_me, logo_prompt, make_page
 from storage.neon_store import get_store
 from tools import gemini_media, image_gen, media_store
@@ -152,7 +155,183 @@ async def video_history(account: dict = Depends(require_account)):
     for j in jobs:
         saved = ddb_backend.get("video_url", j["job_id"])
         j.update(json.loads(saved) if saved else {"status": "rendering"})
+    for pid in _project_ids(account["account_id"]):  # finished storyboard videos sit beside the single clips
+        p = _project(account["account_id"], pid)
+        if p and p.get("url"):
+            jobs.append({"job_id": p["id"], "prompt": p["title"], "aspect_ratio": p["aspect_ratio"], "url": p["url"],
+                         "status": "done", "created": p["created"], "mime": "video/mp4"})
+    jobs.sort(key=lambda j: -int(j.get("created") or 0))
     return {"videos": jobs}
+
+
+# ── Video studio: short and long videos as storyboards of 5-second scenes ─────
+VIDEO_PROJECTS = "video_projects"
+MAX_PROJECTS = 20
+
+
+def _project_ids(account_id: str) -> list[str]:
+    try:
+        return json.loads(ddb_backend.get(VIDEO_PROJECTS, account_id) or "[]")
+    except ValueError:
+        return []
+
+
+def _project(account_id: str, pid: str) -> dict | None:
+    raw = ddb_backend.get("video_project", f"{account_id}:{pid}")
+    return json.loads(raw) if raw else None
+
+
+def _save_project(account_id: str, project: dict):
+    ddb_backend.set("video_project", f"{account_id}:{project['id']}", json.dumps(project), ttl=media_store.KEEP_SECONDS)
+    ids = [project["id"], *[i for i in _project_ids(account_id) if i != project["id"]]][:MAX_PROJECTS]
+    ddb_backend.set(VIDEO_PROJECTS, account_id, json.dumps(ids), ttl=media_store.KEEP_SECONDS)
+
+
+@router.get("/video/formats")
+async def video_formats(_account: dict = Depends(require_account)):
+    return {"formats": FORMATS, "clip_seconds": 5, "clip_usd": CLIP_USD, "voices": list(gemini_media.VOICES)}
+
+
+@router.post("/video/plan")
+async def video_plan(request: Request, _account: dict = Depends(require_account)):
+    """The storyboard: one 5-second scene per clip, sharing one look, with voiceover lines if asked."""
+    body = await request.json()
+    idea = (body.get("idea") or "").strip()
+    if not idea:
+        raise HTTPException(400, "Describe the video first")
+    plan = await plan_video(body.get("brief") or "", idea, int(body.get("seconds") or 15), body.get("format") or "short",
+                            bool(body.get("voiceover")), body.get("model") or "auto")
+    if not plan["ok"]:
+        raise HTTPException(400, plan["error"])
+    return plan
+
+
+async def _voiceover(lines: list[str], voice: str) -> tuple[str, str]:
+    """(audio link, problem). Gemini reads the whole script at once so it sounds like one take."""
+    script = " ".join(x.strip() for x in lines if x.strip())
+    if not script:
+        return "", ""
+    try:
+        spoken = await asyncio.wait_for(gemini_media.speak(script, voice), timeout=22)
+    except asyncio.TimeoutError:
+        return "", "The voiceover took too long, so the video will be silent"
+    if not spoken["ok"]:
+        return "", f"No voiceover ({spoken['error']}), so the video will be silent"
+    url = await media_store.save(spoken["base64"], spoken["mime"], "speech")
+    return (url or ""), ("" if url else "Couldn't store the voiceover, so the video will be silent")
+
+
+@router.post("/video/project")
+async def video_project(request: Request, account: dict = Depends(require_account)):
+    """Renders every scene of a storyboard (one GPU at a time on Modal) and remembers them as one project;
+    polling it joins them into one video when the last scene is done."""
+    body = await request.json()
+    scenes = [s for s in body.get("scenes") or [] if isinstance(s, dict) and str(s.get("prompt") or "").strip()][:12]
+    if not scenes:
+        raise HTTPException(400, "The storyboard has no scenes")
+    aspect = body.get("aspect_ratio") or "9:16"
+    budget = await video_call("budget")
+    if budget.get("ok"):
+        cost = estimate(len(scenes) * 5)["usd"]
+        left = float(budget["cap_usd"]) - float(budget["used_usd"])
+        if cost > left:
+            raise HTTPException(400, f"This video needs about ${cost:.2f} of GPU time and ${max(left, 0):.2f} is left this "
+                                     "month. Make it shorter, or raise VIDEO_MONTHLY_CAP_USD in the Modal secret.")
+    style = str(body.get("style") or "").strip()
+    jobs = []
+    for s in scenes:
+        prompt = str(s["prompt"]).strip()
+        result = await video_call("submit", prompt=prompt, aspect_ratio=aspect, seconds=5)
+        if not result.get("ok"):
+            if not jobs:
+                raise HTTPException(400, result.get("error") or "video submit failed")
+            jobs.append({"prompt": prompt, "narration": s.get("narration") or "", "status": "failed",
+                         "error": result.get("error") or "submit failed"})
+            continue
+        jobs.append({"prompt": prompt, "narration": str(s.get("narration") or "")[:300], "job_id": result["job_id"],
+                     "status": "rendering"})
+    audio, note = ("", "")
+    if body.get("voiceover"):
+        audio, note = await _voiceover([j["narration"] for j in jobs], body.get("voice") or "Kore")
+    project = {"id": uuid.uuid4().hex[:12], "title": str(body.get("title") or "")[:80] or scenes[0]["prompt"][:60],
+               "style": style[:400], "format": body.get("format") or "short", "aspect_ratio": aspect, "scenes": jobs,
+               "audio_url": audio, "note": note, "status": "rendering", "chat_id": body.get("chat_id") or "",
+               "created": int(time.time())}
+    _save_project(account["account_id"], project)
+    return project
+
+
+async def _advance(account_id: str, project: dict) -> dict:
+    """Checks the scenes; once all are done, starts the join; once that's done, the video is saved to S3."""
+    if project["status"] in ("done", "failed"):
+        return project
+    changed = False
+    for s in project["scenes"]:
+        if s.get("status") == "rendering" and s.get("job_id"):
+            peek = await video_call("peek", job_id=s["job_id"])
+            if peek.get("status") in ("done", "failed"):
+                s["status"], s["error"] = peek["status"], peek.get("error", "")
+                changed = True
+    if any(s.get("status") == "failed" for s in project["scenes"]):
+        if not any(s.get("status") == "rendering" for s in project["scenes"]):
+            project["status"] = "scene_failed"
+            changed = True
+    elif all(s.get("status") == "done" for s in project["scenes"]):
+        if not project.get("stitch_job"):
+            joined = await video_call("stitch", job_ids=[s["job_id"] for s in project["scenes"]],
+                                      audio_url=project.get("audio_url") or "")
+            if joined.get("ok"):
+                project["stitch_job"], project["status"] = joined["job_id"], "joining"
+            else:
+                project["status"], project["error"] = "failed", joined.get("error") or "couldn't join the scenes"
+            changed = True
+        else:
+            result = await _video_result(project["stitch_job"])
+            if result.get("status") == "done" and result.get("url"):
+                project.update(status="done", url=result["url"], voice=bool(result.get("voice")))
+                changed = True
+            elif result.get("status") == "failed":
+                project.update(status="failed", error=result.get("error") or "couldn't join the scenes")
+                changed = True
+    if changed:
+        _save_project(account_id, project)
+    return project
+
+
+@router.get("/video/project/{pid}")
+async def video_project_status(pid: str, account: dict = Depends(require_account)):
+    project = _project(account["account_id"], pid)
+    if not project:
+        raise HTTPException(404, "This video is gone (kept 7 days)")
+    return await _advance(account["account_id"], project)
+
+
+@router.post("/video/project/{pid}/scene/{index}")
+async def video_project_retry(pid: str, index: int, account: dict = Depends(require_account)):
+    """Renders one failed scene again; the join waits for it."""
+    project = _project(account["account_id"], pid)
+    if not project or not 0 <= index < len(project["scenes"]):
+        raise HTTPException(404, "No such scene")
+    scene = project["scenes"][index]
+    result = await video_call("submit", prompt=scene["prompt"], aspect_ratio=project["aspect_ratio"], seconds=5)
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error") or "video submit failed")
+    scene.update(job_id=result["job_id"], status="rendering", error="")
+    project.update(status="rendering", error="")
+    project.pop("stitch_job", None)
+    _save_project(account["account_id"], project)
+    return project
+
+
+@router.get("/video/projects")
+async def video_projects(account: dict = Depends(require_account)):
+    out = []
+    for pid in _project_ids(account["account_id"]):
+        p = _project(account["account_id"], pid)
+        if p:
+            out.append({k: p.get(k) for k in ("id", "title", "format", "aspect_ratio", "status", "url", "created")}
+                       | {"scenes": len(p["scenes"])})
+    return {"projects": out}
 
 
 @router.get("/video/{job_id}")

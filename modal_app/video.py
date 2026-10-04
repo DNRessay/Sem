@@ -14,6 +14,9 @@ random string in the Lambda environment.
 Images: POST {"action": "image", "prompt", "aspect_ratio"} returns a job_id the
 same way (seconds once warm); poll it with "status".
 
+Long videos: each 5-second scene is its own "submit"; "peek" says whether one is done without sending it back,
+and {"action": "stitch", "job_ids": [...], "audio_url"} joins the finished scenes (plus a voiceover) on CPU.
+
 Rendering takes minutes, so it's a job: POST {"action": "submit", ...} returns
 a job_id right away; POST {"action": "status", "job_id": ...} until done.
 Every finished render adds its GPU time (at GPU_USD_PER_HOUR) to this month's
@@ -65,6 +68,7 @@ gpu_image = (
     .run_function(_download, secrets=[modal.Secret.from_dict({"HF_TOKEN": os.environ.get("HF_TOKEN", "")})])
 )
 api_image = modal.Image.debian_slim(python_version="3.12").pip_install("fastapi>=0.115.0")
+stitch_image = modal.Image.debian_slim(python_version="3.12").apt_install("ffmpeg").pip_install("httpx")
 spend = modal.Dict.from_name("semblance-video-spend", create_if_missing=True)
 
 
@@ -141,6 +145,47 @@ class ImageGenerator:
         return {"mime": "image/png", "base64": base64.b64encode(buf.getvalue()).decode()}
 
 
+@app.function(image=stitch_image, cpu=2.0, memory=2048, timeout=600)
+def stitch(job_ids: list[str], audio_url: str = "") -> dict:
+    """Long videos: the finished 5-second scenes joined in order, with the voiceover (if any) laid over them.
+    CPU only, so it doesn't count toward the GPU cap."""
+    import subprocess
+    import tempfile
+
+    import httpx
+
+    with tempfile.TemporaryDirectory() as tmp:
+        parts = []
+        for i, job_id in enumerate(job_ids):
+            result = modal.FunctionCall.from_id(job_id).get(timeout=60)
+            path = f"{tmp}/scene{i:02d}.mp4"
+            with open(path, "wb") as f:
+                f.write(base64.b64decode(result["base64"]))
+            parts.append(path)
+        with open(f"{tmp}/list.txt", "w") as f:
+            f.writelines(f"file '{p}'\n" for p in parts)
+        joined = f"{tmp}/joined.mp4"
+        # Re-encoding (rather than -c copy) keeps the joins clean whatever each clip's timestamps look like.
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", f"{tmp}/list.txt",
+                        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20", joined], check=True)
+        out = joined
+        if audio_url:
+            try:
+                audio = httpx.get(audio_url, follow_redirects=True, timeout=60)
+                audio.raise_for_status()
+                with open(f"{tmp}/voice.wav", "wb") as f:
+                    f.write(audio.content)
+                out = f"{tmp}/final.mp4"
+                # The voice runs as long as the video: padded with silence if shorter, cut if longer.
+                subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", joined, "-i", f"{tmp}/voice.wav",
+                                "-filter_complex", "[1:a]apad[a]", "-map", "0:v", "-map", "[a]", "-c:v", "copy",
+                                "-c:a", "aac", "-b:a", "128k", "-shortest", out], check=True)
+            except Exception:
+                out = joined  # a silent video beats no video
+        with open(out, "rb") as f:
+            return {"mime": "video/mp4", "base64": base64.b64encode(f.read()).decode(), "voice": out != joined}
+
+
 @app.function(image=api_image, secrets=[modal.Secret.from_name("semblance-video-secret")])
 @modal.fastapi_endpoint(method="POST")
 def api(body: dict, request: Request):
@@ -169,6 +214,21 @@ def api(body: dict, request: Request):
         if used >= cap:
             return {"ok": False, "error": f"Monthly Modal budget reached (${used:.2f} of ${cap:.2f})"}
         call = ImageGenerator().generate.spawn(prompt[:1500], body.get("aspect_ratio") or "1:1")
+        return {"ok": True, "job_id": call.object_id}
+    if action == "peek":
+        # Done or not, without the video itself (long videos check every scene often).
+        try:
+            modal.FunctionCall.from_id(body.get("job_id") or "").get(timeout=0)
+        except (TimeoutError, modal.exception.TimeoutError):
+            return {"ok": True, "status": "rendering"}
+        except Exception as e:
+            return {"ok": False, "status": "failed", "error": str(e)[:300]}
+        return {"ok": True, "status": "done"}
+    if action == "stitch":
+        ids = [i for i in body.get("job_ids") or [] if isinstance(i, str)]
+        if not ids:
+            return {"ok": False, "error": "job_ids required"}
+        call = stitch.spawn(ids[:12], body.get("audio_url") or "")
         return {"ok": True, "job_id": call.object_id}
     if action == "status":
         try:
