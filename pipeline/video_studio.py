@@ -144,14 +144,15 @@ async def plan_video(brief: str, idea: str, seconds: int, fmt: str, voiceover: b
     # A storyboard is long (80-120 words a scene). Gemini allows long replies; Groq stops at ~800 tokens, which cut
     # 30-second storyboards off mid-scene. So with "auto", Gemini writes it first and the others are the fallback.
     first = "gemini" if model == "auto" and llm_providers.PROVIDERS["gemini"].configured else model
-    result = await llm_providers.complete(first, messages, max_tokens=6000)
+    result = await llm_providers.complete(first, messages, max_tokens=6000, long_reply=True)
     plan = None if "error" in result else parse_plan(result.get("content") or "", n, voiceover)
     if not plan:  # unusable, cut off or down: the free models get a go whichever one was picked
         tried = {model, first, result.get("_provider")}
-        for pid in llm_providers.FREE_ORDER:
+        # Fastest first: Groq writes a storyboard in seconds; the self-hosted Bonsai can take minutes.
+        for pid in ("groq", "gemini", "bonsai"):
             if pid in tried or not llm_providers.PROVIDERS[pid].configured:
                 continue
-            retry = await llm_providers.complete(pid, messages, max_tokens=6000)
+            retry = await llm_providers.complete(pid, messages, max_tokens=6000, long_reply=True)
             plan = None if "error" in retry else parse_plan(retry.get("content") or "", n, voiceover)
             if plan:
                 break
