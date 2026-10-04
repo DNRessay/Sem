@@ -1,7 +1,12 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 
-const AVATAR_URL = "https://cdn.jsdelivr.net/gh/met4citizen/TalkingHead@1.7/avatars/brunette.glb";
-const TALKINGHEAD = "talkinghead"; // resolved by the import map in index.html
+// TalkingHead (the 3D engine) and the avatar model come from jsDelivr; when its main CDN is slow or blocked on a
+// network, the same files are tried on its other mirrors before giving up on the avatar.
+const MIRRORS = ["https://cdn.jsdelivr.net", "https://fastly.jsdelivr.net", "https://gcore.jsdelivr.net"]
+    .map(host => `${host}/gh/met4citizen/TalkingHead@1.7`);
+const LOAD_SECONDS = 60;
+const withTimeout = (promise, what) => Promise.race([promise, new Promise((_, reject) =>
+    setTimeout(() => reject(new Error(`${what} took longer than ${LOAD_SECONDS}s`)), LOAD_SECONDS * 1000))]);
 
 // Even word timings across the audio, weighted by word length — good enough
 // lip-sync for TTS that doesn't return timestamps (Gemini, the phone voice).
@@ -31,22 +36,31 @@ const AvatarStage = forwardRef(function AvatarStage({ onFail, height = 300 }, re
     useEffect(() => {
         let dead = false;
         (async () => {
-            try {
-                const { TalkingHead } = await import(/* @vite-ignore */ TALKINGHEAD);
-                if (dead) return;
-                const h = new TalkingHead(box.current, {
-                    ttsEndpoint: "N/A", lipsyncModules: ["en"], cameraView: "upper", mixerGainSpeech: 3,
-                    cameraRotateEnable: false, cameraZoomEnable: false, cameraPanEnable: false,
-                });
-                await h.showAvatar({ url: AVATAR_URL, body: "F", avatarMood: "neutral", lipsyncLang: "en" },
-                    ev => ev.lengthComputable && setProgress(Math.round((100 * ev.loaded) / ev.total)));
-                if (dead) { h.stop?.(); return; }
-                head.current = h;
-                setReady(true);
-            } catch (e) {
-                console.error("avatar failed", e);
-                if (!dead) onFail?.(String(e));
+            let lastError = null;
+            for (const base of MIRRORS) {
+                let h = null;
+                try {
+                    const { TalkingHead } = await withTimeout(import(/* @vite-ignore */ `${base}/modules/talkinghead.mjs`), "The 3D engine");
+                    if (dead) return;
+                    h = new TalkingHead(box.current, {
+                        ttsEndpoint: "N/A", lipsyncModules: ["en"], cameraView: "upper", mixerGainSpeech: 3,
+                        cameraRotateEnable: false, cameraZoomEnable: false, cameraPanEnable: false,
+                    });
+                    await withTimeout(h.showAvatar({ url: `${base}/avatars/brunette.glb`, body: "F", avatarMood: "neutral", lipsyncLang: "en" },
+                        ev => ev.lengthComputable && setProgress(Math.round((100 * ev.loaded) / ev.total))), "The avatar download");
+                    if (dead) { h.stop?.(); return; }
+                    head.current = h;
+                    setReady(true);
+                    return;
+                } catch (e) {
+                    console.error("avatar failed from", base, e);
+                    lastError = e;
+                    try { h?.stop?.(); } catch { /* already gone */ }
+                    if (box.current) box.current.innerHTML = "";
+                    if (dead) return;
+                }
             }
+            onFail?.(lastError?.message || String(lastError || "unknown error"));
         })();
         return () => { dead = true; clearInterval(acting.current); head.current?.stop?.(); };
     }, []); // eslint-disable-line react-hooks/exhaustive-deps

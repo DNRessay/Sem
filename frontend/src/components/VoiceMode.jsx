@@ -47,7 +47,8 @@ export default function VoiceMode({ token, send, busy, lastReply, liveReply = ""
     const [note, setNote] = useState("");
     const [look, setLook] = useState(() => saved(LOOK_KEY, "avatar"));
     const [engine, setEngine] = useState(() => saved(VOICE_KEY, "natural"));
-    const [avatarBroken, setAvatarBroken] = useState(false);
+    const [avatarBroken, setAvatarBroken] = useState(""); // why the avatar couldn't load ("" = fine)
+    const [avatarTry, setAvatarTry] = useState(0);
     const avatar = useRef(null);
     const useAvatar = look === "avatar" && !avatarBroken;
     const choose = (key, set) => (v) => { set(v); try { localStorage.setItem(key, v); } catch { /* private mode */ } };
@@ -316,12 +317,19 @@ export default function VoiceMode({ token, send, busy, lastReply, liveReply = ""
                 ))}
                 <button onClick={end} aria-label="Close voice mode" style={{ background: "none", border: "none", fontSize: "22px", color: "var(--text-muted)", cursor: "pointer", padding: "0 4px" }}>×</button>
             </div>
-            {avatarBroken && look === "avatar" && <div style={{ fontSize: "12px", color: "var(--text-muted)", textAlign: "center", marginTop: "6px" }}>The avatar can't run on this device — using the orb.</div>}
+            {avatarBroken && look === "avatar" && (
+                <div style={{ fontSize: "12px", color: "var(--text-muted)", textAlign: "center", marginTop: "6px" }}>
+                    The avatar didn't load ({avatarBroken}) — using the orb.{" "}
+                    <button onClick={() => { setAvatarBroken(""); setAvatarTry(n => n + 1); }}
+                        style={{ background: "none", border: "none", color: "var(--gold)", cursor: "pointer", fontSize: "12px", padding: 0 }}>Try again</button>
+                </div>
+            )}
 
             <div onClick={tapOrb} style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", position: "relative" }}>
                 {useAvatar ? (
                     <div style={{ width: "100%", maxWidth: "520px" }}>
-                        <AvatarStage ref={avatar} height={Math.round(window.innerHeight * 0.58)} onFail={() => setAvatarBroken(true)} />
+                        <AvatarStage key={avatarTry} ref={avatar} height={Math.round(window.innerHeight * 0.58)}
+                            onFail={why => setAvatarBroken(why || "unknown error")} />
                     </div>
                 ) : (
                     <div aria-label={phase === "speaking" ? "Interrupt" : "Talk"} style={{
