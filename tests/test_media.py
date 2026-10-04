@@ -105,7 +105,7 @@ def test_finished_video_is_saved_once(s3, client, monkeypatch):
 ])
 def test_open_model_replies_still_parse(reply):
     variants = ad_studio.parse_variants(reply, ["square"])
-    assert len(variants) == 1 and variants[0]["placement"] == "square" and variants[0]["aspect_ratio"] == "1:1"
+    assert len(variants) == 1 and variants[0]["placement"] == "facebook" and variants[0]["aspect_ratio"] == "4:5"
 
 
 async def test_auto_tries_the_next_free_model_when_one_returns_junk(monkeypatch):

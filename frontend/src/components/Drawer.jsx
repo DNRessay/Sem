@@ -100,7 +100,7 @@ export default function Drawer({ open, onClose, currentSessionId, onNewChat, onO
                         onClick={onOpenDesign}
                         style={{ width: "100%", textAlign: "left", padding: "10px 14px", marginTop: "8px", borderRadius: "10px", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: "14px", fontWeight: "600", cursor: "pointer" }}
                     >
-                        <span style={{ display: "flex", alignItems: "center", gap: "10px" }}><BrushIcon size={16} /> Design &amp; ads</span>
+                        <span style={{ display: "flex", alignItems: "center", gap: "10px" }}><BrushIcon size={16} /> Design</span>
                     </button>
                     <button
                         onClick={onOpenFinance}

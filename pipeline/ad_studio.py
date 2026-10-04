@@ -3,34 +3,88 @@ import re
 
 from pipeline import llm_providers
 
-# Placement -> (label, aspect ratio Nano Banana renders at).
+# Platform -> (label, aspect ratio the image is made at). Each platform has its own playbook below: people use
+# them differently, so the same picture and caption don't work everywhere.
 PLACEMENTS = {
-    "fb_ig_feed": ("Facebook/Instagram feed", "4:5"),
-    "square": ("Square post", "1:1"),
-    "story_reel": ("Story / Reel / TikTok", "9:16"),
-    "google_display": ("Google Display / banner", "16:9"),
-    "whatsapp_status": ("WhatsApp Status", "9:16"),
+    "instagram": ("Instagram", "4:5"),
+    "facebook": ("Facebook", "4:5"),
+    "pinterest": ("Pinterest", "2:3"),
+    "linkedin": ("LinkedIn", "1:1"),
+    "story": ("Stories & Status", "9:16"),
+    "tiktok": ("TikTok photo", "9:16"),
+    "google_display": ("Google Display", "16:9"),
+}
+# Ids from before platforms (kept in saved chats).
+ALIASES = {"fb_ig_feed": "instagram", "square": "facebook", "story_reel": "story", "whatsapp_status": "story"}
+
+# (how the image should look, the post text, how many hashtags)
+PLAYBOOK = {
+    "instagram": (
+        "A scroll-stopping, gallery-worthy photo people save because it's beautiful, not because it sells: strong "
+        "composition, rich natural light, a striking colour story, real textures, an aspirational lifestyle moment. "
+        "NO text on the image. The business is present (its product, place or craft) but it's art first, advert second.",
+        "Instagram caption: a hook line, 2-4 short lines of story or feeling, a soft call to action (save, share, link "
+        "in bio), the area named naturally. Emojis welcome but sparing.", 12),
+    "facebook": (
+        "A clear, friendly, informative image for a business page and boosted posts: show the actual offer or service "
+        "plainly, warm and trustworthy, real local people and places. ONE short headline on the image in big bold "
+        "readable letters (the offer, the price, 'free', 'new') with clean space around it.",
+        "Facebook post: plain informative text like a helpful page update: what it is, why it's good value (free, "
+        "cheaper, saves time), who it's for, where (area), and exactly what to do next (link, WhatsApp, call).", 3),
+    "pinterest": (
+        "A tall vertical pin built to be clicked: a bold title on the image in large clean type over a calm part of the "
+        "picture (a how-to, a list, a promise: '5 ways…', 'How to…', 'Free…'), an inspiring styled photo below it, "
+        "bright and clean, with obvious value.",
+        "Pin: a keyword-rich pin title (what people type into search) and a 2-3 sentence description packed naturally "
+        "with search phrases and the area, ending with what they get when they click.", 5),
+    "linkedin": (
+        "A professional, credible image: real people at work, a modern South African business setting, natural office "
+        "or on-site light, confident and polished, muted corporate colours. At most one short line of text, "
+        "understated.",
+        "LinkedIn post: professional tone, opens with an insight or a business problem, 3-5 short lines on the value "
+        "and results, ends with a question or a clear next step. No slang, few emojis.", 4),
+    "story": (
+        "A full-screen vertical story (Instagram/Facebook Stories, WhatsApp Status): bold and simple, the subject big "
+        "in the middle, ONE punchy line of large text in the top or bottom third, leaving room for stickers/UI.",
+        "Story text: one short punchy line plus a tap/swipe/reply action (e.g. 'Reply YES', 'Tap the link').", 2),
+    "tiktok": (
+        "A TikTok photo-mode slide: casual, authentic, phone-shot feel, trendy and fun, bold short text in TikTok "
+        "style, bright and energetic. (TikTok is mostly video; this is for a photo post.)",
+        "TikTok caption: short, casual, a hook and a question to drive comments, local slang welcome where it fits.", 5),
+    "google_display": (
+        "A wide clean web banner: the product or service on one side, clear space on the other for the headline, "
+        "brand colours, uncluttered, readable at small sizes.",
+        "Banner copy: headline and one line of benefit; no hashtags.", 0),
 }
 
-_PROMPT = """You are a performance-marketing copywriter and art director for a small business.
+_PROMPT = """You are a social media strategist, copywriter and art director for a small business.
 
 Business: {brief}
 Campaign: {campaign}
-Write {count} distinct ad variants for each of these placements: {placements}.
+Area to target: {area}
+
+Write {count} distinct post(s) for each of these platforms, following each platform's playbook exactly:
+{playbooks}
 
 Return ONLY a JSON array. Each item:
 {{"placement": one of {keys}, "angle": short name of the creative angle,
-"headline": <= 40 chars, "primary_text": <= 125 chars for the main ad text, "cta": a call-to-action button label,
-"hashtags": [up to 5], "image_prompt": an art director's brief for the image model, 60-100 words: the real subject
-(product, food, person or place from the brief, with specific looks, materials and colours), what is happening, the
-setting, composition for the placement's shape (leave clean space where the text goes), lighting (source, direction,
-mood), camera and lens (e.g. 50mm, shallow depth of field, eye level), style (photorealistic product photography,
-lifestyle photo, flat illustration...) and colour palette in words, not hex codes. On-image text: at most ONE short
-line in quotes, under 6 words, with its placement and font style (e.g. bold white sans-serif across the top)}}
+"headline": the line printed on the image or the pin title ("" for Instagram), <= 40 chars,
+"caption": the full post text, ready to paste, written to that platform's playbook,
+"cta": a short call-to-action label,
+"hashtags": exactly the playbook's number of hashtags: a third popular and broad, a third for the industry or niche,
+a third local (the area, city, province, and South Africa/Mzansi tags if the business is in South Africa); CamelCase,
+no spaces, relevant only, never banned or spammy tags,
+"keywords": 3-6 phrases people would actually type into Google, Instagram, Facebook or Pinterest search to find this,
+including the area (e.g. "website design Soweto", "affordable websites Johannesburg"),
+"alt_text": <= 125 chars describing the image with the main keyword (for accessibility and search),
+"image_prompt": an art director's brief for the image model, 60-100 words, following the platform's look: the real
+subject (product, food, person or place from the brief, with specific looks, materials and colours), what is
+happening, the setting, composition for the platform's shape, lighting, camera and lens, style and colour palette in
+words. Text on the image only as the playbook says, in quotes, under 6 words, with placement and font style}}
 
-Vary the angles (benefit, social proof, urgency/offer, problem/solution, local pride). Show the actual business,
-not abstract shapes or symbols (no floating question marks or generic icons). Write for the audience and
-location in the brief; South African English and Rand pricing if the business is in South Africa. No false claims.{style}"""
+Weave the keywords and the area naturally into the caption so people searching for them find the post (no keyword
+stuffing). Show the actual business, not abstract shapes or generic icons. Write for the audience and location in
+the brief; South African English and Rand prices if the business is in South Africa. No false claims.{style}"""
 
 
 def _json_items(text: str) -> list:
@@ -57,6 +111,8 @@ def _json_items(text: str) -> list:
 
 def _placement(value, wanted: list[str]) -> str:
     v = re.sub(r"[^a-z0-9]+", "_", str(value or "").lower()).strip("_")
+    v = next((new for old, new in ALIASES.items() if v.startswith(old)), v)
+    wanted = [ALIASES.get(w, w) for w in wanted]
     if v in PLACEMENTS:
         return v
     for key, (label, _) in PLACEMENTS.items():
@@ -74,20 +130,32 @@ def parse_variants(text: str, wanted: list[str] | None = None) -> list[dict]:
         if it["placement"] not in PLACEMENTS:
             continue
         it["aspect_ratio"] = PLACEMENTS[it["placement"]][1]
-        it["hashtags"] = [h for h in (it.get("hashtags") or []) if isinstance(h, str)][:5]
+        tags = [h.strip() for h in (it.get("hashtags") or []) if isinstance(h, str) and h.strip()]
+        tags = ["#" + re.sub(r"\s+", "", t.lstrip("#")) for t in tags]
+        it["hashtags"] = list(dict.fromkeys(tags))[:PLAYBOOK[it["placement"]][2]]
+        it["keywords"] = [k for k in (it.get("keywords") or []) if isinstance(k, str)][:6]
+        it["caption"] = str(it.get("caption") or it.get("primary_text") or "")
+        it["primary_text"] = it["caption"]  # older app versions read this
         out.append(it)
     return out
 
 
+def _playbook(p: str) -> str:
+    look, text, tags = PLAYBOOK[p]
+    return (f"- {p} ({PLACEMENTS[p][0]}, {PLACEMENTS[p][1]} image)\n  Look: {look}\n  Text: {text}\n"
+            f"  Hashtags: {tags if tags else 'none'}")
+
+
 async def write_variants(brief: str, campaign: str, placements: list[str], count: int, model: str,
-                         style: str = "") -> dict:
-    placements = [p for p in placements if p in PLACEMENTS] or ["fb_ig_feed"]
+                         style: str = "", area: str = "") -> dict:
+    placements = list(dict.fromkeys(ALIASES.get(p, p) for p in placements if ALIASES.get(p, p) in PLACEMENTS)) or ["instagram"]
     count = max(1, min(int(count or 1), 3))
     prompt = _PROMPT.format(
         brief=brief.strip()[:2000], campaign=campaign.strip()[:1000], count=count,
+        area=area.strip()[:120] or "the business's own area from the brief",
         style=f"\n\nVisual style to match (from the user's inspiration images) — reflect it in every image_prompt:\n{style[:1500]}"
         if style else "",
-        placements=", ".join(f"{p} ({PLACEMENTS[p][0]})" for p in placements), keys=list(placements),
+        playbooks="\n".join(_playbook(p) for p in placements), keys=list(placements),
     )
     messages = [{"role": "user", "content": prompt}]
     result = await llm_providers.complete(model, messages, max_tokens=4096)
@@ -106,5 +174,5 @@ async def write_variants(brief: str, campaign: str, placements: list[str], count
     if not variants:
         if "error" in result:
             return {"ok": False, "error": result["error"]}
-        return {"ok": False, "error": "The model didn't return usable ad variants — try again or pick another model"}
+        return {"ok": False, "error": "The model didn't return usable posts — try again or pick another model"}
     return {"ok": True, "variants": variants[: count * len(placements)]}

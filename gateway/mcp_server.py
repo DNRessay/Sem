@@ -60,9 +60,10 @@ TOOLS = [
           {"text": _S, "voice": {"type": "string", "enum": list(gemini_media.VOICES)}}, ["text"]),
     _tool("learn_website", "Learn a business from its website", "Reads a business website and writes a marketing brief.",
           {"url": _S, "model": _MODEL}, ["url"], True),
-    _tool("write_ads", "Write ads", "Writes ad copy and image prompts per placement for a business brief + campaign.",
+    _tool("write_ads", "Write social posts", "Writes platform-specific posts (caption, hashtags, search keywords, image "
+          "prompt) for Instagram, Facebook, Pinterest, LinkedIn, Stories, TikTok or Google Display.",
           {"brief": _S, "campaign": _S, "placements": {"type": "array", "items": {"type": "string", "enum": list(PLACEMENTS)}},
-           "count": {"type": "integer"}, "model": _MODEL}, ["brief", "campaign"], True),
+           "count": {"type": "integer"}, "area": _S, "model": _MODEL}, ["brief", "campaign"], True),
 ]
 
 
@@ -150,7 +151,7 @@ async def call_tool(name: str, args: dict, account_id: str) -> dict:
         return _text(r["brief"] if r["ok"] else r["error"], not r["ok"])
     if name == "write_ads":
         r = await write_variants(args.get("brief", ""), args.get("campaign", ""), args.get("placements") or [],
-                                 args.get("count") or 2, model)
+                                 args.get("count") or 2, model, area=args.get("area") or "")
         return _text(json.dumps(r["variants"], indent=1) if r["ok"] else r["error"], not r["ok"])
     return _text(f"Unknown tool {name}", True)
 

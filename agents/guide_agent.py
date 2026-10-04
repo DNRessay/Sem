@@ -14,7 +14,7 @@ TAU: Adaptive identity engine. PACIFIC re-reads your Big Five traits and answer 
 DREAM: Memory consolidation. 3-gate (24hr + 5 sessions + lock). 4 phases. Nothing deleted.
 
 TABS: Chat (with Deep research), Code (repo agent + PRs + automations), Co-work (email, calendar,
-Drive, research, images with approvals), Design & ads, Finance (C-Lab over MCP), Settings & MCP.
+Drive, research, images with approvals), Design (images, video, web), Finance (C-Lab over MCP), Settings & MCP.
 MODELS: picker with free (Bonsai self-hosted, Gemini, Groq) and paid (Claude, GPT, Qwen, DeepSeek,
 Kimi, any Hugging Face model). SEMBLANCE is also an MCP server other apps can use.
 
