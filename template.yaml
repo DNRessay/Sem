@@ -282,6 +282,10 @@ Resources:
       # has a hard 256-char limit — CFN's early-validation hook was
       # correctly rejecting it at 622 chars, not a false positive.)
       Description: "Light tier — FastAPI (chat/status/webhooks) via uvicorn + AWS Lambda Web Adapter, RESPONSE_STREAM invoke mode"
+      # Lambda gives CPU in proportion to memory: at 512 MB a cold start took ~9 s before the first reply could
+      # begin. 1536 MB gives about three times the CPU, so start-up and every reply are quicker; it's billed per
+      # millisecond, so shorter runs offset most of the higher rate.
+      MemorySize: 1536
       # Lambda's 15-minute maximum: a Code tab run (agents/code_agent.py)
       # loops for up to 13 minutes, and a chat reply from the self-hosted
       # model can wait out its GPU cold start. Lambda bills per millisecond
