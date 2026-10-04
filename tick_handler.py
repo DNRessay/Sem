@@ -18,9 +18,15 @@ from agents.kairos import KairosDaemon
 from pipeline.code_tasks import run_due_automation
 from tau.pacific import refresh_profile
 
+# One event loop for the life of the Lambda instance: asyncio.run() made a new loop per invocation and closed
+# it, so on a warm instance the database pool and HTTP clients still bound to the old loop failed with
+# "Event loop is closed" (the second tick within a few minutes always crashed).
+_loop = asyncio.new_event_loop()
+
 
 def handler(event, context):
-    return asyncio.run(_run())
+    asyncio.set_event_loop(_loop)
+    return _loop.run_until_complete(_run())
 
 
 async def _run():
