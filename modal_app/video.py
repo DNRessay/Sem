@@ -432,7 +432,8 @@ def _stitch(job_ids: list[str], audio_url: str, upload_url: str = "", music_job:
         if voice or music:
             out = f"{tmp}/final.mp4"
             try:
-                subprocess.run(mix_command(joined, voice, music, _duration(joined), out), check=True,
+                subprocess.run(mix_command(joined, voice, music, _duration(joined), out,
+                                           _duration(voice) if voice else 0.0), check=True,
                                capture_output=True, text=True)
             except subprocess.CalledProcessError as e:
                 voice_error = f"couldn't mix the audio: {(e.stderr or '')[-200:]}"
@@ -461,14 +462,30 @@ def _duration(path: str) -> float:
         return 0.0
 
 
-def mix_command(video: str, voice: str, music: str, seconds: float, out: str) -> list[str]:
-    """ffmpeg: the video as is, the voice at full volume, the music looped quietly under it (louder with no voice),
-    fading out over the last 1.5 s. Everything is cut to the video's length."""
+VOICE_LEAD = 0.4  # the voice starts just after the first frame
+SLOWEST_VOICE = 0.85  # stretched at most 15%: any slower and it starts to sound drawn out
+
+
+def voice_tempo(voice_seconds: float, video_seconds: float) -> float:
+    """How much to slow the voiceover so it fills the video instead of stopping early and leaving dead air
+    (1.0 = as recorded). Only ever slows, and only gently; a voice that's too long is cut at the end as before."""
+    room = video_seconds - VOICE_LEAD - 0.6  # and ends a beat before the last frame
+    if voice_seconds <= 0 or room <= 0 or voice_seconds >= room:
+        return 1.0
+    return round(max(SLOWEST_VOICE, voice_seconds / room), 3)
+
+
+def mix_command(video: str, voice: str, music: str, seconds: float, out: str, voice_seconds: float = 0.0) -> list[str]:
+    """ffmpeg: the video as is, the voice at full volume (slowed a touch to fill the video, see voice_tempo), the
+    music looped under it (louder with no voice), fading out over the last 1.5 s. Everything is cut to the video."""
     cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", video]
     graph, mixed = [], []
     if voice:
         cmd += ["-i", voice]
-        graph.append("[1:a]aresample=44100,aformat=channel_layouts=stereo,apad[v]")
+        tempo = voice_tempo(voice_seconds, seconds) if seconds else 1.0
+        stretch = f"atempo={tempo}," if tempo != 1.0 else ""
+        lead = int(VOICE_LEAD * 1000)
+        graph.append(f"[1:a]{stretch}aresample=44100,aformat=channel_layouts=stereo,adelay={lead}|{lead},apad[v]")
         mixed.append("[v]")
     if music:
         cmd += ["-stream_loop", "-1", "-i", music]
