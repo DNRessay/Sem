@@ -161,13 +161,13 @@ def _stage(stage: str, error: str = ""):
         pass
 
 
-def _upload(path: str, url: str) -> bool:
+def _upload(path: str, url: str, mime: str = "video/mp4") -> bool:
     """PUTs the finished video to the app's storage (a presigned S3 URL), so it never travels back through the
     API as one huge response — those timed out, and finished long videos never reached the app."""
     import urllib.request
 
     with open(path, "rb") as f:
-        req = urllib.request.Request(url, data=f.read(), method="PUT", headers={"Content-Type": "video/mp4"})
+        req = urllib.request.Request(url, data=f.read(), method="PUT", headers={"Content-Type": mime})
     try:
         urllib.request.urlopen(req, timeout=120).read()
         return True
@@ -259,7 +259,7 @@ class Music:
         self.pipe = StableAudioPipeline.from_pretrained(MUSIC_MODEL_ID, torch_dtype=torch.float16).to("cuda")
 
     @modal.method()
-    def generate(self, prompt: str, seconds: int = 15, callback: str = "") -> dict:
+    def generate(self, prompt: str, seconds: int = 15, callback: str = "", upload_url: str = "") -> dict:
         import soundfile as sf
         import torch
 
@@ -269,9 +269,11 @@ class Music:
             audio = self.pipe(prompt=prompt, negative_prompt="Low quality, vocals, singing, speech.", num_inference_steps=100,
                               audio_end_in_s=float(max(5, min(int(seconds), MUSIC_MAX_SECONDS))),
                               generator=torch.Generator("cuda").manual_seed(int(time.time()) % 100000)).audios[0]
-            sf.write(f"{CLIPS}/{modal.current_function_call_id()}.wav", audio.T.float().cpu().numpy(),
-                     self.pipe.vae.sampling_rate)
+            path = f"{CLIPS}/{modal.current_function_call_id()}.wav"
+            sf.write(path, audio.T.float().cpu().numpy(), self.pipe.vae.sampling_rate)
             clips.commit()
+            if upload_url and not _upload(path, upload_url, "audio/wav"):  # a track for the Music tab
+                raise RuntimeError("couldn't upload the track to storage")
             ok = True
         finally:
             gpu_seconds = time.monotonic() - started
@@ -511,7 +513,8 @@ def api(body: dict, request: Request):
             return {"ok": False, "error": "prompt required"}
         if used >= cap:
             return {"ok": False, "error": f"Monthly Modal budget reached (${used:.2f} of ${cap:.2f})"}
-        call = Music().generate.spawn(prompt[:500], int(body.get("seconds") or 15), body.get("callback") or "")
+        call = Music().generate.spawn(prompt[:500], int(body.get("seconds") or 15), body.get("callback") or "",
+                                      body.get("upload_url") or "")
         return {"ok": True, "job_id": _spawned(call)}
     if action == "peek":
         # Done or not, without the video itself (long videos check every scene often).

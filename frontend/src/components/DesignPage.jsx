@@ -9,11 +9,12 @@ import TabDrawer, { MenuButton } from "./TabDrawer";
 import useTabChats, { newId } from "../hooks/useTabChats";
 import WebStudio from "./WebStudio";
 import VideoStudio from "./VideoStudio";
+import MusicStudio from "./MusicStudio";
 import { CloseIcon, PaperclipIcon, SendIcon } from "./Icons";
 
 const API = import.meta.env.VITE_API_URL || "";
 const STORE_KEY = "semblance_design_campaigns";
-const MODE_KEY = "semblance_design_mode"; // "ads" (the Images tab) | "video" | "web"
+const MODE_KEY = "semblance_design_mode"; // "ads" (the Images tab) | "video" | "music" | "web"
 const OLD_KEY = "semblance_design";
 const MAX_TURNS = 30;
 const MAX_REFS = 4;
@@ -455,7 +456,7 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
     const [model, setModel] = useState(() => loadModel("semblance_design_model"));
     const [busy, setBusy] = useState(""); // Web mode's running step
     const [notice, setNotice] = useState("");
-    const [mode, setModeState] = useState(() => { try { const m = localStorage.getItem(MODE_KEY); return ["web", "video"].includes(m) ? m : "ads"; } catch { return "ads"; } });
+    const [mode, setModeState] = useState(() => { try { const m = localStorage.getItem(MODE_KEY); return ["web", "video", "music"].includes(m) ? m : "ads"; } catch { return "ads"; } });
     const [videoIdea, setVideoIdea] = useState("");
     const setMode = m => { setModeState(m); setNotice(""); try { localStorage.setItem(MODE_KEY, m); } catch { /* private mode */ } };
     const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
@@ -625,12 +626,12 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
     );
 
     return (
-        <div style={{ position: "fixed", inset: 0, background: "var(--bg)", zIndex: 25, display: "flex", flexDirection: "column" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "12px 16px", borderBottom: "1px solid var(--border)" }}>
+        <div style={{ position: "fixed", inset: 0, background: "var(--bg)", zIndex: 25, display: "flex", flexDirection: "column", overflowX: "hidden" }}>
+            <div className="ds-head">
                 <MenuButton onClick={() => setMenuOpen(true)} />
                 <span style={{ fontWeight: 700, color: "var(--text)", whiteSpace: "nowrap" }}>Sem Design</span>
-                <div className="ds-seg" role="tablist" aria-label="Design mode">
-                    {[["ads", "Images"], ["video", "Video"], ["web", "Web"]].map(([id, name]) => (
+                <div className="ds-seg ds-modes" role="tablist" aria-label="Design mode">
+                    {[["ads", "Images"], ["video", "Video"], ["music", "Music"], ["web", "Web"]].map(([id, name]) => (
                         <button key={id} role="tab" aria-selected={mode === id} disabled={!!busy && mode !== id} onClick={() => setMode(id)}>{name}</button>
                     ))}
                 </div>
@@ -650,7 +651,9 @@ export default function DesignPage({ token, onNavigate, onUnauthorized, handoff,
                 subtitle={c => c.site || ""} />
             {library && <VideoLibrary videos={videos.filter(v => !v.url || linkAlive(v.url))} onClose={() => setLibrary(null)} />}
 
-            {mode === "video" ? (
+            {mode === "music" ? (
+                <MusicStudio headers={headers} chat={chat} updateChat={updateChat} onUnauthorized={onUnauthorized} top={business} />
+            ) : mode === "video" ? (
                 <VideoStudio headers={headers} chat={chat} updateChat={updateChat} brief={brief} model={model}
                     onUnauthorized={onUnauthorized} top={business} idea={videoIdea} setIdea={setVideoIdea} onRendered={loadVideos} />
             ) : mode === "web" ? (

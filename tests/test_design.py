@@ -492,3 +492,32 @@ def test_hashtags_are_cleaned_and_capped_per_platform():
     assert len(ig["hashtags"]) == 12 and ig["hashtags"][0] == "#tag0" and ig["keywords"] == ["websites Soweto"]
     assert banner["hashtags"] == []
     assert fb["hashtags"] == ["#Mzansi", "#SouthAfrica"] and fb["caption"] == "old"
+
+
+def test_music_tab_makes_a_track_that_lands_in_s3(client, monkeypatch, moto_cache_table):
+    from gateway import design_router
+
+    calls, state = [], {"uploaded": False}
+
+    async def fake_video(action, timeout=60, **kw):
+        calls.append((action, kw))
+        if action == "music":
+            return {"ok": True, "job_id": "music-9"}
+        if action == "peek":
+            return {"ok": True, "status": "rendering"}
+
+    monkeypatch.setattr(design_router, "video_call", fake_video)
+    monkeypatch.setattr(design_router.media_store, "enabled", lambda: True)
+    monkeypatch.setattr(design_router.media_store, "presign_put", lambda key, mime: f"https://s3.example/{key}?put")
+    monkeypatch.setattr(design_router.media_store, "exists", lambda key: state["uploaded"])
+    monkeypatch.setattr(design_router.media_store, "link", lambda key: f"https://api.example/media/file/{key}")
+
+    assert client.post("/design/music", json={"prompt": ""}).status_code == 400
+    made = client.post("/design/music", json={"prompt": "amapiano, 112 BPM", "seconds": 25}).json()
+    music = next(kw for a, kw in calls if a == "music")
+    assert made["job_id"] == "music-9" and music["seconds"] == 20 and music["upload_url"].startswith("https://s3.example/music/")
+    assert client.get("/design/music/music-9").json()["status"] == "rendering"
+    state["uploaded"] = True
+    done = client.get("/design/music/music-9").json()
+    assert done["status"] == "done" and done["url"].startswith("https://api.example/media/file/music/")
+    assert client.get("/design/music/nope").status_code == 404
