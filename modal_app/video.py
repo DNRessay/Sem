@@ -87,6 +87,17 @@ gpu_image = (
 api_image = modal.Image.debian_slim(python_version="3.12").pip_install("fastapi>=0.115.0")
 stitch_image = modal.Image.debian_slim(python_version="3.12").apt_install("ffmpeg").pip_install("httpx")
 spend = modal.Dict.from_name("semblance-video-spend", create_if_missing=True)
+# job_id -> {"started"} at submit, {"done", "ok"} when it ends. "Is it done?" reads this instead of asking Modal
+# for the result with timeout=0, which never succeeded once finished videos got big (720p): fetching a large
+# result takes longer than zero seconds, so every check said "rendering" forever.
+jobs = modal.Dict.from_name("semblance-video-jobs", create_if_missing=True)
+
+
+def _finished(ok: bool):
+    try:
+        jobs[modal.current_function_call_id()] = {"done": time.time(), "ok": ok}
+    except Exception:
+        pass
 
 
 def _month() -> str:
@@ -128,6 +139,7 @@ class Generator:
         width, height = SIZES.get(aspect_ratio, SIZES["9:16"])
         frames = max(1, min(int(seconds), 5)) * FPS + 1  # Wan wants 4k+1 frames: 81 is the full 5 seconds
         fast = bool(fast) and not self.fast_error
+        ok = False
         try:
             if not self.fast_error:
                 self.pipe.set_adapters(["fast"], [1.0 if fast else 0.0])
@@ -139,9 +151,11 @@ class Generator:
             path = _enhance(path) if ENHANCE else path
             with open(path, "rb") as f:
                 data = base64.b64encode(f.read()).decode()
+            ok = True
         finally:
             gpu_seconds = time.monotonic() - started
             _charge(gpu_seconds, GPU_USD_PER_HOUR)
+            _finished(ok)
         return {"mime": "video/mp4", "base64": data, "gpu_seconds": round(gpu_seconds), "fast": fast,
                 **({"fast_error": self.fast_error} if self.fast_error else {})}
 
@@ -189,8 +203,12 @@ class ImageGenerator:
                               max_sequence_length=256).images[0]
             buf = io.BytesIO()
             image.save(buf, format="PNG")
+        except Exception:
+            _finished(False)
+            raise
         finally:
             _charge(time.monotonic() - started, IMAGE_GPU_USD_PER_HOUR)
+        _finished(True)
         return {"mime": "image/png", "base64": base64.b64encode(buf.getvalue()).decode()}
 
 
@@ -198,6 +216,16 @@ class ImageGenerator:
 def stitch(job_ids: list[str], audio_url: str = "") -> dict:
     """Long videos: the finished 5-second scenes joined in order, with the voiceover (if any) laid over them.
     CPU only, so it doesn't count toward the GPU cap."""
+    try:
+        result = _stitch(job_ids, audio_url)
+    except Exception:
+        _finished(False)
+        raise
+    _finished(True)
+    return result
+
+
+def _stitch(job_ids: list[str], audio_url: str) -> dict:
     import subprocess
     import tempfile
 
@@ -206,7 +234,7 @@ def stitch(job_ids: list[str], audio_url: str = "") -> dict:
     with tempfile.TemporaryDirectory() as tmp:
         parts = []
         for i, job_id in enumerate(job_ids):
-            result = modal.FunctionCall.from_id(job_id).get(timeout=60)
+            result = modal.FunctionCall.from_id(job_id).get(timeout=180)
             path = f"{tmp}/scene{i:02d}.mp4"
             with open(path, "wb") as f:
                 f.write(base64.b64decode(result["base64"]))
@@ -235,6 +263,32 @@ def stitch(job_ids: list[str], audio_url: str = "") -> dict:
             return {"mime": "video/mp4", "base64": base64.b64encode(f.read()).decode(), "voice": out != joined}
 
 
+def _state(job_id: str) -> dict:
+    """{"status": rendering | done | failed}. Jobs submitted since the jobs Dict existed are answered from it;
+    older ones fall back to asking Modal, with time to fetch a large finished result."""
+    entry = jobs.get(job_id)
+    if entry is not None:
+        if "done" not in entry:
+            return {"status": "rendering"}
+        return {"status": "done"} if entry.get("ok") else {"status": "failed", "error": "the render failed on Modal"}
+    try:
+        modal.FunctionCall.from_id(job_id).get(timeout=20)
+    except (TimeoutError, modal.exception.TimeoutError):
+        return {"status": "rendering"}
+    except Exception as e:
+        return {"status": "failed", "error": str(e)[:300]}
+    return {"status": "done"}
+
+
+def _spawned(call) -> str:
+    try:
+        if call.object_id not in jobs:  # a job that already finished keeps its "done"
+            jobs[call.object_id] = {"started": time.time()}
+    except Exception:
+        pass
+    return call.object_id
+
+
 @app.function(image=api_image, secrets=[modal.Secret.from_name("semblance-video-secret")])
 @modal.fastapi_endpoint(method="POST")
 def api(body: dict, request: Request):
@@ -256,7 +310,7 @@ def api(body: dict, request: Request):
                                           "VIDEO_MONTHLY_CAP_USD in the Modal secret or wait for next month"}
         call = Generator().generate.spawn(prompt[:1500], body.get("aspect_ratio") or "9:16", body.get("seconds") or 5,
                                           bool(body.get("fast")))
-        return {"ok": True, "job_id": call.object_id, "used_usd": used, "cap_usd": cap}
+        return {"ok": True, "job_id": _spawned(call), "used_usd": used, "cap_usd": cap}
     if action == "image":
         prompt = (body.get("prompt") or "").strip()
         if not prompt:
@@ -264,28 +318,24 @@ def api(body: dict, request: Request):
         if used >= cap:
             return {"ok": False, "error": f"Monthly Modal budget reached (${used:.2f} of ${cap:.2f})"}
         call = ImageGenerator().generate.spawn(prompt[:1500], body.get("aspect_ratio") or "1:1")
-        return {"ok": True, "job_id": call.object_id}
+        return {"ok": True, "job_id": _spawned(call)}
     if action == "peek":
         # Done or not, without the video itself (long videos check every scene often).
-        try:
-            modal.FunctionCall.from_id(body.get("job_id") or "").get(timeout=0)
-        except (TimeoutError, modal.exception.TimeoutError):
-            return {"ok": True, "status": "rendering"}
-        except Exception as e:
-            return {"ok": False, "status": "failed", "error": str(e)[:300]}
-        return {"ok": True, "status": "done"}
+        state = _state(body.get("job_id") or "")
+        return {"ok": state["status"] != "failed", **state}
     if action == "stitch":
         ids = [i for i in body.get("job_ids") or [] if isinstance(i, str)]
         if not ids:
             return {"ok": False, "error": "job_ids required"}
         call = stitch.spawn(ids[:12], body.get("audio_url") or "")
-        return {"ok": True, "job_id": call.object_id}
+        return {"ok": True, "job_id": _spawned(call)}
     if action == "status":
+        job_id = body.get("job_id") or ""
+        state = _state(job_id)
+        if state["status"] != "done":
+            return {"ok": state["status"] != "failed", **state}
         try:
-            call = modal.FunctionCall.from_id(body.get("job_id") or "")
-            result = call.get(timeout=0)
-        except (TimeoutError, modal.exception.TimeoutError):
-            return {"ok": True, "status": "rendering"}
+            result = modal.FunctionCall.from_id(job_id).get(timeout=120)  # done: time to fetch a big video
         except Exception as e:
             return {"ok": False, "status": "failed", "error": str(e)[:300]}
         return {"ok": True, "status": "done", **result}

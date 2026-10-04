@@ -104,7 +104,7 @@ MAX_VIDEO_JOBS = 30
 
 def _video_jobs(account_id: str) -> list[dict]:
     try:
-        return json.loads(ddb_backend.get(VIDEO_JOBS, account_id) or "[]")
+        return json.loads(ddb_backend.get(VIDEO_JOBS, account_id, fresh=True) or "[]")
     except ValueError:
         return []
 
@@ -185,13 +185,13 @@ MAX_PROJECTS = 20
 
 def _project_ids(account_id: str) -> list[str]:
     try:
-        return json.loads(ddb_backend.get(VIDEO_PROJECTS, account_id) or "[]")
+        return json.loads(ddb_backend.get(VIDEO_PROJECTS, account_id, fresh=True) or "[]")
     except ValueError:
         return []
 
 
 def _project(account_id: str, pid: str) -> dict | None:
-    raw = ddb_backend.get("video_project", f"{account_id}:{pid}")
+    raw = ddb_backend.get("video_project", f"{account_id}:{pid}", fresh=True)
     return json.loads(raw) if raw else None
 
 
