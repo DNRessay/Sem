@@ -544,7 +544,7 @@ async def test_a_picked_model_that_fails_falls_back_to_the_free_ones(monkeypatch
         monkeypatch.setattr(ad_studio.llm_providers.PROVIDERS[pid].__class__, "configured", property(lambda self: True))
     monkeypatch.setattr(ad_studio.llm_providers, "complete", fake_complete)
     out = await ad_studio.write_variants("bakery", "intro", ["instagram"], 1, "bonsai")
-    assert out["ok"] and asked == ["bonsai", "gemini", "groq"]
+    assert out["ok"] and asked == ["bonsai", "groq"]  # fastest next
 
 
 def test_improve_rewrites_a_rough_idea_per_tool(client, monkeypatch):

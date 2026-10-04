@@ -181,6 +181,19 @@ async def _complete_openai(p: Provider, client: httpx.AsyncClient, messages: lis
     return message
 
 
+FIRST_TRY_SECONDS = 75
+
+
+async def complete_within(choice: str, messages: list[dict], seconds: float = FIRST_TRY_SECONDS, **kw) -> dict:
+    """complete(), but a model that's still writing after `seconds` counts as failed, so the caller can move on to a
+    faster one (the self-hosted model can take minutes over a long piece like a storyboard)."""
+    try:
+        return await asyncio.wait_for(complete(choice, messages, **kw), timeout=seconds)
+    except asyncio.TimeoutError:
+        _log.warning("llm %s still writing after %.0fs: moving on", choice, seconds)
+        return {"error": f"{choice} was too slow", "_provider": choice, "unavailable": True}
+
+
 async def complete(choice: str, messages: list[dict], tools: list[dict] | None = None,
                    max_tokens: int = 4096, deadline: float | None = None,
                    client: httpx.AsyncClient | None = None, long_reply: bool = False) -> dict:

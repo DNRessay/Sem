@@ -189,13 +189,13 @@ async def write_variants(brief: str, campaign: str, placements: list[str], count
         playbooks="\n".join(_playbook(p) for p in placements), keys=list(placements),
     )
     messages = [{"role": "user", "content": prompt}]
-    result = await llm_providers.complete(model, messages, max_tokens=6000)
+    result = await llm_providers.complete_within(model, messages, max_tokens=6000)
     variants = [] if "error" in result else parse_variants(result.get("content") or "", placements)
     if not variants:
         # The model answered with something unusable, was cut off, or was down (a 503): give the free ones a go,
         # whichever model was picked, rather than leave the user with an error.
         tried = {model, result.get("_provider")}
-        for pid in llm_providers.FREE_ORDER:
+        for pid in ("groq", "gemini", "bonsai"):  # fastest first
             if pid in tried or not llm_providers.PROVIDERS[pid].configured:
                 continue
             retry = await llm_providers.complete(pid, messages, max_tokens=6000)

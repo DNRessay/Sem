@@ -121,7 +121,7 @@ async def test_auto_tries_the_next_free_model_when_one_returns_junk(monkeypatch)
         monkeypatch.setattr(llm_providers.PROVIDERS[pid].__class__, "configured", property(lambda self: True))
     monkeypatch.setattr(ad_studio.llm_providers, "complete", fake_complete)
     result = await ad_studio.write_variants("bakery", "launch", ["fb_ig_feed"], 1, "auto")
-    assert result["ok"] and asked == ["auto", "gemini"]
+    assert result["ok"] and asked == ["auto", "groq"]
 
 
 def test_presigned_links_are_sigv4_on_the_regional_endpoint(monkeypatch):
