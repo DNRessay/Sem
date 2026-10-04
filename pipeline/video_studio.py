@@ -145,9 +145,10 @@ async def plan_video(brief: str, idea: str, seconds: int, fmt: str, voiceover: b
     first = "gemini" if model == "auto" and llm_providers.PROVIDERS["gemini"].configured else model
     result = await llm_providers.complete(first, messages, max_tokens=6000)
     plan = None if "error" in result else parse_plan(result.get("content") or "", n, voiceover)
-    if not plan and model == "auto":
+    if not plan:  # unusable, cut off or down: the free models get a go whichever one was picked
+        tried = {model, first, result.get("_provider")}
         for pid in llm_providers.FREE_ORDER:
-            if pid == result.get("_provider") or not llm_providers.PROVIDERS[pid].configured:
+            if pid in tried or not llm_providers.PROVIDERS[pid].configured:
                 continue
             retry = await llm_providers.complete(pid, messages, max_tokens=6000)
             plan = None if "error" in retry else parse_plan(retry.get("content") or "", n, voiceover)

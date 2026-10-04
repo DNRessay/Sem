@@ -121,9 +121,40 @@ def _placement(value, wanted: list[str]) -> str:
     return wanted[0] if len(wanted) == 1 else ""
 
 
+def _complete_objects(text: str) -> list:
+    """Whole {...} objects out of a reply that was cut off before its JSON array closed."""
+    text = re.sub(r"<think>.*?(</think>|$)", "", text or "", flags=re.S)
+    start = text.find("[")
+    out, depth, begin, in_str, esc = [], 0, -1, False, False
+    for i, ch in enumerate(text[start + 1:] if start != -1 else text, start=start + 1 if start != -1 else 0):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str, esc = True, False
+        elif ch == "{":
+            depth += 1
+            begin = i if depth == 1 else begin
+        elif ch == "}" and depth:
+            depth -= 1
+            if not depth:
+                try:
+                    obj = json.loads(re.sub(r",\s*([\]}])", r"\1", text[begin:i + 1]))
+                    if isinstance(obj, dict):
+                        out.append(obj)
+                except json.JSONDecodeError:
+                    pass
+    return out
+
+
 def parse_variants(text: str, wanted: list[str] | None = None) -> list[dict]:
     out = []
-    for it in _json_items(text):
+    for it in _json_items(text) or _complete_objects(text):
         if not isinstance(it, dict) or not it.get("image_prompt"):
             continue
         it["placement"] = _placement(it.get("placement"), wanted or [])
@@ -158,14 +189,16 @@ async def write_variants(brief: str, campaign: str, placements: list[str], count
         playbooks="\n".join(_playbook(p) for p in placements), keys=list(placements),
     )
     messages = [{"role": "user", "content": prompt}]
-    result = await llm_providers.complete(model, messages, max_tokens=4096)
+    result = await llm_providers.complete(model, messages, max_tokens=6000)
     variants = [] if "error" in result else parse_variants(result.get("content") or "", placements)
-    if not variants and model == "auto":
-        # One free model answered with something unusable (or not at all): give the others a go.
+    if not variants:
+        # The model answered with something unusable, was cut off, or was down (a 503): give the free ones a go,
+        # whichever model was picked, rather than leave the user with an error.
+        tried = {model, result.get("_provider")}
         for pid in llm_providers.FREE_ORDER:
-            if pid == result.get("_provider") or not llm_providers.PROVIDERS[pid].configured:
+            if pid in tried or not llm_providers.PROVIDERS[pid].configured:
                 continue
-            retry = await llm_providers.complete(pid, messages, max_tokens=4096)
+            retry = await llm_providers.complete(pid, messages, max_tokens=6000)
             variants = [] if "error" in retry else parse_variants(retry.get("content") or "", placements)
             if variants:
                 break
