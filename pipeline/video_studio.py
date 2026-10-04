@@ -16,6 +16,8 @@ FORMATS = {"short": {"label": "Short (Reels, TikTok, Shorts)", "aspect_ratio": "
 # What one 5-second Wan clip costs on the L4 (about 10 minutes at $0.80/h), for the estimate before rendering.
 CLIP_MINUTES = 10
 CLIP_USD = round(CLIP_MINUTES / 60 * 0.80, 2)
+FAST_CLIP_MINUTES = 2  # fast mode (CausVid LoRA, ~6 steps)
+FAST_CLIP_USD = round(FAST_CLIP_MINUTES / 60 * 0.80, 2)
 WORDS_PER_SECOND = 2.3  # a relaxed voiceover pace
 
 # How Wan 2.1 wants to be prompted: its demos all run through "prompt extension", which turns a short idea into one
@@ -66,9 +68,10 @@ def scene_count(seconds: int) -> int:
     return max(1, min(math.ceil(int(seconds or CLIP_SECONDS) / CLIP_SECONDS), MAX_SECONDS // CLIP_SECONDS))
 
 
-def estimate(seconds: int) -> dict:
+def estimate(seconds: int, fast: bool = False) -> dict:
     n = scene_count(seconds)
-    return {"scenes": n, "minutes": n * CLIP_MINUTES, "usd": round(n * CLIP_USD, 2)}
+    minutes, usd = (FAST_CLIP_MINUTES, FAST_CLIP_USD) if fast else (CLIP_MINUTES, CLIP_USD)
+    return {"scenes": n, "minutes": n * minutes, "usd": round(n * usd, 2)}
 
 
 def _json_object(text: str) -> dict:

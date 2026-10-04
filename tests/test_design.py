@@ -270,3 +270,24 @@ async def test_short_video_prompts_are_extended_for_wan(monkeypatch):
 
     monkeypatch.setattr(video_studio.llm_providers, "complete", broken)
     assert await video_studio.extend_prompt("bread rising", "9:16") == "bread rising"
+
+
+def test_fast_mode_is_passed_to_modal_and_costs_less(client, monkeypatch, moto_cache_table):
+    from pipeline import video_studio
+
+    submits = []
+
+    async def fake_video(action, **kw):
+        if action == "budget":
+            return {"ok": True, "used_usd": 9.5, "cap_usd": 10}
+        submits.append(kw)
+        return {"ok": True, "job_id": f"s{len(submits)}"}
+
+    monkeypatch.setattr("gateway.design_router.video_call", fake_video)
+    assert video_studio.estimate(60, fast=True) == {"scenes": 12, "minutes": 24, "usd": 0.36}
+    scenes = [{"prompt": f"shot {i}"} for i in range(12)]
+    assert client.post("/design/video/project", json={"scenes": scenes}).status_code == 400  # $1.56 > $0.50 left
+    p = client.post("/design/video/project", json={"scenes": scenes, "fast": True}).json()  # $0.36 fits
+    assert p["fast"] and len(submits) == 12 and all(kw["fast"] for kw in submits)
+    client.post(f"/design/video/project/{p['id']}/scene/0")
+    assert submits[-1]["fast"] is True  # a re-render keeps the project's mode

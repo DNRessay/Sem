@@ -11,7 +11,7 @@ from pipeline.activity import log, session_for
 from pipeline.ad_studio import PLACEMENTS, write_variants
 from pipeline.runs import durable
 from pipeline.site_brief import learn_site
-from pipeline.video_studio import CLIP_USD, FORMATS, estimate, extend_prompt, needs_extending, plan_video
+from pipeline.video_studio import CLIP_USD, FAST_CLIP_USD, FORMATS, estimate, extend_prompt, needs_extending, plan_video
 from pipeline.web_studio import LOGO_STYLES, figma_frames, figma_me, logo_prompt, make_page
 from storage.neon_store import get_store
 from tools import gemini_media, image_gen, media_store
@@ -138,7 +138,8 @@ async def video_submit(request: Request, account: dict = Depends(require_account
     if not prompt:
         raise HTTPException(400, "Describe the clip first")
     prompt = await _extended(prompt, aspect, body.get("brief") or "", body.get("model") or "auto")
-    result = await video_call("submit", prompt=prompt, aspect_ratio=aspect, seconds=body.get("seconds") or 5)
+    result = await video_call("submit", prompt=prompt, aspect_ratio=aspect, seconds=body.get("seconds") or 5,
+                              fast=bool(body.get("fast")))
     if not result.get("ok"):
         raise HTTPException(400, result.get("error") or "video submit failed")
     _save_video_job(account["account_id"], {"job_id": result["job_id"], "prompt": prompt[:500], "aspect_ratio": aspect,
@@ -202,7 +203,8 @@ def _save_project(account_id: str, project: dict):
 
 @router.get("/video/formats")
 async def video_formats(_account: dict = Depends(require_account)):
-    return {"formats": FORMATS, "clip_seconds": 5, "clip_usd": CLIP_USD, "voices": list(gemini_media.VOICES)}
+    return {"formats": FORMATS, "clip_seconds": 5, "clip_usd": CLIP_USD, "fast_clip_usd": FAST_CLIP_USD,
+            "voices": list(gemini_media.VOICES)}
 
 
 @router.post("/video/plan")
@@ -245,7 +247,7 @@ async def video_project(request: Request, account: dict = Depends(require_accoun
     aspect = body.get("aspect_ratio") or "9:16"
     budget = await video_call("budget")
     if budget.get("ok"):
-        cost = estimate(len(scenes) * 5)["usd"]
+        cost = estimate(len(scenes) * 5, bool(body.get("fast")))["usd"]
         left = float(budget["cap_usd"]) - float(budget["used_usd"])
         if cost > left:
             raise HTTPException(400, f"This video needs about ${cost:.2f} of GPU time and ${max(left, 0):.2f} is left this "
@@ -256,7 +258,7 @@ async def video_project(request: Request, account: dict = Depends(require_accoun
                                      for s in scenes])
     jobs = []
     for s, prompt in zip(scenes, prompts):
-        result = await video_call("submit", prompt=prompt, aspect_ratio=aspect, seconds=5)
+        result = await video_call("submit", prompt=prompt, aspect_ratio=aspect, seconds=5, fast=bool(body.get("fast")))
         if not result.get("ok"):
             if not jobs:
                 raise HTTPException(400, result.get("error") or "video submit failed")
@@ -270,7 +272,7 @@ async def video_project(request: Request, account: dict = Depends(require_accoun
         audio, note = await _voiceover([j["narration"] for j in jobs], body.get("voice") or "Kore")
     project = {"id": uuid.uuid4().hex[:12], "title": str(body.get("title") or "")[:80] or scenes[0]["prompt"][:60],
                "style": style[:400], "format": body.get("format") or "short", "aspect_ratio": aspect, "scenes": jobs,
-               "audio_url": audio, "note": note, "status": "rendering", "chat_id": body.get("chat_id") or "",
+               "audio_url": audio, "note": note, "status": "rendering", "fast": bool(body.get("fast")), "chat_id": body.get("chat_id") or "",
                "created": int(time.time())}
     _save_project(account["account_id"], project)
     return project
@@ -328,7 +330,8 @@ async def video_project_retry(pid: str, index: int, account: dict = Depends(requ
     if not project or not 0 <= index < len(project["scenes"]):
         raise HTTPException(404, "No such scene")
     scene = project["scenes"][index]
-    result = await video_call("submit", prompt=scene["prompt"], aspect_ratio=project["aspect_ratio"], seconds=5)
+    result = await video_call("submit", prompt=scene["prompt"], aspect_ratio=project["aspect_ratio"], seconds=5,
+                              fast=bool(project.get("fast")))
     if not result.get("ok"):
         raise HTTPException(400, result.get("error") or "video submit failed")
     scene.update(job_id=result["job_id"], status="rendering", error="")
