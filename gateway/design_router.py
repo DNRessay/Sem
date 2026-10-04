@@ -230,6 +230,44 @@ async def video_formats(_account: dict = Depends(require_account)):
             "voices": list(gemini_media.VOICES)}
 
 
+MUSIC_SECONDS = (10, 20, 30, 47)
+
+
+@router.post("/music")
+async def music(request: Request, account: dict = Depends(require_account)):
+    """Music tab: an instrumental track (Stable Audio Open on Modal), uploaded straight to S3 when it's done."""
+    body = await request.json()
+    prompt = (body.get("prompt") or "").strip()
+    if not prompt:
+        raise HTTPException(400, "Describe the music first")
+    if not media_store.enabled():
+        raise HTTPException(400, "Music needs media storage (MEDIA_BUCKET)")
+    seconds = min(MUSIC_SECONDS, key=lambda s: abs(s - int(body.get("seconds") or 30)))
+    key = media_store.new_key("music", "audio/wav")
+    upload_url = await asyncio.to_thread(media_store.presign_put, key, "audio/wav")
+    made = await video_call("music", prompt=prompt[:500], seconds=seconds, upload_url=upload_url)
+    if not made.get("ok"):
+        raise HTTPException(400, made.get("error") or "Modal couldn't start the track")
+    ddb_backend.set("music_job", made["job_id"], json.dumps({"key": key, "account": account["account_id"]}),
+                    ttl=media_store.KEEP_SECONDS)
+    return {"ok": True, "job_id": made["job_id"], "seconds": seconds, "status": "rendering"}
+
+
+@router.get("/music/{job_id}")
+async def music_status(job_id: str, account: dict = Depends(require_account)):
+    raw = ddb_backend.get("music_job", job_id, fresh=True)
+    job = json.loads(raw) if raw else None
+    if not job or job.get("account") != account["account_id"]:
+        raise HTTPException(404, "This track is gone (kept 7 days)")
+    if await asyncio.to_thread(media_store.exists, job["key"]):
+        return {"status": "done", "url": media_store.link(job["key"]), "mime": "audio/wav"}
+    peek = await video_call("peek", job_id=job_id)
+    if peek.get("status") == "failed":
+        return {"status": "failed", "error": "The music model failed. If it never worked, accept its licence on Hugging Face "
+                                             "(stabilityai/stable-audio-open-1.0) and redeploy Modal."}
+    return {"status": "rendering"}
+
+
 @router.post("/video/plan")
 async def video_plan(request: Request, _account: dict = Depends(require_account)):
     """The storyboard: one 5-second scene per clip, sharing one look, with voiceover lines if asked."""

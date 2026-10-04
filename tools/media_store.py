@@ -13,7 +13,7 @@ from urllib.parse import quote
 from config import settings
 
 KEEP_SECONDS = 7 * 24 * 3600
-KEY_RE = re.compile(r"(ads|video|web|speech)/\d{4}-\d{2}-\d{2}/[a-f0-9]{32}\.(png|jpg|webp|mp4|wav)")
+KEY_RE = re.compile(r"(ads|video|web|speech|music)/\d{4}-\d{2}-\d{2}/[a-f0-9]{32}\.(png|jpg|webp|mp4|wav)")
 _EXT = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "video/mp4": "mp4", "audio/wav": "wav"}
 
 

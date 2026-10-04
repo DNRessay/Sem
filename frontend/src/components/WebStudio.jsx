@@ -48,7 +48,7 @@ function Figma({ headers, figma, setFigma, disabled }) {
             {connected === false && (
                 <>
                     <div style={{ display: "flex", gap: "8px" }}>
-                        <input value={token} onChange={e => setToken(e.target.value)} type="password" placeholder="Figma personal access token" style={{ ...field, flex: 1 }} />
+                        <input value={token} onChange={e => setToken(e.target.value)} type="password" placeholder="Figma personal access token" style={{ ...field, flex: 1, minWidth: 0 }} />
                         <button onClick={connect} disabled={!token.trim() || !!busy || disabled} style={btn}>Connect</button>
                     </div>
                     <div style={hint}>Figma → Settings → Security → Personal access tokens. "File content: read" is enough.</div>
@@ -56,7 +56,7 @@ function Figma({ headers, figma, setFigma, disabled }) {
             )}
             {connected && (
                 <div style={{ display: "flex", gap: "8px" }}>
-                    <input value={url} onChange={e => setUrl(e.target.value)} placeholder="Figma link — a file, or a frame (right-click → Copy link)" style={{ ...field, flex: 1 }} />
+                    <input value={url} onChange={e => setUrl(e.target.value)} placeholder="Figma link — a file, or a frame (right-click → Copy link)" style={{ ...field, flex: 1, minWidth: 0 }} />
                     <button onClick={load} disabled={!url.trim() || !!busy || disabled} style={btn}>Import</button>
                 </div>
             )}
