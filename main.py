@@ -7,6 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from cache.sys_cache import SysCache
 from config import settings
+from gateway.bots_router import public as bots_webhooks
+from gateway.bots_router import router as bots_router
 from gateway.code_router import router as code_router
 from gateway.compact_router import router as compact_router
 from gateway.connectors import router as connectors_router
@@ -86,6 +88,8 @@ app.include_router(webhook_router)
 app.include_router(code_router)
 app.include_router(media_router)
 app.include_router(cowork_router)
+app.include_router(bots_router)
+app.include_router(bots_webhooks)
 app.include_router(design_router)
 app.include_router(mcp_router)
 app.include_router(oauth_router)

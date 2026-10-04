@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import SessionMenu from "./SessionMenu";
-import { BrushIcon, CloseIcon, CodeIcon, GearIcon, SparkleIcon, UserIcon, WalletIcon } from "./Icons";
+import { BrushIcon, CloseIcon, CodeIcon, GearIcon, SparkleIcon, UserIcon, WalletIcon, BotIcon } from "./Icons";
 
 const API = import.meta.env.VITE_API_URL || "";
 const RECENT_LIMIT = 5;
@@ -13,7 +13,7 @@ function timeAgo(unixSeconds) {
     return `${Math.floor(diff / 86400)}d ago`;
 }
 
-export default function Drawer({ open, onClose, currentSessionId, onNewChat, onOpenSession, token, onLogout, onViewAllChats, onOpenCode, onOpenCowork, onOpenDesign, onOpenSettings, onOpenFinance, onSessionRenamed, onSessionDeleted }) {
+export default function Drawer({ open, onClose, currentSessionId, onNewChat, onOpenSession, token, onLogout, onViewAllChats, onOpenCode, onOpenCowork, onOpenDesign, onOpenSettings, onOpenFinance, onOpenBots, onSessionRenamed, onSessionDeleted }) {
     const [sessions, setSessions] = useState([]);
     const [loading, setLoading] = useState(false);
 
@@ -108,6 +108,14 @@ export default function Drawer({ open, onClose, currentSessionId, onNewChat, onO
                     >
                         <span style={{ display: "flex", alignItems: "center", gap: "10px" }}><WalletIcon size={16} /> Finance</span>
                     </button>
+                    {onOpenBots && (
+                        <button
+                            onClick={onOpenBots}
+                            style={{ width: "100%", textAlign: "left", padding: "10px 14px", marginTop: "8px", borderRadius: "10px", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: "14px", fontWeight: "600", cursor: "pointer" }}
+                        >
+                            <span style={{ display: "flex", alignItems: "center", gap: "10px" }}><BotIcon size={16} /> Bots</span>
+                        </button>
+                    )}
                 </div>
 
                 <div style={{ flex: 1, overflowY: "auto", padding: "0 16px" }}>

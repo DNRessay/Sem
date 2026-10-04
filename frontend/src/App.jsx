@@ -9,6 +9,7 @@ import CoworkPage from "./components/CoworkPage";
 import DesignPage from "./components/DesignPage";
 import SettingsPage from "./components/SettingsPage";
 import FinancePage from "./components/FinancePage";
+import BotsPage from "./components/BotsPage";
 import Login, { resetTokenFromUrl } from "./components/Login";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { turnsToHistory } from "./utils/toolMarker";
@@ -22,7 +23,7 @@ function newSessionId() {
     return `session_${Date.now()}`;
 }
 
-const VIEWS = ["chat", "allChats", "code", "cowork", "design", "settings", "finance"];
+const VIEWS = ["chat", "allChats", "code", "cowork", "design", "settings", "finance", "bots"];
 
 function viewFromHash() {
     const v = window.location.hash.slice(1);
@@ -195,6 +196,7 @@ export default function App() {
                 onOpenDesign={() => { setMenuOpen(false); setView("design"); }}
                 onOpenSettings={() => { setMenuOpen(false); setView("settings"); }}
                 onOpenFinance={() => { setMenuOpen(false); setView("finance"); }}
+                onOpenBots={() => { setMenuOpen(false); setView("bots"); }}
                 onSessionRenamed={handleSessionRenamed}
                 onSessionDeleted={handleSessionDeleted}
             />
@@ -206,6 +208,11 @@ export default function App() {
             {view === "finance" && (
                 <ErrorBoundary>
                     <FinancePage token={token} onNavigate={setView} onUnauthorized={logout} handoff={handoff} onHandoff={handOff} />
+                </ErrorBoundary>
+            )}
+            {view === "bots" && (
+                <ErrorBoundary>
+                    <BotsPage token={token} onNavigate={setView} onUnauthorized={logout} />
                 </ErrorBoundary>
             )}
             {view === "settings" && (
